@@ -1,6 +1,23 @@
 import Foundation
 
 extension SessionActions {
+    func normalizedCodexModelName(_ raw: String?) -> String? {
+        guard let text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+            return nil
+        }
+        let lower = text.lowercased()
+        switch lower {
+        case "gpt-5", "gpt5":
+            return "gpt-5.1"
+        case "gpt-5-codex", "gpt5-codex":
+            return "gpt-5.1-codex"
+        case "gpt-5-codex-mini", "gpt5-codex-mini":
+            return "gpt-5.1-codex-mini"
+        default:
+            return text
+        }
+    }
+
     func listPersistedProfiles() -> Set<String> {
         let configURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".codex", isDirectory: true)
@@ -51,14 +68,12 @@ extension SessionActions {
     }
 
     func effectiveCodexModel(for session: SessionSummary) -> String? {
-        if let configured = readTopLevelConfigString("model")?.trimmingCharacters(
-            in: .whitespacesAndNewlines), !configured.isEmpty
-        {
+        if let configured = normalizedCodexModelName(readTopLevelConfigString("model")) {
             return configured
         }
         if session.source.baseKind == .codex {
-            if let m = session.model?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty {
-                return m
+            if let normalized = normalizedCodexModelName(session.model) {
+                return normalized
             }
         }
         return nil
@@ -71,8 +86,8 @@ extension SessionActions {
         sandboxMode: String?
     ) -> String? {
         var pairs: [String] = []
-        if let model, !model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let val = model.replacingOccurrences(of: "\"", with: "\\\"")
+        if let normalized = normalizedCodexModelName(model) {
+            let val = normalized.replacingOccurrences(of: "\"", with: "\\\"")
             pairs.append("model=\"\(val)\"")
         }
         if let approval = approvalPolicy,

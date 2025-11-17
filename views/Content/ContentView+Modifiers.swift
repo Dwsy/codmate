@@ -53,15 +53,15 @@ extension ContentView {
       }
       return
     }
-    // Single real project: restore its last workspace mode, or default to Overview
+    // Single real project: restore its last workspace mode, default to Tasks; sanitize hidden modes
     if viewModel.selectedProjectIDs.count == 1,
        let pid = viewModel.selectedProjectIDs.first,
        let project = viewModel.projects.first(where: { $0.id == pid }),
        let dir = project.directory, !dir.isEmpty {
-      let restored = viewModel.windowStateStore.restoreWorkspaceMode(for: pid) ?? .overview
-      if viewModel.projectWorkspaceMode != restored {
-        viewModel.projectWorkspaceMode = restored
-      }
+      var restored = viewModel.windowStateStore.restoreWorkspaceMode(for: pid) ?? .tasks
+      // Hide Overview/Memory for real projects: coerce to Tasks if persisted as hidden
+      if restored == .overview || restored == .memory { restored = .tasks }
+      if viewModel.projectWorkspaceMode != restored { viewModel.projectWorkspaceMode = restored }
     }
   }
   func navigationSplitView(geometry: GeometryProxy) -> some View {
@@ -203,11 +203,9 @@ extension ContentView {
         // Only show segmented control for specific projects (not All/Other)
         if viewModel.selectedProjectIDs.count == 1 && !isAllSelection() && !isOtherSelection() {
           let items: [SegmentedIconPicker<ProjectWorkspaceMode>.Item] = [
-            .init(title: "Overview", systemImage: "square.grid.2x2", tag: .overview),
             .init(title: "Tasks", systemImage: "checklist", tag: .tasks),
             .init(title: "Review", systemImage: "doc.text.magnifyingglass", tag: .review),
             .init(title: "Agents", systemImage: "book.pages", tag: .agents),
-            .init(title: "Memory", systemImage: "brain", tag: .memory),
             .init(title: "Settings", systemImage: "slider.horizontal.3", tag: .settings)
           ]
           SegmentedIconPicker(items: items, selection: $viewModel.projectWorkspaceMode)

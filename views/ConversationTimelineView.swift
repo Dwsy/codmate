@@ -377,7 +377,7 @@ private struct ConversationTimelinePreview: View {
       timestamp: now.addingTimeInterval(6),
       actor: .info,
       title: "Context Updated",
-      text: "model: gpt-5-codex-mini\npolicy: on-request",
+      text: "model: gpt-5.1-codex-mini\npolicy: on-request",
       metadata: nil,
       repeatCount: 3
     )

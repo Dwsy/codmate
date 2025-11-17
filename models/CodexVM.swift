@@ -3,7 +3,7 @@ import SwiftUI
 
 @MainActor
 final class CodexVM: ObservableObject {
-  let builtinModels: [String] = ["gpt-5", "gpt-5-codex", "gpt-5-codex-mini"]
+  let builtinModels: [String] = ["gpt-5.1", "gpt-5.1-codex", "gpt-5.1-codex-mini"]
   enum ReasoningEffort: String, CaseIterable, Identifiable {
     case minimal, low, medium, high
     var id: String { rawValue }
@@ -108,7 +108,7 @@ final class CodexVM: ObservableObject {
     {
       model = defaultModel
     } else if registryActiveProviderId == nil {
-      model = builtinModels.first ?? "gpt-5-codex-mini"
+      model = builtinModels.first ?? "gpt-5.1-codex-mini"
     }
     normalizeBuiltinModelIfNeeded()
   }
@@ -405,7 +405,7 @@ final class CodexVM: ObservableObject {
         }
       } else {
         try await service.applyProviderFromRegistry(nil)
-        model = builtinModels.first ?? "gpt-5-codex-mini"
+        model = builtinModels.first ?? "gpt-5.1-codex-mini"
       }
       await applyModel()
     } catch {
@@ -417,7 +417,7 @@ final class CodexVM: ObservableObject {
   private func normalizeBuiltinModelIfNeeded() {
     guard registryActiveProviderId == nil else { return }
     if !builtinModels.contains(model) {
-      model = builtinModels.first ?? "gpt-5-codex-mini"
+      model = builtinModels.first ?? "gpt-5.1-codex-mini"
     }
   }
   func applyReasoning() async {

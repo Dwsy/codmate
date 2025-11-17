@@ -264,8 +264,8 @@ extension SessionActions {
         var args: [String] = []
         // Preserve model for Codex default New (non-project) to ensure CLI has a model
         if session.source.baseKind == .codex,
-           let m = session.model?.trimmingCharacters(in: .whitespacesAndNewlines), !m.isEmpty {
-            args += ["--model", m]
+           let normalized = normalizedCodexModelName(session.model) {
+            args += ["--model", normalized]
         }
         // Attach sandbox/approval flags from options
         args += flags(from: options)

@@ -231,7 +231,7 @@ struct ProvidersSettingsView: View {
             GridRow {
               Text("Default Model").font(.subheadline).fontWeight(.medium)
               HStack(spacing: 8) {
-                TextField("gpt-5-codex-mini", text: $vm.defaultCodexModel)
+                TextField("gpt-5.1-codex-mini", text: $vm.defaultCodexModel)
                   .onSubmit { Task { await vm.applyDefaultCodexModel() } }
                 let ids = vm.catalogModelIdsForActiveCodex()
                 if !ids.isEmpty {

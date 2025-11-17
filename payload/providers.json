@@ -269,7 +269,7 @@
 
     },
     "defaultModel" : {
-      "codex" : "gpt-5"
+      "codex" : "gpt-5.1"
     }
   }
 }
