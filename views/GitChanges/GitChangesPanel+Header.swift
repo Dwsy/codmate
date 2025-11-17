@@ -31,7 +31,7 @@ extension GitChangesPanel {
         .background(
           RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2))
         )
-        .frame(minWidth: 160, maxWidth: 280)
+        .frame(minWidth: 160, maxWidth: 360)
 
         // Repo authorization toggle (to the left of the edge)
         let rootURL = vm.repoRoot ?? projectDirectory ?? workingDirectory

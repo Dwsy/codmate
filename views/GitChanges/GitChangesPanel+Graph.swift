@@ -3,13 +3,30 @@ import SwiftUI
 extension GitChangesPanel {
   // MARK: - Graph detail view
   var graphDetailView: some View {
-    GraphContainer(vm: graphVM, wrapText: wrapText, showLineNumbers: showLineNumbers)
-      .onAppear {
-        graphVM.attach(to: vm.repoRoot)
-      }
-      .onChange(of: vm.repoRoot) { _, newVal in
-        graphVM.attach(to: newVal)
-      }
+    graphListView(compactColumns: false) { commit in
+      // Enter History Detail mode when a commit is activated.
+      historyDetailCommit = commit
+    }
+  }
+
+  /// Shared helper to host the graph list with repo attachment and activation callback.
+  func graphListView(
+    compactColumns: Bool,
+    onActivateCommit: @escaping (GitService.GraphCommit?) -> Void
+  ) -> some View {
+    GraphContainer(
+      vm: graphVM,
+      wrapText: wrapText,
+      showLineNumbers: showLineNumbers,
+      compactColumns: compactColumns,
+      onActivateCommit: onActivateCommit
+    )
+    .onAppear {
+      graphVM.attach(to: vm.repoRoot)
+    }
+    .onChange(of: vm.repoRoot) { _, newVal in
+      graphVM.attach(to: newVal)
+    }
   }
 
   // Host for the graph UI
@@ -17,10 +34,21 @@ extension GitChangesPanel {
     @StateObject var vm: GitGraphViewModel
     let wrapText: Bool
     let showLineNumbers: Bool
-    init(vm: GitGraphViewModel, wrapText: Bool, showLineNumbers: Bool) {
+    let compactColumns: Bool
+    let onActivateCommit: (GitService.GraphCommit?) -> Void
+
+    init(
+      vm: GitGraphViewModel,
+      wrapText: Bool,
+      showLineNumbers: Bool,
+      compactColumns: Bool,
+      onActivateCommit: @escaping (GitService.GraphCommit?) -> Void
+    ) {
       _vm = StateObject(wrappedValue: vm)
       self.wrapText = wrapText
       self.showLineNumbers = showLineNumbers
+      self.compactColumns = compactColumns
+      self.onActivateCommit = onActivateCommit
     }
     @State private var rowHoverId: String? = nil
 
@@ -28,49 +56,41 @@ extension GitChangesPanel {
       VStack(spacing: 8) {
         // Controls + full-width commit list (no right-side diff in History mode)
         // Branch scope controls (search moved to header)
-        HStack(spacing: 10) {
-          // Branch selector
+        HStack(spacing: 12) {
+          ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+              branchSelector
+              remoteBranchesToggle
+            }
+            HStack(spacing: 10) {
+              branchSelector
+            }
+          }
+          Spacer()
+          actionButtons
+        }
+        // Match Tasks/Review layout: align controls with consistent inset
+        // and keep the block pulled down from the header divider.
+        .padding(.top, 16)
+        .padding(.horizontal, 16)
+        .onChange(of: vm.showAllBranches) { _, _ in vm.loadCommits() }
+        if let error = vm.errorMessage, !error.isEmpty {
           HStack(spacing: 6) {
-            Text("Branches:")
+            Image(systemName: "exclamationmark.triangle.fill")
+              .foregroundStyle(.orange)
+            Text(error)
               .font(.caption)
               .foregroundStyle(.secondary)
-            Picker(
-              "",
-              selection: Binding<String>(
-                get: { vm.showAllBranches ? "__all__" : (vm.selectedBranch ?? "__current__") },
-                set: { newVal in
-                  if newVal == "__all__" {
-                    vm.showAllBranches = true
-                    vm.selectedBranch = nil
-                  } else if newVal == "__current__" {
-                    vm.showAllBranches = false
-                    vm.selectedBranch = nil
-                  } else {
-                    vm.showAllBranches = false
-                    vm.selectedBranch = newVal
-                  }
-                  vm.loadCommits()
-                })
-            ) {
-              Text("Show All").tag("__all__")
-              Text("Current").tag("__current__")
-              Divider()
-              ForEach(vm.branches, id: \.self) { name in
-                Text(name).tag(name)
-              }
-            }
-            .pickerStyle(.menu)
-            .frame(width: 200)
+              .lineLimit(2)
+            Spacer()
+            Button("Dismiss") { vm.clearError() }
+              .buttonStyle(.link)
+              .font(.caption)
           }
-          Toggle("Show Remote Branches", isOn: $vm.showRemoteBranches)
-            .onChange(of: vm.showRemoteBranches) { _, _ in
-              vm.loadBranches()
-              vm.loadCommits()
-            }
-          Spacer()
+          .padding(.horizontal, 16)
+          .padding(.bottom, 4)
         }
-        .onChange(of: vm.showAllBranches) { _, _ in vm.loadCommits() }
-        // Header row (fixed height, fixed column widths)
+        // Header row (fixed height, fixed column widths; compact mode hides trailing columns)
         HStack(spacing: 8) {
           Color.clear
             .frame(width: graphColumnWidth)
@@ -78,23 +98,26 @@ extension GitChangesPanel {
             .foregroundStyle(.secondary)
             .font(.caption)
             .frame(maxWidth: .infinity, alignment: .leading)
-          // Date
-          Text("Date")
-            .foregroundStyle(.secondary)
-            .font(.caption)
-            .frame(width: dateWidth, alignment: .leading)
-          // Author
-          Text("Author")
-            .foregroundStyle(.secondary)
-            .font(.caption)
-            .frame(width: authorWidth, alignment: .leading)
-          // SHA
-          Text("SHA")
-            .foregroundStyle(.secondary)
-            .font(.caption)
-            .frame(width: shaWidth, alignment: .leading)
+          if !compactColumns {
+            // Date
+            Text("Date")
+              .foregroundStyle(.secondary)
+              .font(.caption)
+              .frame(width: dateWidth, alignment: .leading)
+            // Author
+            Text("Author")
+              .foregroundStyle(.secondary)
+              .font(.caption)
+              .frame(width: authorWidth, alignment: .leading)
+            // SHA
+            Text("SHA")
+              .foregroundStyle(.secondary)
+              .font(.caption)
+              .frame(width: shaWidth, alignment: .leading)
+          }
         }
-        .padding(.horizontal, 6)
+        .padding(.leading, 16)
+        .padding(.trailing, 6)
         .frame(height: 26)
         .background(Color(nsColor: .controlBackgroundColor))
         .overlay(alignment: .bottom) {
@@ -140,19 +163,21 @@ extension GitChangesPanel {
                   }
                 }
                 .padding(.trailing, 8)
-                Text(c.date)
-                  .foregroundStyle(.secondary)
-                  .lineLimit(1)
-                  .frame(width: dateWidth, alignment: .leading)
-                Text(c.author)
-                  .foregroundStyle(.secondary)
-                  .lineLimit(1)
-                  .frame(width: authorWidth, alignment: .leading)
-                Text(c.shortId)
-                  .font(.system(.caption, design: .monospaced))
-                  .foregroundStyle(.secondary)
-                  .lineLimit(1)
-                  .frame(width: shaWidth, alignment: .leading)
+                if !compactColumns {
+                  Text(c.date)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: dateWidth, alignment: .leading)
+                  Text(c.author)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: authorWidth, alignment: .leading)
+                  Text(c.shortId)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: shaWidth, alignment: .leading)
+                }
               }
               .frame(height: rowHeight)
               .background(rowHoverId == c.id ? Color.accentColor.opacity(0.07) : Color.clear)
@@ -161,10 +186,18 @@ extension GitChangesPanel {
               .onHover { inside in
                 rowHoverId = inside ? c.id : (rowHoverId == c.id ? nil : rowHoverId)
               }
-              .onTapGesture { vm.selectCommit(c) }
+              .onTapGesture {
+                vm.selectCommit(c)
+                if c.id == "::working-tree::" {
+                  onActivateCommit(nil)
+                } else {
+                  onActivateCommit(c)
+                }
+              }
             }
           }
         }
+        .padding(.leading, 16)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -177,6 +210,110 @@ extension GitChangesPanel {
     private var dateWidth: CGFloat { 110 }
     private var authorWidth: CGFloat { 120 }
     private var shaWidth: CGFloat { 80 }
+
+    @ViewBuilder
+    private var branchSelector: some View {
+      HStack(spacing: 6) {
+        Text("Branches:")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+        Picker(
+          "",
+          selection: Binding<String>(
+            get: { vm.showAllBranches ? "__all__" : (vm.selectedBranch ?? "__current__") },
+            set: { newVal in
+              if newVal == "__all__" {
+                vm.showAllBranches = true
+                vm.selectedBranch = nil
+              } else if newVal == "__current__" {
+                vm.showAllBranches = false
+                vm.selectedBranch = nil
+              } else {
+                vm.showAllBranches = false
+                vm.selectedBranch = newVal
+              }
+              vm.loadCommits()
+            })
+        ) {
+          Text("Show All").tag("__all__")
+          Text("Current").tag("__current__")
+          Divider()
+          ForEach(vm.branches, id: \.self) { name in
+            Text(name).tag(name)
+          }
+        }
+        .pickerStyle(.menu)
+        .frame(width: 200)
+      }
+    }
+
+    private var remoteBranchesToggle: some View {
+      Toggle(
+        isOn: $vm.showRemoteBranches
+      ) {
+        Text("Show Remote Branches")
+          .lineLimit(1)
+      }
+      .onChange(of: vm.showRemoteBranches) { _, _ in
+        vm.loadBranches()
+        vm.loadCommits()
+      }
+    }
+
+    private var actionButtons: some View {
+      HStack(spacing: 8) {
+        Button {
+          vm.triggerRefresh()
+        } label: {
+          Label("Refresh", systemImage: "arrow.clockwise")
+            .labelStyle(.titleAndIcon)
+        }
+        .controlSize(.small)
+        .buttonStyle(.bordered)
+        .disabled(vm.isLoading)
+        .help("Reload the commit list")
+
+        Button {
+          vm.fetchRemotes()
+        } label: {
+          Label("Fetch", systemImage: "arrow.down.circle")
+            .labelStyle(.titleAndIcon)
+        }
+        .controlSize(.small)
+        .buttonStyle(.bordered)
+        .disabled(vm.historyActionInProgress != nil)
+        .help("Fetch all remotes")
+
+        Button {
+          vm.pullLatest()
+        } label: {
+          Label("Pull", systemImage: "square.and.arrow.down")
+            .labelStyle(.titleAndIcon)
+        }
+        .controlSize(.small)
+        .buttonStyle(.bordered)
+        .disabled(vm.historyActionInProgress != nil)
+        .help("Pull current branch (fast-forward)")
+
+        Button {
+          vm.pushCurrent()
+        } label: {
+          Label("Push", systemImage: "square.and.arrow.up")
+            .labelStyle(.titleAndIcon)
+        }
+        .controlSize(.small)
+        .buttonStyle(.bordered)
+        .disabled(vm.historyActionInProgress != nil)
+        .help("Push current branch")
+
+        if vm.historyActionInProgress != nil {
+          ProgressView()
+            .controlSize(.small)
+            .padding(.leading, 2)
+        }
+      }
+    }
   }
 
   // Monospace-like graph glyph: a vertical line with a centered dot, mimicking a basic lane.
@@ -206,6 +343,456 @@ extension GitChangesPanel {
             }
           }
         }
+      }
+    }
+  }
+
+  // Detailed view for a single commit: meta info, files list, and diff viewer.
+  struct HistoryCommitDetailView: View {
+    let commit: GitService.GraphCommit
+    @ObservedObject var viewModel: GitGraphViewModel
+    var onClose: () -> Void
+    let wrap: Bool
+    let showLineNumbers: Bool
+    @State private var fileSearch: String = ""
+    @State private var showMessageBody: Bool = false
+
+    var body: some View {
+      VSplitView {
+        // Top: meta + files tree (stacked vertically)
+        VSplitView {
+          metaSection
+          filesSection
+        }
+        // Bottom: diff viewer
+        diffSection
+      }
+      .onAppear {
+        viewModel.loadDetail(for: commit)
+      }
+      .onChange(of: commit.id) { _, _ in
+        viewModel.loadDetail(for: commit)
+      }
+    }
+
+    private var metaSection: some View {
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
+          VStack(alignment: .leading, spacing: 6) {
+            Text(commit.subject)
+              .font(.headline)
+              .lineLimit(2)
+            HStack(spacing: 12) {
+              Text(commit.shortId)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.secondary)
+              if !commit.parents.isEmpty {
+                Text("Parents: \(commit.parents.joined(separator: ", "))")
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+            }
+            HStack(spacing: 12) {
+              Text(commit.author)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+              Text(commit.date)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+          Spacer()
+          Button(action: onClose) {
+            Image(systemName: "xmark.circle.fill")
+              .font(.system(size: 16, weight: .semibold))
+              .foregroundStyle(.secondary)
+          }
+          .buttonStyle(.plain)
+          .help("Close commit details")
+        }
+        if !commit.decorations.isEmpty {
+          HStack(spacing: 6) {
+            ForEach(commit.decorations.prefix(4), id: \.self) { deco in
+              Text(deco)
+                .font(.system(size: 10, weight: .medium))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(Color.secondary.opacity(0.15)))
+            }
+          }
+        }
+        if !viewModel.detailMessage.isEmpty {
+          VStack(alignment: .leading, spacing: 4) {
+            Button {
+              showMessageBody.toggle()
+            } label: {
+              HStack(spacing: 4) {
+                Image(systemName: showMessageBody ? "chevron.down" : "chevron.right")
+                  .font(.system(size: 11, weight: .semibold))
+                Text("Message")
+                  .font(.caption.weight(.semibold))
+                Spacer()
+              }
+            }
+            .buttonStyle(.plain)
+
+            if showMessageBody {
+              ScrollView(.vertical, showsIndicators: true) {
+                Text(viewModel.detailMessage)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .frame(maxWidth: .infinity, alignment: .leading)
+                  .textSelection(.enabled)
+                  .padding(.trailing, 2)
+              }
+              .frame(maxHeight: .infinity, alignment: .topLeading)
+            }
+          }
+        }
+      }
+      .padding(16)
+      .frame(minHeight: showMessageBody ? 140 : 110, alignment: .topLeading)
+    }
+
+    private var filesSection: some View {
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 8) {
+          HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Filter files", text: $fileSearch)
+              .textFieldStyle(.plain)
+          }
+          .padding(.vertical, 4)
+          .padding(.horizontal, 6)
+          .background(
+            RoundedRectangle(cornerRadius: 8)
+              .stroke(Color.secondary.opacity(0.2))
+          )
+
+          Spacer()
+
+          HStack(spacing: 0) {
+            Button {
+              expandedHistoryDirs.removeAll()
+            } label: {
+              Image(systemName: "arrow.up.right.and.arrow.down.left")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 28, height: 28)
+
+            Button {
+              let nodes = buildHistoryTree(from: filteredDetailFiles)
+              var all: Set<String> = []
+              collectAllDirKeys(nodes: nodes, into: &all)
+              expandedHistoryDirs = all
+            } label: {
+              Image(systemName: "arrow.down.left.and.arrow.up.right")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 28, height: 28)
+          }
+
+          if viewModel.isLoadingDetail && viewModel.detailFiles.isEmpty {
+            ProgressView().controlSize(.small)
+          }
+        }
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 0) {
+            if filteredDetailFiles.isEmpty, !viewModel.isLoadingDetail {
+              Text("No files changed in this commit.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 8)
+            } else {
+              HistoryTreeView(
+                nodes: buildHistoryTree(from: filteredDetailFiles),
+                depth: 0,
+                expandedDirs: $expandedHistoryDirs,
+                selectedPath: viewModel.selectedDetailFile,
+                onSelectFile: { path in
+                  viewModel.selectedDetailFile = path
+                  viewModel.loadDetailPatch(for: path)
+                }
+              )
+            }
+          }
+        }
+      }.padding(16)
+    }
+
+    private var diffSection: some View {
+      VStack(alignment: .leading, spacing: 4) {
+        HStack {
+          Text("Diff")
+            .font(.subheadline.weight(.semibold))
+          if let file = viewModel.selectedDetailFile {
+            Text("— \(file)")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          Spacer()
+          if viewModel.isLoadingDetail {
+            ProgressView().controlSize(.small)
+          }
+        }
+
+        if viewModel.detailFilePatch.isEmpty && !viewModel.isLoadingDetail {
+          Text("Select a file to view its diff.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 8)
+        } else {
+          AttributedTextView(
+            text: viewModel.detailFilePatch,
+            isDiff: true,
+            wrap: wrap,
+            showLineNumbers: showLineNumbers,
+            fontSize: 12
+          )
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+      }
+      .padding(16)
+    }
+
+    // MARK: - History file tree helpers
+
+    private var filteredDetailFiles: [GitService.FileChange] {
+      let q = fileSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !q.isEmpty else { return viewModel.detailFiles }
+      return viewModel.detailFiles.filter {
+        $0.path.localizedCaseInsensitiveContains(q)
+          || ($0.oldPath?.localizedCaseInsensitiveContains(q) ?? false)
+      }
+    }
+
+    struct HistoryFileNode: Identifiable {
+      let id = UUID()
+      let name: String
+      let path: String?
+      let dirPath: String?
+      let change: GitService.FileChange?
+      var children: [HistoryFileNode]?
+      var isDirectory: Bool { dirPath != nil }
+    }
+
+    private func buildHistoryTree(from changes: [GitService.FileChange]) -> [HistoryFileNode] {
+      struct Builder {
+        var children: [String: Builder] = [:]
+        var fileChange: GitService.FileChange? = nil
+      }
+      var root = Builder()
+      for change in changes {
+        let path = change.path
+        guard !path.isEmpty else { continue }
+        let components = path.split(separator: "/").map(String.init)
+        guard !components.isEmpty else { continue }
+        func insert(_ index: Int, current: inout Builder) {
+          let key = components[index]
+          if index == components.count - 1 {
+            var child = current.children[key, default: Builder()]
+            child.fileChange = change
+            current.children[key] = child
+          } else {
+            var child = current.children[key, default: Builder()]
+            insert(index + 1, current: &child)
+            current.children[key] = child
+          }
+        }
+        insert(0, current: &root)
+      }
+      func convert(_ builder: Builder, prefix: String?) -> [HistoryFileNode] {
+        var nodes: [HistoryFileNode] = []
+        for (name, child) in builder.children {
+          let fullPath = prefix.map { "\($0)/\(name)" } ?? name
+          if let change = child.fileChange, child.children.isEmpty {
+            nodes.append(
+              HistoryFileNode(name: name, path: change.path, dirPath: nil, change: change, children: nil)
+            )
+          } else {
+            let childrenNodes = convert(child, prefix: fullPath)
+            nodes.append(
+              HistoryFileNode(
+                name: name,
+                path: nil,
+                dirPath: fullPath,
+                change: nil,
+                children: childrenNodes.sorted {
+                  $0.name.localizedStandardCompare($1.name) == .orderedAscending
+                }
+              )
+            )
+          }
+        }
+        return nodes.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+      }
+      return convert(root, prefix: nil)
+    }
+
+    private func collectAllDirKeys(nodes: [HistoryFileNode], into set: inout Set<String>) {
+      for node in nodes {
+        if let dir = node.dirPath {
+          set.insert(dir)
+        }
+        if let children = node.children {
+          collectAllDirKeys(nodes: children, into: &set)
+        }
+      }
+    }
+
+    @State private var expandedHistoryDirs: Set<String> = []
+
+    struct HistoryTreeView: View {
+      let nodes: [HistoryFileNode]
+      let depth: Int
+      @Binding var expandedDirs: Set<String>
+      let selectedPath: String?
+      let onSelectFile: (String) -> Void
+
+      var body: some View {
+        ForEach(nodes) { node in
+          if node.isDirectory {
+            let key = node.dirPath ?? ""
+            let isExpanded = expandedDirs.contains(key)
+            directoryRow(node: node, key: key, isExpanded: isExpanded)
+            if isExpanded, let children = node.children {
+              HistoryTreeView(
+                nodes: children,
+                depth: depth + 1,
+                expandedDirs: $expandedDirs,
+                selectedPath: selectedPath,
+                onSelectFile: onSelectFile
+              )
+            }
+          } else if let path = node.path {
+            fileRow(node: node, path: path)
+          }
+        }
+      }
+
+      private func directoryRow(node: HistoryFileNode, key: String, isExpanded: Bool) -> some View {
+        let indentStep: CGFloat = 16
+        let chevronWidth: CGFloat = 16
+        return HStack(spacing: 0) {
+          ZStack(alignment: .leading) {
+            Color.clear.frame(width: CGFloat(depth) * indentStep + chevronWidth)
+            let guideColor = Color.secondary.opacity(0.15)
+            ForEach(0..<depth, id: \.self) { i in
+              Rectangle()
+                .fill(guideColor)
+                .frame(width: 1)
+                .offset(x: CGFloat(i) * indentStep + chevronWidth / 2)
+            }
+            HStack(spacing: 0) {
+              Spacer().frame(width: CGFloat(depth) * indentStep)
+              Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(.secondary)
+                .frame(width: chevronWidth, height: 20)
+            }
+          }
+          HStack(spacing: 6) {
+            Image(systemName: "folder")
+              .font(.system(size: 13))
+              .foregroundStyle(.secondary)
+            Text(node.name)
+              .font(.system(size: 13))
+              .lineLimit(1)
+            Spacer(minLength: 0)
+          }
+          .padding(.trailing, 8)
+        }
+        .frame(height: 22)
+        .contentShape(Rectangle())
+        .onTapGesture {
+          if let dir = node.dirPath {
+            if expandedDirs.contains(dir) {
+              expandedDirs.remove(dir)
+            } else {
+              expandedDirs.insert(dir)
+            }
+          }
+        }
+      }
+
+      private func fileRow(node: HistoryFileNode, path: String) -> some View {
+        let indentStep: CGFloat = 16
+        let chevronWidth: CGFloat = 16
+        let isSelected = (path == selectedPath)
+        return HStack(spacing: 0) {
+          ZStack(alignment: .leading) {
+            Color.clear.frame(width: CGFloat(depth) * indentStep + chevronWidth)
+            let guideColor = Color.secondary.opacity(0.15)
+            ForEach(0..<depth, id: \.self) { i in
+              Rectangle()
+                .fill(guideColor)
+                .frame(width: 1)
+                .offset(x: CGFloat(i) * indentStep + chevronWidth / 2)
+            }
+          }
+          HStack(spacing: 6) {
+            let icon = GitFileIcon.icon(for: path)
+            Image(systemName: icon.name)
+              .font(.system(size: 12))
+              .foregroundStyle(icon.color)
+            Text(node.name)
+              .font(.system(size: 13))
+              .lineLimit(1)
+            Spacer(minLength: 0)
+            if let change = node.change {
+              Circle()
+                .fill(Self.statusColor(for: change))
+                .frame(width: 6, height: 6)
+              Self.statusBadge(text: Self.badgeText(for: change))
+            }
+          }
+          .padding(.trailing, 8)
+        }
+        .frame(height: 22)
+        .background(
+          RoundedRectangle(cornerRadius: 4)
+            .fill(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+          onSelectFile(path)
+        }
+      }
+
+      // MARK: - Helper methods
+      private static func statusColor(for change: GitService.FileChange) -> Color {
+        guard let code = change.statusCode.first else { return Color.secondary.opacity(0.6) }
+        switch code {
+        case "A": return .green
+        case "M": return .orange
+        case "D": return .red
+        case "R": return .purple
+        case "C": return .blue
+        case "T": return .teal
+        case "U": return .gray
+        default: return Color.secondary.opacity(0.6)
+        }
+      }
+
+      private static func badgeText(for change: GitService.FileChange) -> String {
+        guard let first = change.statusCode.first else { return "?" }
+        return String(first)
+      }
+
+      private static func statusBadge(text: String) -> some View {
+        Text(text)
+          .font(.system(size: 9, weight: .medium))
+          .foregroundStyle(.secondary)
+          .padding(.horizontal, 4)
+          .padding(.vertical, 1)
+          .background(
+            RoundedRectangle(cornerRadius: 3)
+              .fill(Color.secondary.opacity(0.1))
+          )
       }
     }
   }

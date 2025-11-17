@@ -59,6 +59,7 @@ struct GitChangesPanel: View {
   // Graph view toggle + model
   @State var showGraph: Bool = false
   @StateObject var graphVM = GitGraphViewModel()
+  @State var historyDetailCommit: GitService.GraphCommit? = nil
   // Use an optional Int for segmented momentary actions: 0=collapse, 1=expand
   // @State private var treeToggleIndex: Int? = nil
   // Layout constraints
@@ -272,9 +273,9 @@ struct GitChangesPanel: View {
       switch presentation {
       case .embedded:
         baseContent
-          .padding(8)
           .background(.thinMaterial)
           .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+          .padding(8)
       case .full:
         baseContent
       }
@@ -286,24 +287,29 @@ struct GitChangesPanel: View {
     VStack(alignment: .leading, spacing: 0) {
       switch regionLayout {
       case .combined:
-        header
-          .padding(.horizontal, 16)
-          .padding(.vertical, 12)
-        Divider()
-        VSplitView {
-          GeometryReader { geo in
-            splitContent(totalWidth: geo.size.width)
-              .frame(maxWidth: .infinity, maxHeight: .infinity)
-              .onAppear {
-                if leftColumnWidth == 0 {
-                  let store = WindowStateStore()
-                  if let saved = store.restoreReviewLeftPaneWidth() {
-                    leftColumnWidth = clampLeftWidth(saved, total: geo.size.width)
-                  } else {
-                    leftColumnWidth = clampLeftWidth(geo.size.width * 0.25, total: geo.size.width)
+        if mode == .graph, historyDetailCommit != nil {
+          // History Details mode: hide left tree, use full width for History list + detail split
+          historyDetailRoot
+        } else {
+          header
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+          Divider()
+          VSplitView {
+            GeometryReader { geo in
+              splitContent(totalWidth: geo.size.width)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear {
+                  if leftColumnWidth == 0 {
+                    let store = WindowStateStore()
+                    if let saved = store.restoreReviewLeftPaneWidth() {
+                      leftColumnWidth = clampLeftWidth(saved, total: geo.size.width)
+                    } else {
+                      leftColumnWidth = clampLeftWidth(geo.size.width * 0.25, total: geo.size.width)
+                    }
                   }
                 }
-              }
+            }
           }
         }
       case .leftOnly:
@@ -319,17 +325,70 @@ struct GitChangesPanel: View {
 
           Divider()
 
-          if mode == .graph {
+          if mode == .graph, historyDetailCommit != nil {
+            historyDetailBody
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
+          } else if mode == .graph {
             graphDetailView
-              .padding(16)
               .frame(maxWidth: .infinity, maxHeight: .infinity)
           } else {
             detailView
-              .padding(16)
               .frame(maxWidth: .infinity, maxHeight: .infinity)
           }
         }
       }
+    }
+  }
+
+  // MARK: - History detail layout (History mode, commit details)
+
+  /// Combined layout root when left tree is hidden and full width is used for History list + detail.
+  private var historyDetailRoot: some View {
+    VStack(spacing: 0) {
+      header
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+      Divider()
+      historyDetailBody
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+  }
+
+  /// Right-side body: horizontally split between compact History list and commit detail.
+  private var historyDetailBody: some View {
+    HSplitView {
+      historyDetailListPane
+      historyDetailPane
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+
+  /// Left pane in History Details mode: compact History list (graph + description only).
+  private var historyDetailListPane: some View {
+    graphListView(compactColumns: true) { commit in
+      historyDetailCommit = commit
+    }
+  }
+
+  /// Right pane in History Details mode: commit meta + files tree + diff viewer.
+  @ViewBuilder
+  private var historyDetailPane: some View {
+    if let commit = historyDetailCommit {
+      HistoryCommitDetailView(
+        commit: commit,
+        viewModel: graphVM,
+        onClose: {
+          historyDetailCommit = nil
+        },
+        wrap: wrapText,
+        showLineNumbers: showLineNumbers
+      )
+    } else {
+      VStack {
+        Text("No commit selected")
+          .foregroundStyle(.secondary)
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
   }
 

@@ -14,6 +14,18 @@ actor GitService {
         var worktree: Kind?
     }
 
+    struct FileChange: Identifiable, Sendable, Hashable {
+        let id = UUID()
+        var path: String
+        var statusCode: String
+        var oldPath: String?
+
+        var statusLetter: String {
+            guard let first = statusCode.first else { return "?" }
+            return String(first)
+        }
+    }
+
     struct Repo: Sendable, Hashable {
         var root: URL
     }
@@ -341,17 +353,33 @@ actor GitService {
         return commits
     }
 
-    /// Files changed in a given commit. Returns repository-relative paths.
-    func filesChanged(in repo: Repo, commitId: String) async -> [String] {
-        // --name-only prints a flat list; ignore commit headers via empty format
-        let args = ["show", "--pretty=format:", "--name-only", commitId]
+    /// Files changed in a given commit, including change type/status.
+    func filesChanged(in repo: Repo, commitId: String) async -> [FileChange] {
+        // diff-tree gives reliable name-status output, including renames/copies.
+        let args = ["diff-tree", "--no-commit-id", "--name-status", "-r", commitId]
         guard let out = try? await runGit(args, cwd: repo.root), out.exitCode == 0 else {
             return []
         }
-        return out.stdout
-            .split(separator: "\n")
-            .map(String.init)
-            .filter { !$0.isEmpty }
+        var results: [FileChange] = []
+        for rawLine in out.stdout.split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.isEmpty { continue }
+            let components = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard let status = components.first, !status.isEmpty else { continue }
+            let code = status
+            if let first = status.first, first == "R" || first == "C" {
+                // Rename/Copy: expect "R100\told\tnew"
+                guard components.count >= 3 else { continue }
+                let oldPath = components[1]
+                let newPath = components[2]
+                results.append(FileChange(path: newPath, statusCode: code, oldPath: oldPath))
+            } else {
+                guard components.count >= 2 else { continue }
+                let path = components[1]
+                results.append(FileChange(path: path, statusCode: code, oldPath: nil))
+            }
+        }
+        return results
     }
 
     /// Unified diff patch for a specific commit against its first parent.
@@ -361,6 +389,67 @@ actor GitService {
         let args = ["show", "--pretty=format:", "--no-ext-diff", "--no-color", commitId]
         guard let out = try? await runGit(args, cwd: repo.root), out.exitCode == 0 else { return "" }
         return out.stdout
+    }
+
+    /// Unified diff patch for a specific file in a given commit.
+    func filePatch(in repo: Repo, commitId: String, path: String) async -> String {
+        // Restrict git show to a single path; suppress commit header and external diff tools.
+        let args = ["show", "--pretty=format:", "--no-ext-diff", "--no-color", commitId, "--", path]
+        guard let out = try? await runGit(args, cwd: repo.root), out.exitCode == 0 else { return "" }
+        return out.stdout
+    }
+
+    /// Full commit message (subject + body) for a given commit.
+    func commitMessage(in repo: Repo, commitId: String) async -> String {
+        let args = ["show", "-s", "--format=%B", "--no-color", commitId]
+        guard let out = try? await runGit(args, cwd: repo.root), out.exitCode == 0 else { return "" }
+        return out.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Fetch all remotes (equivalent to `git fetch --all --prune`).
+    func fetchAllRemotes(in repo: Repo) async -> Int32 {
+        let args = ["fetch", "--all", "--prune"]
+        let out = try? await runGit(args, cwd: repo.root)
+        return out?.exitCode ?? -1
+    }
+
+    /// Pull the current branch from its upstream in fast-forward mode.
+    func pullCurrentBranch(in repo: Repo) async -> Int32 {
+        // Prefer fast-forward to avoid interactive merges; users can rebase manually if desired.
+        let args = ["pull", "--ff-only"]
+        let out = try? await runGit(args, cwd: repo.root)
+        return out?.exitCode ?? -1
+    }
+
+    /// Push the current branch to its upstream. If no upstream is configured, attempts to
+    /// set origin/HEAD as the upstream target automatically.
+    func pushCurrentBranch(in repo: Repo) async -> Int32 {
+        // Check whether an upstream is already configured.
+        let upstream = try? await runGit(
+            ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+            cwd: repo.root
+        )
+        if upstream?.exitCode == 0 {
+            let out = try? await runGit(["push"], cwd: repo.root)
+            return out?.exitCode ?? -1
+        } else {
+            // Determine current branch name; fallback to HEAD if detection fails.
+            let branch = try? await runGit(["rev-parse", "--abbrev-ref", "HEAD"], cwd: repo.root)
+            let name = branch?.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let current = name, !current.isEmpty, current != "HEAD" {
+                let out = try? await runGit(
+                    ["push", "--set-upstream", "origin", current],
+                    cwd: repo.root
+                )
+                return out?.exitCode ?? -1
+            } else {
+                let out = try? await runGit(
+                    ["push", "--set-upstream", "origin", "HEAD"],
+                    cwd: repo.root
+                )
+                return out?.exitCode ?? -1
+            }
+        }
     }
 
     /// Full graph-friendly commit list with parents and decorations. Optional inclusion of remotes.
@@ -517,7 +606,7 @@ actor GitService {
             env["GIT_EDITOR"] = ":"
             env["GIT_OPTIONAL_LOCKS"] = "0"
             // Prevent reading global/system configs that may live outside sandbox
-            env["GIT_CONFIG_NOSYSTEM"] = "1"
+            env["GIT_CONFIG_NOSYSTEM"] = "0"
             let existingConfigCount = Int(env["GIT_CONFIG_COUNT"] ?? "0") ?? 0
             env["GIT_CONFIG_COUNT"] = String(existingConfigCount + 1)
             env["GIT_CONFIG_KEY_\(existingConfigCount)"] = "safe.directory"

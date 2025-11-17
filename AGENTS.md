@@ -128,6 +128,57 @@ Dialectics Page
   - CLI environment: preferred and resolved codex and Claude paths, PATH snapshot
   - Does not mutate config automatically; changes only happen via explicit user actions in other pages
 
+Build & Run
+- Prefer Xcode-based builds over `swift build`; do not use `swift build` for validating this app.
+- Standard local debug build command from the repo root:  
+  `xcodebuild -project CodMate.xcodeproj -scheme CodMate -configuration Debug -derivedDataPath .build -destination 'platform=macOS' build`
+- When validating changes, run the above command (or the equivalent Xcode GUI build) to ensure the app compiles.
+
+Commit Conventions
+
+Follow conventional commits pattern:
+
+- `feat:` - New feature
+- `fix:` - Bug fix
+- `docs:` - Documentation change
+- `style:` - Formatting, missing semicolons, etc.
+- `refactor:` - Code change that neither fixes a bug nor adds a feature
+- `perf:` - Performance improvement
+- `test:` - Adding or updating tests
+- `chore:` - Changes to build process or auxiliary tools
+
+> Tip: Before writing your commit message, first try to summarize the main theme and motivation of your staged changes (the "why" and "core focus"). This helps ensure your commit message highlights the real intent and impact of the change, making the subject and body more focused and valuable. For AI-assisted commit generation, always let the AI attempt this summary step first.
+
+Commit Subject Focus Principles
+
+- The commit subject (title) should concisely highlight the "core focus" or the most important substantive change of the commit.
+- Avoid generic descriptions like "update docs" or "fix bug"; the title should make the main purpose and impact of the change clear at a glance.
+- If the change involves bilingual documentation, syncing with code implementation, or architectural adjustments, make this explicit in the title.
+- Recommended format: "what was done + why/for what". For example:
+  - `docs: sync EN/CN README and align config docs with codebase`
+  - `feat: support multi-suit config management for flexible scenarios`
+  - `fix: resolve SSE connection issue in bridge module`
+
+Example:
+```
+Feature: Expand MCP API documentation with detailed instance and system management
+
+Where:
+- Updated README.md files across the API, handlers, models, and routes directories to include comprehensive details on new instance and system management functionalities.
+- Added specific sections for MCP handlers, models, and routes to clarify the operations available for managing servers and instances.
+
+Why:
+- To enhance the clarity and usability of the API documentation, ensuring users can easily understand and utilize the new features.
+
+What:
+- Documented new API endpoints for instance management, including listing, retrieving, and managing instance health.
+- Provided detailed descriptions of the handlers and models associated with MCP server and instance management.
+- Updated routing information to reflect the new structure and capabilities of the API.
+
+Issues:
+- This documentation update supports ongoing development and user engagement by providing clear guidance on the API's capabilities.
+```
+
 PR / Change Policy for Agents
 - Keep changes minimal and focused; do not refactor broadly without need.
 - Maintain macOS compliance first; avoid iOS‑only modifiers/placements.

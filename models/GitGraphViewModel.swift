@@ -23,6 +23,8 @@ final class GitGraphViewModel: ObservableObject {
     private let service = GitService()
     private var repo: GitService.Repo? = nil
     private var refreshTask: Task<Void, Never>? = nil
+    private var detailTask: Task<Void, Never>? = nil
+    private var historyActionTask: Task<Void, Never>? = nil
 
     // Branch scope controls
     @Published var showAllBranches: Bool = true
@@ -31,6 +33,25 @@ final class GitGraphViewModel: ObservableObject {
     @Published var branches: [String] = []
     @Published var selectedBranch: String? = nil   // nil = current HEAD when showAllBranches == false
     @Published private(set) var workingChangesCount: Int = 0
+
+    // Detail panel state (files + per-file patch)
+    @Published private(set) var detailFiles: [GitService.FileChange] = []
+    @Published var selectedDetailFile: String? = nil
+    @Published private(set) var detailFilePatch: String = ""
+    @Published private(set) var isLoadingDetail: Bool = false
+    @Published private(set) var detailMessage: String = ""
+    enum HistoryAction: String {
+        case fetch, pull, push
+
+        var displayName: String {
+            switch self {
+            case .fetch: return "Fetch"
+            case .pull: return "Pull"
+            case .push: return "Push"
+            }
+        }
+    }
+    @Published private(set) var historyActionInProgress: HistoryAction? = nil
 
     func attach(to root: URL?) {
         guard let root else { commits = []; filteredCommits = []; return }
@@ -104,6 +125,7 @@ final class GitGraphViewModel: ObservableObject {
     func selectCommit(_ c: GitService.GraphCommit) {
         selectedCommit = c
         Task { await loadPatchForSelection() }
+        loadDetail(for: c)
     }
 
     func loadPatchForSelection() async {
@@ -111,6 +133,75 @@ final class GitGraphViewModel: ObservableObject {
         if id == "::working-tree::" { commitPatch = ""; return }
         let text = await service.commitPatch(in: repo, commitId: id)
         commitPatch = text
+    }
+
+    /// Load detail panel data (files list + first file patch) for the given commit.
+    func loadDetail(for commit: GitService.GraphCommit) {
+        // The synthetic working-tree node does not correspond to a real commit id.
+        // For now, skip detail loading and leave the panel empty.
+        if commit.id == "::working-tree::" {
+            detailFiles = []
+            selectedDetailFile = nil
+            detailFilePatch = ""
+            isLoadingDetail = false
+            return
+        }
+        guard let repo = self.repo else {
+            detailFiles = []
+            selectedDetailFile = nil
+            detailFilePatch = ""
+            detailMessage = ""
+            return
+        }
+        detailTask?.cancel()
+        detailTask = Task { [weak self] in
+            guard let self else { return }
+            await MainActor.run {
+                self.isLoadingDetail = true
+                self.detailFiles = []
+                self.detailFilePatch = ""
+                self.detailMessage = ""
+            }
+            async let filesTask = service.filesChanged(in: repo, commitId: commit.id)
+            async let messageTask = service.commitMessage(in: repo, commitId: commit.id)
+            let (files, message) = await (filesTask, messageTask)
+            if Task.isCancelled { return }
+            await MainActor.run {
+                self.detailFiles = files
+                self.selectedDetailFile = files.first?.path
+                self.detailMessage = message
+            }
+            if let first = files.first {
+                await loadDetailPatch(for: first.path, in: repo, commitId: commit.id)
+            } else {
+                await MainActor.run {
+                    self.detailFilePatch = ""
+                    self.isLoadingDetail = false
+                }
+            }
+        }
+    }
+
+    func loadDetailPatch(for path: String) {
+        guard let repo = self.repo, let commit = selectedCommit else { return }
+        detailTask?.cancel()
+        detailTask = Task { [weak self] in
+            await self?.loadDetailPatch(for: path, in: repo, commitId: commit.id)
+        }
+    }
+
+    private func loadDetailPatch(for path: String, in repo: GitService.Repo, commitId: String) async {
+        await MainActor.run {
+            self.isLoadingDetail = true
+            self.detailFilePatch = ""
+        }
+        // Show diff of this file in the given commit against its first parent.
+        let text = await service.filePatch(in: repo, commitId: commitId, path: path)
+        if Task.isCancelled { return }
+        await MainActor.run {
+            self.detailFilePatch = text
+            self.isLoadingDetail = false
+        }
     }
 
     // MARK: - Lanes
@@ -204,6 +295,67 @@ final class GitGraphViewModel: ObservableObject {
             guard let self else { return }
             let names = await service.listBranches(in: repo, includeRemoteBranches: showRemoteBranches)
             await MainActor.run { self.branches = names }
+        }
+    }
+
+    func clearError() {
+        errorMessage = nil
+    }
+
+    func triggerRefresh() {
+        loadCommits()
+    }
+
+    func fetchRemotes() {
+        performHistoryAction(.fetch)
+    }
+
+    func pullLatest() {
+        performHistoryAction(.pull)
+    }
+
+    func pushCurrent() {
+        performHistoryAction(.push)
+    }
+
+    private func performHistoryAction(_ action: HistoryAction) {
+        guard historyActionInProgress == nil else { return }
+        guard let repo = self.repo else { return }
+        historyActionTask?.cancel()
+        historyActionTask = Task { [weak self] in
+            guard let self else { return }
+            await MainActor.run { self.historyActionInProgress = action }
+            let code: Int32
+            switch action {
+            case .fetch:
+                code = await service.fetchAllRemotes(in: repo)
+            case .pull:
+                code = await service.pullCurrentBranch(in: repo)
+            case .push:
+                code = await service.pushCurrentBranch(in: repo)
+            }
+            if Task.isCancelled {
+                await MainActor.run {
+                    self.historyActionInProgress = nil
+                    self.historyActionTask = nil
+                }
+                return
+            }
+            let failureDetail = (code == 0) ? nil : await self.service.takeLastFailureDescription()
+            await MainActor.run {
+                self.historyActionInProgress = nil
+                self.historyActionTask = nil
+                if code == 0 {
+                    self.errorMessage = nil
+                    self.loadCommits()
+                } else {
+                    if let detail = failureDetail, !detail.isEmpty {
+                        self.errorMessage = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+                    } else {
+                        self.errorMessage = "\(action.displayName) failed (exit code \(code))"
+                    }
+                }
+            }
         }
     }
 }

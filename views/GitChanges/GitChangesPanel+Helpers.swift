@@ -3,6 +3,23 @@ import SwiftUI
 import AppKit
 #endif
 
+// Shared helpers for Git file icons.
+enum GitFileIcon {
+    static func icon(for path: String) -> (name: String, color: Color) {
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        switch ext {
+        case "swift": return ("swift", .orange)
+        case "md": return ("doc.text", .green)
+        case "json": return ("curlybraces", .teal)
+        case "yml", "yaml": return ("list.bullet", .indigo)
+        case "js", "ts", "tsx", "jsx": return ("chevron.left.slash.chevron.right", .yellow)
+        case "png", "jpg", "jpeg", "gif", "svg": return ("photo", .purple)
+        case "sh", "zsh", "bash": return ("terminal", .gray)
+        default: return ("doc.plaintext", .secondary)
+        }
+    }
+}
+
 extension GitChangesPanel {
     // MARK: - Helper functions for tree manipulation
     func allDirectoryKeys(nodes: [FileNode]) -> [String] {
@@ -97,19 +114,9 @@ extension GitChangesPanel {
         return Color.secondary.opacity(0.3)
     }
 
-    // Simple file type icon mapping
+    // Simple file type icon mapping (shared with History views)
     func fileTypeIconName(for path: String) -> (name: String, color: Color) {
-        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
-        switch ext {
-        case "swift": return ("swift", .orange)
-        case "md": return ("doc.text", .green)
-        case "json": return ("curlybraces", .teal)
-        case "yml", "yaml": return ("list.bullet", .indigo)
-        case "js", "ts", "tsx", "jsx": return ("chevron.left.slash.chevron.right", .yellow)
-        case "png", "jpg", "jpeg", "gif", "svg": return ("photo", .purple)
-        case "sh", "zsh", "bash": return ("terminal", .gray)
-        default: return ("doc.plaintext", .secondary)
-        }
+        GitFileIcon.icon(for: path)
     }
 
     // Helper: Status badge text
@@ -138,6 +145,7 @@ extension GitChangesPanel {
                     .fill(Color.secondary.opacity(0.1))
             )
     }
+
 
     /// Expand all parent directories for a given file path in browser mode
     func ensureBrowserPathExpanded(_ filePath: String) {
