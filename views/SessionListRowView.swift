@@ -82,18 +82,18 @@ struct SessionListRowView: View {
               .opacity(
                 reduceMotion ? 1.0 : (awaitingFollowup ? (breathing ? 1.0 : 0.55) : 1.0)
               )
-          } else if awaitingFollowup {
+          } else if awaitingFollowup && !isUpdating {
             // Draw a non-spinning beachball and apply a subtle breathing fade
             SpinningBeachballView(spins: false)
               .padding(2)
               .opacity(reduceMotion ? 1.0 : (breathing ? 1.0 : 0.55))
-          } else if let asset = branding.badgeAssetName {
+          } else if !isUpdating, let asset = branding.badgeAssetName {
             Image(asset)
               .resizable()
               .renderingMode(.original)
               .aspectRatio(contentMode: .fit)
               .padding(4)
-          } else {
+          } else if !isUpdating {
             Image(systemName: branding.symbolName)
               .font(.system(size: 14, weight: .semibold))
               .foregroundStyle(branding.iconColor)
@@ -158,10 +158,25 @@ struct SessionListRowView: View {
     .padding(.vertical, 8)
     .buttonStyle(.plain)
     .overlay(alignment: .topTrailing) {
-      HStack(spacing: 8) {
-        if inTaskContainer {
-          // In task mode, show provider branding icon (ChatGPT/Claude asset) in the trailing slot
-          if let asset = branding.badgeAssetName {
+      HStack(spacing: 0) {
+        // Single-slot trailing indicator:
+        //  - When updating, show the timer icon
+        //  - Else if in a task container, show beachball (running) or provider branding
+        //  - Else if in a project, show project glyph
+        if isUpdating {
+          Image(systemName: "timer")
+            .foregroundStyle(Color.orange)
+            .font(.system(size: 16, weight: .semibold))
+            .symbolEffect(.pulse, isActive: true)
+            .help("Updating…")
+        } else if inTaskContainer {
+          if isRunning {
+            SpinningBeachballView(spins: true)
+              .frame(width: 18, height: 18)
+              .opacity(
+                reduceMotion ? 1.0 : (awaitingFollowup ? (breathing ? 1.0 : 0.55) : 1.0)
+              )
+          } else if let asset = branding.badgeAssetName {
             Image(asset)
               .resizable()
               .renderingMode(.original)
@@ -169,13 +184,14 @@ struct SessionListRowView: View {
               .frame(width: 18, height: 18)
               .modifier(
                 DarkModeInvertModifier(
-                  active: summary.source.baseKind == .codex && colorScheme == .dark
+                  active: summary.source.baseKind == .codex
+                    && (colorScheme == .dark || isSelected)
                 )
               )
               .help(branding.displayName)
           } else {
             Image(systemName: branding.symbolName)
-              .foregroundStyle(branding.iconColor)
+              .foregroundStyle(isSelected ? Color.white : branding.iconColor)
               .font(.system(size: 12, weight: .semibold))
               .help(branding.displayName)
           }
@@ -184,13 +200,6 @@ struct SessionListRowView: View {
             .foregroundStyle(Color.secondary)
             .font(.system(size: 12, weight: .regular))
             .help(projectTip ?? "Project")
-        }
-        if isUpdating {
-          Image(systemName: "timer")
-            .foregroundStyle(Color.orange)
-            .font(.system(size: 16, weight: .semibold))
-            .symbolEffect(.pulse, isActive: true)
-            .help("Updating…")
         }
       }
       .padding(.trailing, 8)
