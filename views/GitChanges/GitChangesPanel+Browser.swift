@@ -241,7 +241,7 @@ extension GitChangesPanel {
                         Button {
                             revealBrowserItem(path: path, isDirectory: false)
                         } label: {
-                            Image(systemName: "folder")
+                            Image(systemName: "finder")
                                 .foregroundStyle((hoverBrowserRevealPath == path) ? Color.accentColor : Color.secondary)
                         }
                         .buttonStyle(.plain)

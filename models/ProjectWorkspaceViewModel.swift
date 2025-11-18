@@ -8,6 +8,7 @@ class ProjectWorkspaceViewModel: ObservableObject {
 
     private let tasksStore: TasksStore
     private let sessionListViewModel: SessionListViewModel
+    private let contextTreeshaker = ContextTreeshaker()
 
     init(tasksStore: TasksStore = TasksStore(), sessionListViewModel: SessionListViewModel) {
         self.tasksStore = tasksStore
@@ -80,6 +81,114 @@ class ProjectWorkspaceViewModel: ObservableObject {
         await tasksStore.removeContextItem(id: contextId, from: taskId)
         if let task = tasks.first(where: { $0.id == taskId }) {
             await loadTasks(for: task.projectId)
+        }
+    }
+
+    // MARK: - Shared Task Context
+
+    /// Regenerates the shared context file for the given task.
+    /// The file is written to ~/.codmate/tasks/context-<taskId>.md and contains a
+    /// compact markdown snapshot of the most recent sessions under this task.
+    func syncTaskContext(taskId: UUID, maxSessions: Int = 5) async -> URL? {
+        // Prefer in-memory snapshot; fall back to store when needed
+        let task: CodMateTask
+        if let cached = tasks.first(where: { $0.id == taskId }) {
+            task = cached
+        } else if let loaded = await tasksStore.getTask(id: taskId) {
+            task = loaded
+        } else {
+            return nil
+        }
+
+        // Resolve sessions for this task from the global list
+        let allSessions = sessionListViewModel.allSessions
+        let sessionsForTask = allSessions.filter { task.sessionIds.contains($0.id) }
+        let sortedSessions = sessionsForTask.sorted { lhs, rhs in
+            let lDate = lhs.lastUpdatedAt ?? lhs.startedAt
+            let rDate = rhs.lastUpdatedAt ?? rhs.startedAt
+            return lDate < rDate
+        }
+        let limited = Array(sortedSessions.suffix(maxSessions))
+
+        // Build slim markdown using the same engine as the legacy New With Context flow…
+        var options = TreeshakeOptions()
+        let kinds = sessionListViewModel.preferences.markdownVisibleKinds
+        options.visibleKinds = kinds
+        options.includeReasoning = kinds.contains(.reasoning)
+        options.includeToolSummary = kinds.contains(.infoOther)
+
+        let body: String
+        if limited.isEmpty {
+            body = "_No sessions available for this task yet._"
+        } else {
+            body = await contextTreeshaker.generateMarkdown(for: limited, options: options)
+        }
+
+        var headerLines: [String] = [
+            "# Task: \(task.effectiveTitle)",
+            "",
+            "- Updated: \(Date().formatted(date: .abbreviated, time: .shortened))",
+            "- Project: \(task.projectId)",
+            "- Status: \(task.status.displayName)"
+        ]
+
+        if let desc = task.effectiveDescription {
+            headerLines.append("- Description: \(desc)")
+        }
+
+        let sessionList = task.sessionIds.joined(separator: ", ")
+        if !sessionList.isEmpty {
+            headerLines.append("- Sessions: \(sessionList)")
+        }
+
+        headerLines.append("")
+
+        if !sortedSessions.isEmpty {
+            headerLines.append("## Sessions in this Task")
+            headerLines.append("")
+
+            for session in sortedSessions {
+                headerLines.append("- \(session.effectiveTitle)")
+
+                if let rawComment = session.userComment?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !rawComment.isEmpty
+                {
+                    let snippet =
+                        rawComment.count > 200
+                        ? String(rawComment.prefix(200)) + "…"
+                        : rawComment
+                    headerLines.append("  - Note: \(snippet)")
+                } else if let rawInstructions = session.instructions?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !rawInstructions.isEmpty
+                {
+                    let snippet =
+                        rawInstructions.count > 200
+                        ? String(rawInstructions.prefix(200)) + "…"
+                        : rawInstructions
+                    headerLines.append("  - Instructions: \(snippet)")
+                }
+            }
+
+            headerLines.append("")
+        }
+
+        headerLines.append("## Shared Context")
+        headerLines.append("")
+
+        let content = (headerLines + [body]).joined(separator: "\n")
+
+        let fm = FileManager.default
+        let paths = TasksStore.Paths.default(fileManager: fm)
+        let root = paths.root
+        do {
+            try fm.createDirectory(at: root, withIntermediateDirectories: true)
+            let url = root.appendingPathComponent("context-\(taskId.uuidString).md", isDirectory: false)
+            try content.write(to: url, atomically: true, encoding: .utf8)
+            return url
+        } catch {
+            return nil
         }
     }
 

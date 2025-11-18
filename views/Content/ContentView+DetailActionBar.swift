@@ -176,13 +176,6 @@ extension ContentView {
                   }
                 }
               }
-              // Third group: New With Context…
-              items.append(.init(kind: .separator))
-              items.append(
-                .init(
-                  kind: .action(title: "New With Context…") {
-                    showNewWithContext = true
-                  }))
               return items
             }()
           )
@@ -274,12 +267,12 @@ extension ContentView {
         }
 
         // Reveal in Finder (chromed icon)
-        ChromedIconButton(systemImage: "macwindow", help: "Reveal in Finder") {
+        ChromedIconButton(systemImage: "finder", help: "Reveal in Finder") {
           viewModel.reveal(session: focused)
         }
 
-        // Prompts (only when embedded terminal is running)
-        if runningSessionIDs.contains(focused.id) {
+        // Prompts (only when embedded terminal is running and Terminal tab is active)
+        if selectedDetailTab == .terminal, runningSessionIDs.contains(focused.id) {
           ChromedIconButton(systemImage: "text.insert", help: "Prompts") {
             showPromptPicker.toggle()
           }
@@ -294,6 +287,15 @@ extension ContentView {
               pendingDelete: $pendingDelete,
               onDismiss: { showPromptPicker = false }
             )
+          }
+        }
+
+        // Sync from Task (when focused session is part of a Task and local)
+        if let workspace = viewModel.workspaceVM,
+           !focused.isRemote,
+           workspace.tasks.contains(where: { $0.sessionIds.contains(focused.id) }) {
+          ChromedIconButton(systemImage: "arrow.triangle.2.circlepath", help: "Sync from Task") {
+            syncFromTask(for: focused)
           }
         }
 
@@ -466,35 +468,7 @@ private extension ContentView {
               title: "CodMate", body: "Command copied. Paste it in Warp.")
           }
         }))
-    // Third group: New With Context… — enabled when we can infer an anchor session.
-    items.append(.init(kind: .separator))
-    let anchor = defaultAnchorForNewWithContext(project: project)
-    items.append(
-      .init(
-        kind: .action(title: "New With Context…", disabled: anchor == nil) {
-          guard let anchor else { return }
-          newWithContextAnchor = anchor
-          showNewWithContext = true
-        }))
     return items
-  }
-
-  /// Fallback anchor selection for New With Context when no focused session exists:
-  /// pick the most recently updated session in the given project (if any).
-  func defaultAnchorForNewWithContext(project: Project?) -> SessionSummary? {
-    let all = viewModel.allSessions
-    let candidates: [SessionSummary]
-    if let project {
-      candidates = all.filter { viewModel.projectIdForSession($0.id) == project.id }
-    } else {
-      candidates = all
-    }
-    guard !candidates.isEmpty else { return nil }
-    return candidates.max { lhs, rhs in
-      let l = lhs.lastUpdatedAt ?? lhs.startedAt
-      let r = rhs.lastUpdatedAt ?? rhs.startedAt
-      return l < r
-    }
   }
 
   // Build external Terminal flow exactly like SessionListColumnView's project New
@@ -539,6 +513,49 @@ private extension ContentView {
     let cd = "cd " + shellEscapedPath(dir)
     let cmd = viewModel.buildNewProjectCLIInvocation(project: project)
     return cd + "\n" + cmd
+  }
+
+  /// Sync shared Task context for the focused session and expose it to the running CLI.
+  /// - In Timeline tab: regenerates the context file and copies a prompt with path hint.
+  /// - In Terminal tab (embedded): regenerates the context file and inserts the prompt
+  ///   into the embedded terminal input for this session.
+  func syncFromTask(for focused: SessionSummary) {
+    guard !focused.isRemote else { return }
+    guard let workspace = viewModel.workspaceVM else { return }
+    guard let task = workspace.tasks.first(where: { $0.sessionIds.contains(focused.id) }) else {
+      return
+    }
+
+    Task { @MainActor in
+      _ = await workspace.syncTaskContext(taskId: task.id)
+      let taskIdString = task.id.uuidString
+      let pathHint = "~/.codmate/tasks/context-\(taskIdString).md"
+      let promptLines: [String] = [
+        "当前 Task 的共享上下文已更新并保存到本地文件：",
+        pathHint,
+        "",
+        "在回答接下来的问题前，如有需要，请先阅读该文件以了解任务历史记录和相关约束。"
+      ]
+      let text = promptLines.joined(separator: "\n")
+
+      if selectedDetailTab == .terminal, runningSessionIDs.contains(focused.id) {
+        #if canImport(SwiftTerm) && !APPSTORE
+          TerminalSessionManager.shared.send(to: focused.id, text: text)
+        #else
+          let pb = NSPasteboard.general
+          pb.clearContents()
+          pb.setString(text + "\n", forType: .string)
+        #endif
+      } else {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text + "\n", forType: .string)
+      }
+
+      await SystemNotifier.shared.notify(
+        title: "CodMate",
+        body: "Task context synced. Prompt is ready for use.")
+    }
   }
 
   // Build a Claude invocation honoring project/default model and runtime flags

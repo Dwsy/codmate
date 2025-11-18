@@ -31,7 +31,6 @@ struct ContentView: View {
   @SceneStorage("cm.listHidden") var storeListHidden: Bool = false
   // Persist content column (sessions list / review left pane) preferred width
   @State var contentColumnIdealWidth: CGFloat = 420
-  @State var showNewWithContext = false
   @State var showSidebarNewProjectSheet = false
   // When starting embedded sessions, record the initial command lines per-session
   @State var embeddedInitialCommands: [SessionSummary.ID: String] = [:]
@@ -91,8 +90,6 @@ struct ContentView: View {
   func promptKey(_ p: SourcedPrompt) -> String { p.command }
   func canDelete(_ p: SourcedPrompt) -> Bool { true }
   @State var pendingDelete: SourcedPrompt? = nil
-  // Optional explicit anchor for New With Context when no focused session is available.
-  @State var newWithContextAnchor: SessionSummary? = nil
   // Build highlighted text where matches of `query` are tinted; non-matches use the provided base color
   func highlightedText(_ text: String, query: String, base: Color = .primary) -> Text {
     guard !query.isEmpty else {
@@ -183,15 +180,6 @@ struct ContentView: View {
     GeometryReader { geometry in
       navigationSplitView(geometry: geometry)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-    .sheet(
-      isPresented: $showNewWithContext,
-      onDismiss: { newWithContextAnchor = nil }
-    ) {
-      if let anchor = newWithContextAnchor ?? focusedSummary {
-        NewWithContextSheet(isPresented: $showNewWithContext, anchor: anchor)
-          .environmentObject(viewModel)
-      }
     }
   }
 

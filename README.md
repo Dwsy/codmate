@@ -23,7 +23,6 @@ Status: macOS 15+, Swift 6, Xcode 16. Universal binary (arm64 + x86_64).
 - Detail pane
   - Sticky action bar: Resume (Terminal/iTerm2/Warp or Embedded), Reveal in Finder, Delete, Export Markdown.
   - “New” starts a fresh session using the focused session’s working directory and (when available) its Project Profile.
-  - “New With Context” builds slim Markdown from selected sessions and starts a new session with that content as the initial prompt.
   - Copy real command button appears when the embedded terminal is active.
   - Task Instructions via DisclosureGroup (lazy loaded). Environment Context panel parses and renders `<environment_context>` entries.
   - Conversation timeline uses LazyVStack and differentiates user/assistant/tool/info bubbles.
@@ -135,7 +134,6 @@ This sets CFBundleShortVersionString to `1.4.0`, CFBundleVersion to the computed
 - Ensures PATH includes `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` when launching.
 - Resume uses the original session `cwd` if it exists; otherwise falls back to the log file’s directory.
 - New (detail): reuses the focused session’s working directory and, when a Project Profile is present, applies its model/sandbox/approval defaults (inline temporary profile injection if needed).
-- New With Context: composes a slim Markdown prompt from selected sessions and starts a new Codex session with that content.
 - External terminals: open in Apple Terminal, iTerm2 (direct), or Warp (path). Embedded terminal is available as an option.
 - Copy real command: when embedded, a toolbar button copies the exact `codex resume <id>` invocation used.
 - Flags supported by the UI when building commands:

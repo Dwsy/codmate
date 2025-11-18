@@ -525,9 +525,6 @@ extension SessionListColumnView {
               title: "CodMate", body: "Command copied. Paste it in Warp.")
           }
         }))
-    // Third group: New With Context… (disabled in list-empty state; needs a session anchor)
-    items.append(.init(kind: .separator))
-    items.append(.init(kind: .action(title: "New With Context…", disabled: true) {}))
     return items
   }
 
