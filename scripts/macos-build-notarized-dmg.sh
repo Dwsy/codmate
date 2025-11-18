@@ -206,8 +206,6 @@ fi
 
 for ARCH in "${ARCH_MATRIX[@]}"; do
   ARCHIVE_PATH="$BUILD_DIR/$SCHEME-$ARCH.xcarchive"
-  EXPORT_DIR="$BUILD_DIR/export-$ARCH"
-  mkdir -p "$EXPORT_DIR"
 
   echo "[1/7][$ARCH] Archiving $SCHEME (project: $PROJECT, config: $CONFIG)"
   if command -v xcpretty >/dev/null 2>&1; then
@@ -245,50 +243,14 @@ for ARCH in "${ARCH_MATRIX[@]}"; do
       "${EXTRA_XC_ARGS[@]}"
   fi
 
-  echo "[2/7][$ARCH] Preparing ExportOptions.plist"
-  cat > "$EXPORT_OPTIONS_PLIST" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>destination</key>
-  <string>export</string>
-  <key>method</key>
-  <string>developer-id</string>
-  <key>signingStyle</key>
-  <string>automatic</string>
-  <key>teamID</key>
-  <string>${TEAM_ID:-}</string>
-  <key>signingCertificate</key>
-  <string>${SIGNING_CERT}</string>
-  <key>stripSwiftSymbols</key>
-  <true/>
-  <key>compileBitcode</key>
-  <false/>
-</dict>
-</plist>
-PLIST
-
-  echo "[3/7][$ARCH] Exporting signed app"
-  if command -v xcpretty >/dev/null 2>&1; then
-    xcrun xcodebuild -exportArchive \
-      -archivePath "$ARCHIVE_PATH" \
-      -exportPath "$EXPORT_DIR" \
-      -exportOptionsPlist "$EXPORT_OPTIONS_PLIST" \
-      | xcpretty
-  else
-    xcrun xcodebuild -exportArchive \
-      -archivePath "$ARCHIVE_PATH" \
-      -exportPath "$EXPORT_DIR" \
-      -exportOptionsPlist "$EXPORT_OPTIONS_PLIST"
-  fi
-
-  APP_PATH=$(find "$EXPORT_DIR" -maxdepth 1 -name "*.app" -print -quit)
+  echo "[2/7][$ARCH] Locating built app in archive"
+  APP_PATH=$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -name "*.app" -print -quit)
   if [[ -z "${APP_PATH}" ]]; then
-    echo "[ERROR][$ARCH] Exported app not found in $EXPORT_DIR" >&2
+    echo "[ERROR][$ARCH] .app not found in $ARCHIVE_PATH/Products/Applications" >&2
     exit 1
   fi
 
+  echo "[3/7][$ARCH] Verifying and post-signing app"
   echo "[verify][$ARCH] entitlements (pre post-sign)"
   codesign -d --entitlements :- "$APP_PATH" 2>/dev/null || true
 
