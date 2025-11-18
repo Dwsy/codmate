@@ -14,7 +14,10 @@ enum SettingCategory: String, CaseIterable, Identifiable {
   case about
 
   // Customize displayed order and allow hiding categories without breaking enums elsewhere.
-  static var allCases: [SettingCategory] { [.general, .terminal, .providers, .gitReview, .mcpServer, .codex, .remoteHosts, .claudeCode, .dialectics, .about] }
+  // Remote Hosts appears as a top-level settings page alongside Codex.
+  static var allCases: [SettingCategory] {
+    [.general, .terminal, .providers, .gitReview, .mcpServer, .remoteHosts, .codex, .claudeCode, .dialectics, .about]
+  }
 
   var id: String { rawValue }
 

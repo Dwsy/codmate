@@ -29,7 +29,7 @@ struct CodexSettingsView: View {
                 .buttonStyle(.plain)
             }
 
-            // Tabs
+            // Tabs (Remote Hosts is a top-level page, not a Codex sub-tab)
             TabView {
                 Tab("Provider", systemImage: "server.rack") { providerPane }
                 Tab("Runtime", systemImage: "gearshape.2") { runtimePane }
