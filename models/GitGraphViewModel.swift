@@ -44,6 +44,8 @@ final class GitGraphViewModel: ObservableObject {
 
     private let service = GitService()
     private var repo: GitService.Repo? = nil
+    private var laneLayoutTask: Task<Void, Never>? = nil
+    private var laneLayoutGeneration: Int = 0
     private var refreshTask: Task<Void, Never>? = nil
     private var detailTask: Task<Void, Never>? = nil
     private var historyActionTask: Task<Void, Never>? = nil
@@ -74,6 +76,18 @@ final class GitGraphViewModel: ObservableObject {
         }
     }
     @Published private(set) var historyActionInProgress: HistoryAction? = nil
+
+    // When loading commits, we briefly want to avoid building rowData
+    // before lane layout has been computed; otherwise the initial
+    // table render uses a degenerate lane count and graph column width.
+    private var suppressNextRowBuild: Bool = false
+
+    deinit {
+        laneLayoutTask?.cancel()
+        refreshTask?.cancel()
+        detailTask?.cancel()
+        historyActionTask?.cancel()
+    }
 
     func attach(to root: URL?) {
         guard let root else { commits = []; filteredCommits = []; return }
@@ -117,6 +131,11 @@ final class GitGraphViewModel: ObservableObject {
             }
             isLoading = false
             self.commits = finalList
+            // Defer the first rowData build until after lane layout
+            // has been computed so that maxLaneCount is accurate on
+            // the initial render and the graph column reserves enough
+            // width. Subsequent filter operations rebuild rows normally.
+            self.suppressNextRowBuild = true
             applyFilter()
             if selectedCommit == nil { selectedCommit = list.first }
             computeLaneLayout()
@@ -127,7 +146,11 @@ final class GitGraphViewModel: ObservableObject {
         let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !q.isEmpty else {
             filteredCommits = commits
-            buildRowData()
+            if suppressNextRowBuild {
+                suppressNextRowBuild = false
+            } else {
+                buildRowData()
+            }
             return
         }
         let basic = commits.filter { c in
@@ -156,7 +179,7 @@ final class GitGraphViewModel: ObservableObject {
 
     private func buildRowData() {
         let count = filteredCommits.count
-        rowData = filteredCommits.enumerated().map { idx, commit in
+        let newRowData = filteredCommits.enumerated().map { idx, commit in
             CommitRowData(
                 id: commit.id,
                 commit: commit,
@@ -167,6 +190,11 @@ final class GitGraphViewModel: ObservableObject {
                 isWorkingTree: commit.id == "::working-tree::",
                 isStriped: idx % 2 == 1
             )
+        }
+        
+        // Only update if data actually changed to prevent unnecessary re-renders
+        if newRowData != rowData {
+            rowData = newRowData
         }
     }
 
@@ -243,20 +271,83 @@ final class GitGraphViewModel: ObservableObject {
             self.isLoadingDetail = false
         }
     }
+    
+    private struct LaneLayoutResult: Sendable {
+        let byId: [String: LaneInfo]
+        let maxLaneCount: Int
+    }
 
     // MARK: - Lanes
     private func computeLaneLayout() {
-        guard !commits.isEmpty else {
+        let currentCommits = commits
+        laneLayoutGeneration &+= 1
+        let generation = laneLayoutGeneration
+        laneLayoutTask?.cancel()
+
+        guard !currentCommits.isEmpty else {
+            laneLayoutTask = nil
             laneInfoById = [:]
             maxLaneCount = 1
+            buildRowData()
             return
         }
+
+        // For small histories, compute synchronously on the main actor
+        // to avoid the overhead of task hopping.
+        if currentCommits.count <= 400 {
+            if let result = Self.computeLaneLayout(for: currentCommits) {
+                laneLayoutTask = nil
+                laneInfoById = result.byId
+                maxLaneCount = result.maxLaneCount
+                buildRowData()
+            }
+            return
+        }
+
+        let snapshot = currentCommits
+        let startTime = CFAbsoluteTimeGetCurrent()
+        laneLayoutTask = Task(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            guard let result = Self.computeLaneLayout(for: snapshot) else { return }
+            if Task.isCancelled { return }
+
+            let duration = CFAbsoluteTimeGetCurrent() - startTime
+
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                guard self.laneLayoutGeneration == generation else { return }
+                self.laneLayoutTask = nil
+                self.laneInfoById = result.byId
+                self.maxLaneCount = result.maxLaneCount
+                #if DEBUG
+                if duration > 0.1 {
+                    print("[GitGraph] Layout took \(String(format: "%.3f", duration))s for \(snapshot.count) commits")
+                }
+                #endif
+                self.buildRowData()
+            }
+        }
+    }
+
+    private static func computeLaneLayout(for commits: [GitService.GraphCommit]) -> LaneLayoutResult? {
+        guard !commits.isEmpty else {
+            return LaneLayoutResult(byId: [:], maxLaneCount: 1)
+        }
+
         // lanes array holds the commit SHA expected to appear in that lane in the NEXT row
         var lanes: [String?] = []
         var byId: [String: LaneInfo] = [:]
         var maxLanes = 1
+        var processed = 0
 
         for commit in commits {
+            // Periodically check for cancellation to avoid doing
+            // unnecessary work when a newer layout request arrives.
+            if processed & 0x1F == 0, Task.isCancelled {
+                return nil
+            }
+            processed &+= 1
+
             let before = lanes // snapshot for continuing determination
 
             // Determine current lane for this commit
@@ -339,9 +430,8 @@ final class GitGraphViewModel: ObservableObject {
                 maxLanes = max(maxLanes, laneIndex + 1)
             }
         }
-        laneInfoById = byId
-        maxLaneCount = max(1, maxLanes)
-        buildRowData()
+
+        return LaneLayoutResult(byId: byId, maxLaneCount: max(1, maxLanes))
     }
 
     func loadBranches() {
