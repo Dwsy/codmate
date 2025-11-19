@@ -431,7 +431,9 @@ final class GitChangesViewModel: ObservableObject {
     func generateCommitMessage(providerId: String? = nil, modelId: String? = nil, maxBytes: Int = 128 * 1024) {
         // Debounce: if already generating for the same repo, ignore
         if isGenerating, let current = repoRoot?.path, generatingRepoPath == current {
+            #if DEBUG
             print("[AICommit] Debounced: generation already in progress for repo=\(current)")
+            #endif
             Self.log.info("Debounced: generation already in progress for repo=\(current, privacy: .public)")
             return
         }
@@ -462,7 +464,9 @@ final class GitChangesViewModel: ObservableObject {
                     body: "No staged changes to summarize.",
                     threadId: "ai-commit"
                 )
+                #if DEBUG
                 print("[AICommit] No staged changes; generation skipped")
+                #endif
                 Self.log.info("No staged changes; generation skipped")
                 return
             }
@@ -470,7 +474,9 @@ final class GitChangesViewModel: ObservableObject {
             let truncated = Self.prefixBytes(of: full, maxBytes: maxBytes)
             let prompt = Self.commitPrompt(diff: truncated)
             let llm = LLMHTTPService()
+            #if DEBUG
             print("[AICommit] Start generation providerId=\(providerId ?? "(auto)") bytes=\(truncated.utf8.count)")
+            #endif
             Self.log.info("Start generation providerId=\(providerId ?? "(auto)", privacy: .public) bytes=\(truncated.utf8.count)")
             do {
                 // Allow a slightly longer timeout for commit generation to reduce provider-specific timeouts
@@ -481,7 +487,9 @@ final class GitChangesViewModel: ObservableObject {
                 await MainActor.run {
                     guard self.repoRoot?.path == repoPath else {
                         // Repo changed during generation; drop the result
+                        #if DEBUG
                         print("[AICommit] Repo switched during generation; result discarded for repo=\(repoPath)")
+                        #endif
                         return
                     }
                     if finalMessage.isEmpty {
@@ -491,11 +499,15 @@ final class GitChangesViewModel: ObservableObject {
                     self.commitMessage = finalMessage
                 }
                 if finalMessage.isEmpty {
+                    #if DEBUG
                     print("[AICommit] Empty response from provider=\(res.providerId), elapsedMs=\(res.elapsedMs)")
+                    #endif
                     Self.log.warning("Empty commit message from provider=\(res.providerId, privacy: .public)")
                 } else {
                     let preview = finalMessage.prefix(120)
+                    #if DEBUG
                     print("[AICommit] Success provider=\(res.providerId) elapsedMs=\(res.elapsedMs) msg=\(preview)")
+                    #endif
                     Self.log.info("Success provider=\(res.providerId, privacy: .public) elapsedMs=\(res.elapsedMs) msg=\(String(preview), privacy: .public)")
                 }
                 await SystemNotifier.shared.notify(
@@ -506,7 +518,9 @@ final class GitChangesViewModel: ObservableObject {
                     threadId: "ai-commit"
                 )
             } catch {
+                #if DEBUG
                 print("[AICommit] Error: \(error.localizedDescription)")
+                #endif
                 Self.log.error("Generation error: \(error.localizedDescription, privacy: .public)")
                 await SystemNotifier.shared.notify(
                     title: "AI Commit",

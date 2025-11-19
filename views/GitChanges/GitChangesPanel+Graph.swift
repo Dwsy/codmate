@@ -51,6 +51,8 @@ extension GitChangesPanel {
       self.onActivateCommit = onActivateCommit
     }
     @State private var rowHoverId: String? = nil
+    @State private var isScrolling: Bool = false
+    @State private var scrollTimer: Timer? = nil
 
     var body: some View {
       VStack(spacing: 8) {
@@ -127,75 +129,56 @@ extension GitChangesPanel {
         // Rows: zero spacing to keep lane connectors continuous between rows
         ScrollView {
           LazyVStack(spacing: 0) {
-            ForEach(Array(vm.filteredCommits.enumerated()), id: \.element.id) { idx, c in
-              HStack(spacing: 8) {
-                if let info = vm.laneInfoById[c.id] {
-                  GraphLaneView(
-                    info: info,
-                    maxLanes: vm.maxLaneCount,
-                    laneSpacing: laneSpacing,
-                    verticalWidth: 2,
-                    hideTopForCurrentLane: idx == 0,
-                    hideBottomForCurrentLane: idx == vm.filteredCommits.count - 1,
-                    headIsHollow: c.id == "::working-tree::",
-                    headSize: 12
-                  )
-                  .frame(width: graphColumnWidth, height: rowHeight)
-                } else {
-                  GraphGlyph()
-                    .frame(width: graphColumnWidth, height: rowHeight)
-                }
-                // Description cell
-                VStack(alignment: .leading, spacing: 2) {
-                  HStack(spacing: 6) {
-                    Text(c.subject)
-                      .fontWeight(c.id == "::working-tree::" ? .semibold : .regular)
-                      .lineLimit(1)
-                      .frame(maxWidth: .infinity, alignment: .leading)
-                    // Decorations chips
-                    ForEach(c.decorations.prefix(3), id: \.self) { d in
-                      Text(d)
-                        .font(.system(size: 10, weight: .medium))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
+            // Scroll detector - only on first item for performance
+            if !vm.rowData.isEmpty {
+              Color.clear
+                .frame(height: 0)
+                .background(
+                  GeometryReader { geo in
+                    Color.clear.preference(
+                      key: ScrollOffsetPreferenceKey.self,
+                      value: geo.frame(in: .named("scroll")).minY
+                    )
+                  }
+                )
+            }
+
+            ForEach(vm.rowData) { rowData in
+              CommitRowView(
+                data: rowData,
+                maxLanes: vm.maxLaneCount,
+                graphColumnWidth: graphColumnWidth,
+                rowHeight: rowHeight,
+                laneSpacing: laneSpacing,
+                dateWidth: dateWidth,
+                authorWidth: authorWidth,
+                shaWidth: shaWidth,
+                compactColumns: compactColumns,
+                isHovered: !isScrolling && rowHoverId == rowData.id,
+                onTap: {
+                  vm.selectCommit(rowData.commit)
+                  if rowData.isWorkingTree {
+                    onActivateCommit(nil)
+                  } else {
+                    onActivateCommit(rowData.commit)
+                  }
+                },
+                onHoverChange: { hovered in
+                  if !isScrolling {
+                    if hovered {
+                      rowHoverId = rowData.id
+                    } else if rowHoverId == rowData.id {
+                      rowHoverId = nil
                     }
                   }
                 }
-                .padding(.trailing, 8)
-                if !compactColumns {
-                  Text(c.date)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: dateWidth, alignment: .leading)
-                  Text(c.author)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: authorWidth, alignment: .leading)
-                  Text(c.shortId)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: shaWidth, alignment: .leading)
-                }
-              }
-              .frame(height: rowHeight)
-              .background(rowHoverId == c.id ? Color.accentColor.opacity(0.07) : Color.clear)
-              .background((idx % 2 == 1) ? Color.secondary.opacity(0.06) : Color.clear)
-              .contentShape(Rectangle())
-              .onHover { inside in
-                rowHoverId = inside ? c.id : (rowHoverId == c.id ? nil : rowHoverId)
-              }
-              .onTapGesture {
-                vm.selectCommit(c)
-                if c.id == "::working-tree::" {
-                  onActivateCommit(nil)
-                } else {
-                  onActivateCommit(c)
-                }
-              }
+              )
             }
           }
+        }
+        .coordinateSpace(name: "scroll")
+        .onPreferenceChange(ScrollOffsetPreferenceKey.self) { _ in
+          handleScrollEvent()
         }
         .padding(.leading, 16)
       }
@@ -261,6 +244,23 @@ extension GitChangesPanel {
       }
     }
 
+    private func handleScrollEvent() {
+      // Cancel existing timer
+      scrollTimer?.invalidate()
+
+      // Mark as scrolling
+      if !isScrolling {
+        isScrolling = true
+        // Clear hover when scrolling starts
+        rowHoverId = nil
+      }
+
+      // Set timer to detect scroll stop (150ms after last scroll event)
+      scrollTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: false) { _ in
+        isScrolling = false
+      }
+    }
+
     private var actionButtons: some View {
       HStack(spacing: 8) {
         Button {
@@ -316,16 +316,6 @@ extension GitChangesPanel {
     }
   }
 
-  // Monospace-like graph glyph: a vertical line with a centered dot, mimicking a basic lane.
-  struct GraphGlyph: View {
-    var body: some View {
-      ZStack {
-        Rectangle().fill(Color.secondary.opacity(0.25)).frame(width: 1).padding(.vertical, 2)
-        Circle().fill(Color.accentColor).frame(width: 6, height: 6)
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-    }
-  }
   // Simple background with alternating horizontal stripes to separate rows visually
   struct StripedBackground: View {
     var stripe: CGFloat = 28
@@ -811,96 +801,211 @@ private struct GraphLaneView: View {
 
   private let dotSize: CGFloat = 8
   private let lineWidth: CGFloat = 2
+  private let rowHeight: CGFloat = 24
 
   private func x(_ lane: Int) -> CGFloat {
     CGFloat(lane) * laneSpacing + laneSpacing / 2
   }
 
   var body: some View {
-    GeometryReader { geo in
-      let h = max(geo.size.height, 18)
-
-      // Vertical lane segments to maintain continuity across rows
-      Path { p in
-        let top: CGFloat = 0
-        let bottom: CGFloat = h
-        let count = max(info.activeLaneCount, maxLanes)
-        if count > 0 {
-          for i in 0..<count {
-            if info.continuingLanes.contains(i) {
-              let xi = x(i)
-              let dotY = h * 0.5
-              // margin to avoid line intruding into hollow ring
-              let headRadius: CGFloat =
-                headIsHollow && i == info.laneIndex ? max(ceil(headSize / 2), 5) : ceil(dotSize / 2)
-              let startBelow: CGFloat = headRadius + 1
-              if i == info.laneIndex {
-                if hideTopForCurrentLane {
-                  // start under the head
-                  p.move(to: CGPoint(x: xi, y: dotY + startBelow))
-                  if hideBottomForCurrentLane {
-                    // draw nothing further; hidden both above and below
-                  } else {
-                    p.addLine(to: CGPoint(x: xi, y: bottom))
-                  }
-                } else if hideBottomForCurrentLane {
-                  // draw from top to just above the head
-                  p.move(to: CGPoint(x: xi, y: top))
-                  p.addLine(to: CGPoint(x: xi, y: dotY - startBelow))
-                } else {
-                  p.move(to: CGPoint(x: xi, y: top))
-                  p.addLine(to: CGPoint(x: xi, y: bottom))
-                }
-              } else if info.parentLaneIndices.contains(i) {
-                // For lanes that are only reached via branch connectors on this row,
-                // skip vertical segment here so only the diagonal branch is visible.
-                continue
-              } else {
-                p.move(to: CGPoint(x: xi, y: top))
-                p.addLine(to: CGPoint(x: xi, y: bottom))
-              }
-            }
-          }
-        }
-      }
-      .stroke(Color.accentColor.opacity(0.6), lineWidth: max(0.5, verticalWidth))
-
-      // Connectors from current dot to parent lanes (downward curves); only draw diagonals
-      Path { p in
-        if !hideBottomForCurrentLane {
-          let cx = x(info.laneIndex)
-          let dotY = h * 0.5
-          let startY: CGFloat = {
-            if headIsHollow { return dotY + CGFloat(max(ceil(headSize / 2), 5)) + 1 }
-            return dotY
-          }()
-          for parent in info.parentLaneIndices where parent != info.laneIndex {
-            let px = x(parent)
-            p.move(to: CGPoint(x: cx, y: startY))
-            // Smooth S-shaped curve toward bottom at parent lane position
-            let c1 = CGPoint(x: cx, y: startY + h * 0.25)
-            let c2 = CGPoint(x: px, y: h - h * 0.25)
-            p.addCurve(to: CGPoint(x: px, y: h), control1: c1, control2: c2)
-          }
-        }
-      }
-      .stroke(Color.accentColor.opacity(0.6), lineWidth: lineWidth)
-
-      // Commit dot
-      Group {
-        if headIsHollow {
-          Circle()
-            .stroke(Color.accentColor, lineWidth: 2)
-            .frame(width: headSize, height: headSize)
-        } else {
-          Circle()
-            .fill(Color.accentColor)
-            .frame(width: dotSize, height: dotSize)
-        }
-      }
-      .position(x: x(info.laneIndex), y: h * 0.5)
+    Canvas { context, size in
+      drawGraph(in: context, size: size)
     }
   }
+
+  private func drawGraph(in context: GraphicsContext, size: CGSize) {
+    let h = rowHeight
+    let top: CGFloat = 0
+    let bottom: CGFloat = h
+    let dotY = h * 0.5
+
+    // Draw vertical lane lines
+    let count = max(info.activeLaneCount, maxLanes)
+    if count > 0 {
+      for i in 0..<count where info.continuingLanes.contains(i) {
+        let xi = x(i)
+        let headRadius: CGFloat = headIsHollow && i == info.laneIndex
+          ? max(ceil(headSize / 2), 5) : ceil(dotSize / 2)
+        let margin: CGFloat = headRadius + 1
+
+        var path = Path()
+
+        if i == info.laneIndex {
+          if !hideTopForCurrentLane && !hideBottomForCurrentLane {
+            path.move(to: CGPoint(x: xi, y: top))
+            path.addLine(to: CGPoint(x: xi, y: bottom))
+          } else if hideTopForCurrentLane && !hideBottomForCurrentLane {
+            path.move(to: CGPoint(x: xi, y: dotY + margin))
+            path.addLine(to: CGPoint(x: xi, y: bottom))
+          } else if !hideTopForCurrentLane && hideBottomForCurrentLane {
+            path.move(to: CGPoint(x: xi, y: top))
+            path.addLine(to: CGPoint(x: xi, y: dotY - margin))
+          }
+        } else if !info.parentLaneIndices.contains(i) && !info.joinLaneIndices.contains(i) {
+          path.move(to: CGPoint(x: xi, y: top))
+          path.addLine(to: CGPoint(x: xi, y: bottom))
+        }
+
+        context.stroke(path, with: .color(.accentColor.opacity(0.6)), lineWidth: verticalWidth)
+      }
+    }
+
+    // Draw join connectors (incoming branches from above)
+    let cx = x(info.laneIndex)
+    let endY = headIsHollow ? dotY - max(ceil(headSize / 2), 5) - 1 : dotY - ceil(dotSize / 2) - 1
+
+    for source in info.joinLaneIndices where source != info.laneIndex {
+      var path = Path()
+      let sx = x(source)
+      path.move(to: CGPoint(x: sx, y: 0))
+      path.addCurve(
+        to: CGPoint(x: cx, y: endY),
+        control1: CGPoint(x: sx, y: h * 0.25),
+        control2: CGPoint(x: cx, y: endY - h * 0.25)
+      )
+      context.stroke(path, with: .color(.accentColor.opacity(0.6)), lineWidth: lineWidth)
+    }
+
+    // Draw parent connectors (outgoing branches downward)
+    if !hideBottomForCurrentLane {
+      let startY = headIsHollow ? dotY + max(ceil(headSize / 2), 5) + 1 : dotY
+
+      for parent in info.parentLaneIndices where parent != info.laneIndex {
+        var path = Path()
+        let px = x(parent)
+        path.move(to: CGPoint(x: cx, y: startY))
+        path.addCurve(
+          to: CGPoint(x: px, y: h),
+          control1: CGPoint(x: cx, y: startY + h * 0.25),
+          control2: CGPoint(x: px, y: h - h * 0.25)
+        )
+        context.stroke(path, with: .color(.accentColor.opacity(0.6)), lineWidth: lineWidth)
+      }
+    }
+
+    // Draw commit dot
+    if headIsHollow {
+      var circle = Path()
+      circle.addEllipse(in: CGRect(
+        x: x(info.laneIndex) - headSize / 2,
+        y: dotY - headSize / 2,
+        width: headSize,
+        height: headSize
+      ))
+      context.stroke(circle, with: .color(.accentColor), lineWidth: 2)
+    } else {
+      var circle = Path()
+      circle.addEllipse(in: CGRect(
+        x: x(info.laneIndex) - dotSize / 2,
+        y: dotY - dotSize / 2,
+        width: dotSize,
+        height: dotSize
+      ))
+      context.fill(circle, with: .color(.accentColor))
+    }
+  }
+
 }
 
 // ColumnResizer removed: columns use fixed widths; Description fills remaining space.
+
+// MARK: - Commit Row View
+private struct CommitRowView: View {
+  let data: GitGraphViewModel.CommitRowData
+  let maxLanes: Int
+  let graphColumnWidth: CGFloat
+  let rowHeight: CGFloat
+  let laneSpacing: CGFloat
+  let dateWidth: CGFloat
+  let authorWidth: CGFloat
+  let shaWidth: CGFloat
+  let compactColumns: Bool
+  let isHovered: Bool
+  let onTap: () -> Void
+  let onHoverChange: (Bool) -> Void
+
+  var body: some View {
+    HStack(spacing: 8) {
+      // Graph lane
+      if let info = data.laneInfo {
+        GraphLaneView(
+          info: info,
+          maxLanes: maxLanes,
+          laneSpacing: laneSpacing,
+          verticalWidth: 2,
+          hideTopForCurrentLane: data.isFirst,
+          hideBottomForCurrentLane: data.isLast,
+          headIsHollow: data.isWorkingTree,
+          headSize: 12
+        )
+        .frame(width: graphColumnWidth, height: rowHeight)
+      } else {
+        GraphGlyph()
+          .frame(width: graphColumnWidth, height: rowHeight)
+      }
+
+      // Description with decorations
+      HStack(spacing: 6) {
+        Text(data.commit.subject)
+          .fontWeight(data.isWorkingTree ? .semibold : .regular)
+          .lineLimit(1)
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+        if !data.commit.decorations.isEmpty {
+          ForEach(data.commit.decorations.prefix(3), id: \.self) { d in
+            Text(d)
+              .font(.system(size: 10, weight: .medium))
+              .padding(.horizontal, 6)
+              .padding(.vertical, 2)
+              .background(Capsule().fill(Color.secondary.opacity(0.15)))
+          }
+        }
+      }
+      .padding(.trailing, 8)
+
+      // Metadata columns
+      if !compactColumns {
+        Text(data.commit.date)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .frame(width: dateWidth, alignment: .leading)
+        Text(data.commit.author)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .frame(width: authorWidth, alignment: .leading)
+        Text(data.commit.shortId)
+          .font(.system(.caption, design: .monospaced))
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .frame(width: shaWidth, alignment: .leading)
+      }
+    }
+    .frame(height: rowHeight)
+    .background(isHovered ? Color.accentColor.opacity(0.07) : Color.clear)
+    .background(data.isStriped ? Color.secondary.opacity(0.06) : Color.clear)
+    .contentShape(Rectangle())
+    .onHover(perform: onHoverChange)
+    .onTapGesture(perform: onTap)
+  }
+}
+
+// MARK: - Graph Glyph
+// Monospace-like graph glyph: a vertical line with a centered dot, mimicking a basic lane.
+private struct GraphGlyph: View {
+  var body: some View {
+    ZStack {
+      Rectangle().fill(Color.secondary.opacity(0.25)).frame(width: 1).padding(.vertical, 2)
+      Circle().fill(Color.accentColor).frame(width: 6, height: 6)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+  }
+}
+
+// MARK: - Scroll Detection
+private struct ScrollOffsetPreferenceKey: PreferenceKey {
+  static var defaultValue: CGFloat = 0
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = nextValue()
+  }
+}
+

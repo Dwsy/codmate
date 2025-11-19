@@ -7,7 +7,6 @@ final class GitGraphViewModel: ObservableObject {
     @Published var filteredCommits: [GitService.GraphCommit] = []
     @Published var selectedCommit: GitService.GraphCommit? = nil
     @Published var searchQuery: String = ""
-    @Published private(set) var commitPatch: String = ""
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var errorMessage: String? = nil
     // Graph lane layout
@@ -16,9 +15,32 @@ final class GitGraphViewModel: ObservableObject {
         var parentLaneIndices: [Int]      // lane indices of parents in next row
         var activeLaneCount: Int          // lanes count to consider for verticals this row
         var continuingLanes: Set<Int>     // lanes that should show a vertical line in this row
+        var joinLaneIndices: [Int]        // additional lanes carrying the same commit id (branch joins)
     }
     @Published private(set) var laneInfoById: [String: LaneInfo] = [:]
     @Published private(set) var maxLaneCount: Int = 1
+
+    // Pre-computed row data for performance
+    struct CommitRowData: Identifiable, Equatable {
+        let id: String
+        let commit: GitService.GraphCommit
+        let index: Int
+        let laneInfo: LaneInfo?
+        let isFirst: Bool
+        let isLast: Bool
+        let isWorkingTree: Bool
+        let isStriped: Bool
+
+        static func == (lhs: CommitRowData, rhs: CommitRowData) -> Bool {
+            lhs.id == rhs.id &&
+            lhs.index == rhs.index &&
+            lhs.laneInfo == rhs.laneInfo &&
+            lhs.isFirst == rhs.isFirst &&
+            lhs.isLast == rhs.isLast &&
+            lhs.isStriped == rhs.isStriped
+        }
+    }
+    @Published private(set) var rowData: [CommitRowData] = []
 
     private let service = GitService()
     private var repo: GitService.Repo? = nil
@@ -98,13 +120,16 @@ final class GitGraphViewModel: ObservableObject {
             applyFilter()
             if selectedCommit == nil { selectedCommit = list.first }
             computeLaneLayout()
-            await loadPatchForSelection()
         }
     }
 
     func applyFilter() {
         let q = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { filteredCommits = commits; return }
+        guard !q.isEmpty else {
+            filteredCommits = commits
+            buildRowData()
+            return
+        }
         let basic = commits.filter { c in
             if c.subject.lowercased().contains(q) { return true }
             if c.author.lowercased().contains(q) { return true }
@@ -113,26 +138,41 @@ final class GitGraphViewModel: ObservableObject {
             return false
         }
         // Also include commits whose messages match (subject/body) via git --grep
-        guard let repo else { filteredCommits = basic; return }
+        guard let repo else {
+            filteredCommits = basic
+            buildRowData()
+            return
+        }
         Task { [weak self] in
             guard let self else { return }
             let ids = await self.service.searchCommitIds(in: repo, query: q, includeAllBranches: self.showAllBranches, includeRemoteBranches: self.showRemoteBranches, singleRef: (self.showAllBranches ? nil : (self.selectedBranch?.isEmpty == false ? self.selectedBranch : nil)))
             let extra = commits.filter { ids.contains($0.id) }
-            await MainActor.run { self.filteredCommits = Array(Set(basic + extra)) }
+            await MainActor.run {
+                self.filteredCommits = Array(Set(basic + extra))
+                self.buildRowData()
+            }
+        }
+    }
+
+    private func buildRowData() {
+        let count = filteredCommits.count
+        rowData = filteredCommits.enumerated().map { idx, commit in
+            CommitRowData(
+                id: commit.id,
+                commit: commit,
+                index: idx,
+                laneInfo: laneInfoById[commit.id],
+                isFirst: idx == 0,
+                isLast: idx == count - 1,
+                isWorkingTree: commit.id == "::working-tree::",
+                isStriped: idx % 2 == 1
+            )
         }
     }
 
     func selectCommit(_ c: GitService.GraphCommit) {
         selectedCommit = c
-        Task { await loadPatchForSelection() }
         loadDetail(for: c)
-    }
-
-    func loadPatchForSelection() async {
-        guard let repo = self.repo, let id = selectedCommit?.id else { commitPatch = ""; return }
-        if id == "::working-tree::" { commitPatch = ""; return }
-        let text = await service.commitPatch(in: repo, commitId: id)
-        commitPatch = text
     }
 
     /// Load detail panel data (files list + first file patch) for the given commit.
@@ -259,6 +299,19 @@ final class GitGraphViewModel: ObservableObject {
                 if laneIndex < lanes.count { lanes[laneIndex] = nil }
             }
 
+            // When the same commit id appears in multiple lanes in the pre-state,
+            // treat the extra occurrences as branch joins into this commit.
+            let joinLanes: [Int] = before.enumerated().compactMap { index, value in
+                (value == commit.id && index != laneIndex) ? index : nil
+            }
+            // After this commit row, those join lanes should terminate instead of
+            // continuing further into older history.
+            if !joinLanes.isEmpty {
+                for j in joinLanes where j < lanes.count {
+                    lanes[j] = nil
+                }
+            }
+
             // Trim trailing nils to keep lane array compact
             while let last = lanes.last, last == nil { _ = lanes.popLast() }
 
@@ -277,9 +330,10 @@ final class GitGraphViewModel: ObservableObject {
                 laneIndex: laneIndex,
                 parentLaneIndices: parentLaneIndices,
                 activeLaneCount: activeCount,
-                continuingLanes: continuing
+                continuingLanes: continuing,
+                joinLaneIndices: joinLanes
             )
-            if let localMax = (parentLaneIndices + [laneIndex]).max() {
+            if let localMax = (parentLaneIndices + joinLanes + [laneIndex]).max() {
                 maxLanes = max(maxLanes, localMax + 1)
             } else {
                 maxLanes = max(maxLanes, laneIndex + 1)
@@ -287,6 +341,7 @@ final class GitGraphViewModel: ObservableObject {
         }
         laneInfoById = byId
         maxLaneCount = max(1, maxLanes)
+        buildRowData()
     }
 
     func loadBranches() {
