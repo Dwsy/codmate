@@ -65,7 +65,9 @@ struct ProjectsListView: View {
               Task { await viewModel.assignSessions(to: projectId, ids: ids) }
             },
             onChangeParent: { projectId, newParentId in
-              Task { await viewModel.changeProjectParent(projectId: projectId, newParentId: newParentId) }
+              Task {
+                await viewModel.changeProjectParent(projectId: projectId, newParentId: newParentId)
+              }
             }
           )
         }
@@ -128,12 +130,12 @@ struct ProjectsListView: View {
           .environmentObject(viewModel)
       }
     }
-    .sheet(isPresented: $showNewProject) {
+    .sheet(isPresented: $showNewProject, onDismiss: { newParentProject = nil }) {
       ProjectEditorSheet(
         isPresented: $showNewProject,
         mode: .new,
         prefill: ProjectEditorSheet.Prefill(
-          name: nil,
+          name: newParentProject == nil ? nil : "New Subproject",
           directory: newParentProject?.directory,
           trustLevel: nil,
           overview: nil,
@@ -407,7 +409,7 @@ private struct ProjectTreeNodeView: View {
     Button {
       onNewSubproject(project)
     } label: {
-      Label("New Subproject", systemImage: "plus.square.on.square")
+      Label("New Subproject…", systemImage: "plus.square.on.square")
     }
     Divider()
     let editors = EditorApp.installedEditors

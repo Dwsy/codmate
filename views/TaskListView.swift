@@ -30,6 +30,8 @@ struct TaskListView: View {
   @State private var lastClickedID: SessionSummary.ID? = nil
   @State private var pendingMove: PendingSessionMove? = nil
   @State private var editingMode: EditTaskSheet.Mode = .edit
+  @State private var collapsedTaskIDs: Set<UUID> = []
+  @State private var sessionAssigningTask: SessionSummary? = nil
 
   private var currentProjectId: String? {
     viewModel.selectedProjectIDs.first
@@ -113,6 +115,26 @@ struct TaskListView: View {
           editingTask = nil
         }
       )
+    }
+    .sheet(item: $sessionAssigningTask) { session in
+      if let projectId = currentProjectId {
+        TaskSelectionSheet(
+          tasks: workspaceVM.tasks.filter { $0.projectId == projectId },
+          onSelect: { task in
+            Task {
+              var updatedTask = task
+              if !updatedTask.sessionIds.contains(session.id) {
+                updatedTask.sessionIds.append(session.id)
+                await workspaceVM.updateTask(updatedTask)
+              }
+              sessionAssigningTask = nil
+            }
+          },
+          onCancel: {
+            sessionAssigningTask = nil
+          }
+        )
+      }
     }
     .task(id: currentProjectId) {
       if let projectId = currentProjectId {
@@ -324,7 +346,7 @@ struct TaskListView: View {
     // For each task (in sorted order), add a header row and then its sessions that belong to this section
     for task in sortedTasks {
       result.append(.taskHeader(task))
-      if let sectionSessions = taskSectionSessions[task.task.id] {
+      if !collapsedTaskIDs.contains(task.task.id), let sectionSessions = taskSectionSessions[task.task.id] {
         for session in sectionSessions {
           result.append(.taskSession(task, session))
         }
@@ -378,7 +400,7 @@ struct TaskListView: View {
 
         // Content area
         VStack(alignment: .leading, spacing: 4) {
-          // Title with status icon
+          // Title with status icon and collapse indicator
           HStack(spacing: 6) {
             Text(taskWithSessions.task.effectiveTitle)
               .font(.headline)
@@ -387,6 +409,12 @@ struct TaskListView: View {
             Image(systemName: taskWithSessions.task.status.icon)
               .font(.caption)
               .foregroundColor(statusColor(taskWithSessions.task.status))
+            
+            // Collapse state indicator
+            Image(systemName: "chevron.right")
+              .rotationEffect(.degrees(collapsedTaskIDs.contains(taskWithSessions.task.id) ? 0 : 90))
+              .font(.caption2.bold())
+              .foregroundStyle(.tertiary)
           }
 
           // Metadata row
@@ -451,6 +479,13 @@ struct TaskListView: View {
       .onTapGesture(count: 2) {
         editingMode = .edit
         editingTask = taskWithSessions.task
+      }
+      .onTapGesture {
+        if collapsedTaskIDs.contains(taskWithSessions.task.id) {
+          collapsedTaskIDs.remove(taskWithSessions.task.id)
+        } else {
+          collapsedTaskIDs.insert(taskWithSessions.task.id)
+        }
       }
       .contextMenu {
         if let project = projectForTask(taskWithSessions.task) {
@@ -531,6 +566,11 @@ struct TaskListView: View {
           )
           editingMode = .new
           editingTask = draft
+        }
+        if parentTask == nil {
+           Button("Add to Task…") {
+             sessionAssigningTask = session
+           }
         }
       }
       if parentTask != nil {
@@ -911,5 +951,63 @@ struct TaskDropDelegate: DropDelegate {
     let draggedTask = workspaceVM.tasks.first(where: { $0.sessionIds.contains(draggedSession.id) })
     // Allow drop if session is unassigned or belongs to a different task
     return draggedTask == nil || draggedTask?.id != task.id
+  }
+}
+
+// MARK: - Task Selection Sheet
+struct TaskSelectionSheet: View {
+  let tasks: [CodMateTask]
+  let onSelect: (CodMateTask) -> Void
+  let onCancel: () -> Void
+
+  var body: some View {
+    VStack(spacing: 16) {
+      Text("Add to Task")
+        .font(.title2)
+        .fontWeight(.bold)
+
+      if tasks.isEmpty {
+        Text("No tasks found in this project.")
+          .foregroundColor(.secondary)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      } else {
+        List(tasks) { task in
+          HStack {
+            Image(systemName: task.status.icon)
+              .foregroundColor(statusColor(task.status))
+            Text(task.effectiveTitle)
+              .lineLimit(1)
+            Spacer()
+          }
+          .padding(.vertical, 4)
+          .contentShape(Rectangle())
+          .onTapGesture {
+            onSelect(task)
+          }
+        }
+        .listStyle(.plain)
+        .overlay(
+          RoundedRectangle(cornerRadius: 6)
+            .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+        )
+      }
+
+      HStack {
+        Button("Cancel", action: onCancel)
+          .keyboardShortcut(.cancelAction)
+        Spacer()
+      }
+    }
+    .padding()
+    .frame(width: 400, height: 400)
+  }
+
+  private func statusColor(_ status: TaskStatus) -> Color {
+    switch status {
+    case .pending: return .gray
+    case .inProgress: return .blue
+    case .completed: return .green
+    case .archived: return .orange
+    }
   }
 }
