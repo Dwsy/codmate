@@ -230,6 +230,11 @@ struct SessionSummaryBuilder {
     }
 
     mutating func observe(_ row: SessionRow) {
+        if case let .eventMessage(payload) = row.kind,
+           payload.type.lowercased() == "turn_boundary"
+        {
+            return
+        }
         lineCount += 1
         seedLastUpdated(row.timestamp)
 

@@ -2,6 +2,20 @@ import CryptoKit
 import Foundation
 
 actor GeminiSessionProvider {
+  private struct AggregatedSession {
+    let summary: SessionSummary
+    let rows: [SessionRow]
+    let primaryFileURL: URL
+  }
+
+  private struct GeminiLogEntry: Decodable {
+    let sessionId: String
+    let messageId: Int
+    let type: String
+    let message: String
+    let timestamp: String
+  }
+
   private let parser = GeminiSessionParser()
   private var projectsStore: ProjectsStore
   private let fileManager: FileManager
@@ -9,6 +23,10 @@ actor GeminiSessionProvider {
 
   private var hashToPath: [String: String] = [:]
   private var canonicalURLById: [String: URL] = [:]
+  private var rowsCacheBySessionId: [String: [SessionRow]] = [:]
+  private var logCacheByHash: [String: [String: [GeminiLogEntry]]] = [:]
+  private let logDateFormatter: ISO8601DateFormatter
+  private let fallbackLogFormatter: ISO8601DateFormatter
 
   init(projectsStore: ProjectsStore, fileManager: FileManager = .default) {
     self.projectsStore = projectsStore
@@ -22,6 +40,10 @@ actor GeminiSessionProvider {
     } else {
       self.tmpRoot = nil
     }
+    self.logDateFormatter = ISO8601DateFormatter()
+    self.logDateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    self.fallbackLogFormatter = ISO8601DateFormatter()
+    self.fallbackLogFormatter.formatOptions = [.withInternetDateTime]
   }
 
   func sessions(scope: SessionLoadScope) async -> [SessionSummary] {
@@ -30,6 +52,7 @@ actor GeminiSessionProvider {
       at: tmpRoot, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
     else { return [] }
 
+    rowsCacheBySessionId.removeAll()
     var summaries: [SessionSummary] = []
 
     for hashURL in hashes {
@@ -38,25 +61,16 @@ actor GeminiSessionProvider {
       guard hash.count == 64,
         hash.range(of: "^[0-9a-f]+$", options: .regularExpression) != nil
       else { continue }
-      let chatsDir = hashURL.appendingPathComponent("chats", isDirectory: true)
-      var isDir: ObjCBool = false
-      guard fileManager.fileExists(atPath: chatsDir.path, isDirectory: &isDir), isDir.boolValue else {
-        continue
-      }
-      guard let files = try? fileManager.contentsOfDirectory(
-        at: chatsDir,
-        includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
-        options: [.skipsHiddenFiles])
-      else { continue }
-
       let resolvedPath = await resolveProjectPath(forHash: hash)
-      for file in files where file.pathExtension.lowercased() == "json" {
-        if let parsed = parser.parse(at: file, projectHash: hash, resolvedProjectPath: resolvedPath) {
-          if matches(scope: scope, summary: parsed.summary) {
-            summaries.append(parsed.summary)
-            canonicalURLById[parsed.summary.id] = file
-          }
-        }
+      let aggregated = aggregateSessions(
+        forHash: hash,
+        hashURL: hashURL,
+        resolvedProjectPath: resolvedPath,
+        cacheResults: true)
+      for session in aggregated where matches(scope: scope, summary: session.summary) {
+        summaries.append(session.summary)
+        rowsCacheBySessionId[session.summary.id] = session.rows
+        canonicalURLById[session.summary.id] = session.primaryFileURL
       }
     }
 
@@ -69,32 +83,25 @@ actor GeminiSessionProvider {
 
   func collectCWDCounts() async -> [String: Int] {
     guard let tmpRoot else { return [:] }
-    var counts: [String: Int] = [:]
     guard let hashes = try? fileManager.contentsOfDirectory(
       at: tmpRoot, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
     else { return [:] }
 
+    var counts: [String: Int] = [:]
     for hashURL in hashes {
       guard hashURL.hasDirectoryPath else { continue }
       let hash = hashURL.lastPathComponent
       guard hash.count == 64,
-        hash.range(of: "^[0-9a-f]+$", options: .regularExpression) != nil else { continue }
-      let chats = hashURL.appendingPathComponent("chats", isDirectory: true)
-      var isDir: ObjCBool = false
-      guard fileManager.fileExists(atPath: chats.path, isDirectory: &isDir), isDir.boolValue else {
-        continue
-      }
-      guard let files = try? fileManager.contentsOfDirectory(
-        at: chats,
-        includingPropertiesForKeys: nil,
-        options: [.skipsHiddenFiles])
+        hash.range(of: "^[0-9a-f]+$", options: .regularExpression) != nil
       else { continue }
-
       let resolved = await resolveProjectPath(forHash: hash)
-      for file in files where file.pathExtension.lowercased() == "json" {
-        if let parsed = parser.parse(at: file, projectHash: hash, resolvedProjectPath: resolved) {
-          counts[parsed.summary.cwd, default: 0] += 1
-        }
+      let aggregated = aggregateSessions(
+        forHash: hash,
+        hashURL: hashURL,
+        resolvedProjectPath: resolved,
+        cacheResults: false)
+      for session in aggregated {
+        counts[session.summary.cwd, default: 0] += 1
       }
     }
     return counts
@@ -108,109 +115,81 @@ actor GeminiSessionProvider {
     var total = 0
     for hashURL in hashes {
       guard hashURL.hasDirectoryPath else { continue }
-      let chats = hashURL.appendingPathComponent("chats", isDirectory: true)
-      var isDir: ObjCBool = false
-      guard fileManager.fileExists(atPath: chats.path, isDirectory: &isDir), isDir.boolValue else {
-        continue
-      }
-      if let files = try? fileManager.contentsOfDirectory(
-        at: chats, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
-      {
-        total += files.filter { $0.pathExtension.lowercased() == "json" }.count
-      }
+      let hash = hashURL.lastPathComponent
+      guard hash.count == 64,
+        hash.range(of: "^[0-9a-f]+$", options: .regularExpression) != nil
+      else { continue }
+      let resolved = await resolveProjectPath(forHash: hash)
+      let aggregated = aggregateSessions(
+        forHash: hash,
+        hashURL: hashURL,
+        resolvedProjectPath: resolved,
+        cacheResults: false)
+      total += aggregated.count
     }
     return total
   }
 
   func timeline(for summary: SessionSummary) async -> [ConversationTurn]? {
-    guard let url = canonicalURL(for: summary) else { return nil }
-    guard
-      let hash = projectHash(for: url),
-      let parsed = parser.parse(
-        at: url,
-        projectHash: hash,
-        resolvedProjectPath: await resolveProjectPath(forHash: hash))
-    else { return nil }
+    guard let rows = await rowsForSession(summary: summary) else { return nil }
     let loader = SessionTimelineLoader()
-    return loader.turns(from: parsed.rows)
+    return loader.turns(from: rows)
   }
 
   func environmentContext(for summary: SessionSummary) async -> EnvironmentContextInfo? {
-    guard let url = canonicalURL(for: summary) else { return nil }
-    guard
-      let hash = projectHash(for: url),
-      let parsed = parser.parse(
-        at: url,
-        projectHash: hash,
-        resolvedProjectPath: await resolveProjectPath(forHash: hash))
-    else { return nil }
+    guard let rows = await rowsForSession(summary: summary) else { return nil }
     let loader = SessionTimelineLoader()
-    return loader.loadEnvironmentContext(from: parsed.rows)
+    return loader.loadEnvironmentContext(from: rows)
   }
 
   func enrich(summary: SessionSummary) async -> SessionSummary? {
-    guard let url = canonicalURL(for: summary) else { return summary }
-    guard
-      let hash = projectHash(for: url),
-      let parsed = parser.parse(
-        at: url,
-        projectHash: hash,
-        resolvedProjectPath: await resolveProjectPath(forHash: hash))
-    else { return summary }
+    guard let rows = await rowsForSession(summary: summary) else { return summary }
     let loader = SessionTimelineLoader()
-    let turns = loader.turns(from: parsed.rows)
+    let turns = loader.turns(from: rows)
     let activeDuration = computeActiveDuration(turns: turns)
     return SessionSummary(
-      id: parsed.summary.id,
-      fileURL: parsed.summary.fileURL,
-      fileSizeBytes: parsed.summary.fileSizeBytes,
-      startedAt: parsed.summary.startedAt,
-      endedAt: parsed.summary.endedAt,
+      id: summary.id,
+      fileURL: summary.fileURL,
+      fileSizeBytes: summary.fileSizeBytes,
+      startedAt: summary.startedAt,
+      endedAt: summary.endedAt,
       activeDuration: activeDuration,
-      cliVersion: parsed.summary.cliVersion,
-      cwd: parsed.summary.cwd,
-      originator: parsed.summary.originator,
-      instructions: parsed.summary.instructions,
-      model: parsed.summary.model,
-      approvalPolicy: parsed.summary.approvalPolicy,
-      userMessageCount: parsed.summary.userMessageCount,
-      assistantMessageCount: parsed.summary.assistantMessageCount,
-      toolInvocationCount: parsed.summary.toolInvocationCount,
-      responseCounts: parsed.summary.responseCounts,
-      turnContextCount: parsed.summary.turnContextCount,
-      eventCount: parsed.summary.eventCount,
-      lineCount: parsed.summary.lineCount,
-      lastUpdatedAt: parsed.summary.lastUpdatedAt,
+      cliVersion: summary.cliVersion,
+      cwd: summary.cwd,
+      originator: summary.originator,
+      instructions: summary.instructions,
+      model: summary.model,
+      approvalPolicy: summary.approvalPolicy,
+      userMessageCount: summary.userMessageCount,
+      assistantMessageCount: summary.assistantMessageCount,
+      toolInvocationCount: summary.toolInvocationCount,
+      responseCounts: summary.responseCounts,
+      turnContextCount: summary.turnContextCount,
+      eventCount: summary.eventCount,
+      lineCount: summary.lineCount,
+      lastUpdatedAt: summary.lastUpdatedAt,
       source: .geminiLocal,
-      remotePath: parsed.summary.remotePath,
-      userTitle: parsed.summary.userTitle,
-      userComment: parsed.summary.userComment,
-      taskId: parsed.summary.taskId
+      remotePath: summary.remotePath,
+      userTitle: summary.userTitle,
+      userComment: summary.userComment,
+      taskId: summary.taskId
     )
   }
 
   func sessions(inProjectDirectory directory: String) async -> [SessionSummary] {
     guard let hash = directoryHash(for: directory) else { return [] }
-    guard let tmpRoot = tmpRoot else { return [] }
+    guard let tmpRoot else { return [] }
     let hashURL = tmpRoot.appendingPathComponent(hash, isDirectory: true)
-    let chats = hashURL.appendingPathComponent("chats", isDirectory: true)
-    var isDir: ObjCBool = false
-    guard fileManager.fileExists(atPath: chats.path, isDirectory: &isDir), isDir.boolValue else {
-      return []
+    let aggregated = aggregateSessions(
+      forHash: hash,
+      hashURL: hashURL,
+      resolvedProjectPath: directory,
+      cacheResults: true)
+    for session in aggregated {
+      rowsCacheBySessionId[session.summary.id] = session.rows
+      canonicalURLById[session.summary.id] = session.primaryFileURL
     }
-    guard let files = try? fileManager.contentsOfDirectory(
-      at: chats,
-      includingPropertiesForKeys: [.isRegularFileKey],
-      options: [.skipsHiddenFiles])
-    else { return [] }
-    var summaries: [SessionSummary] = []
-    for file in files where file.pathExtension.lowercased() == "json" {
-      if let parsed = parser.parse(at: file, projectHash: hash, resolvedProjectPath: directory) {
-        summaries.append(parsed.summary)
-        canonicalURLById[parsed.summary.id] = file
-      }
-    }
-    return summaries
+    return aggregated.map { $0.summary }
   }
 
   // MARK: - Helpers
@@ -233,8 +212,7 @@ actor GeminiSessionProvider {
   }
 
   private func canonicalURL(for summary: SessionSummary) -> URL? {
-    if let url = canonicalURLById[summary.id] { return url }
-    return summary.fileURL
+    canonicalURLById[summary.id] ?? summary.fileURL
   }
 
   private func projectHash(for url: URL) -> String? {
@@ -288,5 +266,223 @@ actor GeminiSessionProvider {
       if delta > 0 { total += delta }
     }
     return total
+  }
+
+  private func rowsForSession(summary: SessionSummary) async -> [SessionRow]? {
+    if let rows = rowsCacheBySessionId[summary.id] { return rows }
+    guard let url = canonicalURL(for: summary),
+      let hash = projectHash(for: url),
+      let tmpRoot
+    else { return nil }
+    let hashURL = tmpRoot.appendingPathComponent(hash, isDirectory: true)
+    let resolved = await resolveProjectPath(forHash: hash)
+    let aggregated = aggregateSessions(
+      forHash: hash,
+      hashURL: hashURL,
+      resolvedProjectPath: resolved,
+      cacheResults: true)
+    for session in aggregated {
+      rowsCacheBySessionId[session.summary.id] = session.rows
+      canonicalURLById[session.summary.id] = session.primaryFileURL
+    }
+    return rowsCacheBySessionId[summary.id]
+  }
+
+  private func aggregateSessions(
+    forHash hash: String,
+    hashURL: URL,
+    resolvedProjectPath: String?,
+    cacheResults: Bool
+  ) -> [AggregatedSession] {
+    let chatsDir = hashURL.appendingPathComponent("chats", isDirectory: true)
+    var isDir: ObjCBool = false
+    guard fileManager.fileExists(atPath: chatsDir.path, isDirectory: &isDir), isDir.boolValue else {
+      return []
+    }
+    guard let files = try? fileManager.contentsOfDirectory(
+      at: chatsDir,
+      includingPropertiesForKeys: [.isRegularFileKey, .contentModificationDateKey],
+      options: [.skipsHiddenFiles])
+    else { return [] }
+
+    var segmentsBySession: [String: [GeminiParsedLog]] = [:]
+    for file in files where file.pathExtension.lowercased() == "json" {
+      guard let parsed = parser.parse(at: file, projectHash: hash, resolvedProjectPath: resolvedProjectPath)
+      else { continue }
+      segmentsBySession[parsed.summary.id, default: []].append(parsed)
+    }
+    guard !segmentsBySession.isEmpty else { return [] }
+
+    if cacheResults { logCacheByHash.removeValue(forKey: hash) }
+    let logEntries = logEntriesBySession(forHash: hash)
+    var results: [AggregatedSession] = []
+    for (sessionId, segments) in segmentsBySession {
+      guard let aggregated = aggregate(
+        segments: segments,
+        extraLogEntries: logEntries[sessionId])
+      else { continue }
+      results.append(aggregated)
+      if cacheResults {
+        rowsCacheBySessionId[aggregated.summary.id] = aggregated.rows
+        canonicalURLById[aggregated.summary.id] = aggregated.primaryFileURL
+      }
+    }
+    return results
+  }
+
+  private func aggregate(
+    segments: [GeminiParsedLog],
+    extraLogEntries: [GeminiLogEntry]?
+  ) -> AggregatedSession? {
+    guard !segments.isEmpty else { return nil }
+    var rows: [SessionRow] = []
+    let orderedSegments = segments.sorted { lhs, rhs in
+      lhs.summary.startedAt < rhs.summary.startedAt
+    }
+    for segment in orderedSegments { rows.append(contentsOf: segment.rows) }
+    if let extras = extraLogEntries {
+      rows.append(contentsOf: rowsFromLogs(extras))
+    }
+    let normalized = normalize(rows: rows)
+    guard !normalized.isEmpty else { return nil }
+    let timelineLoader = SessionTimelineLoader()
+    let turns = timelineLoader.turns(from: normalized)
+    let conversationCount = turns.count
+    let assistantMessages = turns.reduce(into: 0) { partialResult, turn in
+      partialResult += turn.outputs.filter { $0.actor == .assistant }.count
+    }
+
+    var builder = SessionSummaryBuilder()
+    builder.setSource(.geminiLocal)
+    let totalSize = segments.compactMap { $0.summary.fileSizeBytes }.reduce(0, +)
+    if totalSize > 0 { builder.setFileSize(totalSize) }
+    for row in normalized { builder.observe(row) }
+    if let lastTimestamp = normalized.last?.timestamp {
+      builder.seedLastUpdated(lastTimestamp)
+    }
+    guard let representative = segments.max(by: { ($0.summary.lastUpdatedAt ?? $0.summary.startedAt) < ($1.summary.lastUpdatedAt ?? $1.summary.startedAt) })
+    else { return nil }
+    guard var summary = builder.build(for: representative.summary.fileURL) else { return nil }
+    summary = summary
+      .overridingSource(.geminiLocal)
+      .overridingCounts(userMessages: conversationCount, assistantMessages: assistantMessages)
+    return AggregatedSession(summary: summary, rows: normalized, primaryFileURL: representative.summary.fileURL)
+  }
+
+  private func rowsFromLogs(_ logEntries: [GeminiLogEntry]) -> [SessionRow] {
+    logEntries.compactMap { entry in
+      guard entry.type.lowercased() == "user" else { return nil }
+      guard let timestamp = parseLogDate(entry.timestamp) else { return nil }
+      let text = entry.message.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !text.isEmpty, !GeminiSessionParser.isControlCommand(text) else { return nil }
+      let payload = EventMessagePayload(
+        type: "user_message",
+        message: text,
+        kind: nil,
+        text: text,
+        info: nil,
+        rateLimits: nil
+      )
+      return SessionRow(timestamp: timestamp, kind: .eventMessage(payload))
+    }
+  }
+
+  private func normalize(rows: [SessionRow]) -> [SessionRow] {
+    guard !rows.isEmpty else { return [] }
+    let ordered = rows.enumerated().sorted { lhs, rhs in
+      if lhs.element.timestamp == rhs.element.timestamp { return lhs.offset < rhs.offset }
+      return lhs.element.timestamp < rhs.element.timestamp
+    }
+
+    var deduped: [SessionRow] = []
+    var repeatCountByIndex: [Int: Int] = [:]
+    var userEntryByText: [String: (index: Int, timestamp: Date)] = [:]
+    let duplicateWindow: TimeInterval = 5.0
+
+    for (_, row) in ordered {
+      var shouldAppend = true
+      if case let .eventMessage(payload) = row.kind,
+        payload.type.lowercased() == "user_message"
+      {
+        let normalizedText = (payload.message ?? payload.text ?? "")
+          .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let existing = userEntryByText[normalizedText],
+          abs(row.timestamp.timeIntervalSince(existing.timestamp)) < duplicateWindow
+        {
+          repeatCountByIndex[existing.index, default: 1] += 1
+          userEntryByText[normalizedText] = (existing.index, row.timestamp)
+          shouldAppend = false
+        } else {
+          let index = deduped.count
+          userEntryByText[normalizedText] = (index, row.timestamp)
+          repeatCountByIndex[index] = 1
+        }
+      }
+
+      if shouldAppend {
+        deduped.append(row)
+      }
+    }
+
+    if !repeatCountByIndex.isEmpty {
+      for (index, count) in repeatCountByIndex where count > 1 {
+        guard index < deduped.count else { continue }
+        deduped[index] = injectRepeatCount(into: deduped[index], count: count)
+      }
+    }
+
+    return deduped
+  }
+
+  private func injectRepeatCount(into row: SessionRow, count: Int) -> SessionRow {
+    guard count > 1 else { return row }
+    guard case let .eventMessage(payload) = row.kind else { return row }
+    var metadata: [String: JSONValue] = [:]
+    if case let .object(existing) = payload.info {
+      metadata = existing
+    }
+    metadata["repeat_count"] = .number(Double(count))
+    let updatedPayload = EventMessagePayload(
+      type: payload.type,
+      message: payload.message,
+      kind: payload.kind,
+      text: payload.text,
+      info: metadata.isEmpty ? nil : .object(metadata),
+      rateLimits: payload.rateLimits
+    )
+    return SessionRow(timestamp: row.timestamp, kind: .eventMessage(updatedPayload))
+  }
+
+  private func logEntriesBySession(forHash hash: String) -> [String: [GeminiLogEntry]] {
+    if let cached = logCacheByHash[hash] { return cached }
+    guard let tmpRoot else {
+      logCacheByHash[hash] = [:]
+      return [:]
+    }
+    let logURL = tmpRoot
+      .appendingPathComponent(hash, isDirectory: true)
+      .appendingPathComponent("logs.json", isDirectory: false)
+    guard let data = try? Data(contentsOf: logURL) else {
+      logCacheByHash[hash] = [:]
+      return [:]
+    }
+    guard let entries = try? JSONDecoder().decode([GeminiLogEntry].self, from: data) else {
+      logCacheByHash[hash] = [:]
+      return [:]
+    }
+    var grouped: [String: [GeminiLogEntry]] = [:]
+    for entry in entries {
+      grouped[entry.sessionId, default: []].append(entry)
+    }
+    for key in grouped.keys {
+      grouped[key]?.sort(by: { $0.messageId < $1.messageId })
+    }
+    logCacheByHash[hash] = grouped
+    return grouped
+  }
+
+  private func parseLogDate(_ value: String) -> Date? {
+    if let date = logDateFormatter.date(from: value) { return date }
+    return fallbackLogFormatter.date(from: value)
   }
 }

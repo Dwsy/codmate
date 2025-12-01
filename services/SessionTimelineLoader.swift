@@ -6,6 +6,7 @@ struct SessionTimelineLoader {
         "reasoning",
         "reasoning_output"
     ]
+    private let turnBoundaryMetadataKey = "turn_boundary"
 
     init() {
         decoder = FlexibleDecoders.iso8601Flexible()
@@ -60,6 +61,23 @@ struct SessionTimelineLoader {
             )
         case let .eventMessage(payload):
             let type = payload.type.lowercased()
+            if type == "turn_boundary" {
+                var metadata: [String: String] = [turnBoundaryMetadataKey: "1"]
+                if let kind = payload.kind, !kind.isEmpty {
+                    metadata["boundary_kind"] = kind
+                }
+                if let identifier = payload.message, !identifier.isEmpty {
+                    metadata["boundary_message_id"] = identifier
+                }
+                return TimelineEvent(
+                    id: UUID().uuidString,
+                    timestamp: row.timestamp,
+                    actor: .info,
+                    title: nil,
+                    text: nil,
+                    metadata: metadata
+                )
+            }
             if skippedEventTypes.contains(type) { return nil }
             if type == "token_count" {
                 return makeTokenCountEvent(timestamp: row.timestamp, payload: payload)
@@ -93,7 +111,8 @@ struct SessionTimelineLoader {
                     actor: .user,
                     title: nil,
                     text: message,
-                    metadata: nil
+                    metadata: nil,
+                    repeatCount: repeatCountHint(from: payload.info)
                 )
             case "agent_message":
                 return TimelineEvent(
@@ -102,7 +121,8 @@ struct SessionTimelineLoader {
                     actor: .assistant,
                     title: nil,
                     text: message,
-                    metadata: nil
+                    metadata: nil,
+                    repeatCount: repeatCountHint(from: payload.info)
                 )
             default:
                 return TimelineEvent(
@@ -193,6 +213,12 @@ struct SessionTimelineLoader {
         let deduped = collapseDuplicates(ordered)
 
         for event in deduped {
+            if event.metadata?[turnBoundaryMetadataKey] == "1" {
+                if currentUser == nil {
+                    flushTurn()
+                }
+                continue
+            }
             if event.actor == .user {
                 flushTurn()
                 currentUser = event
@@ -240,6 +266,25 @@ struct SessionTimelineLoader {
 
     private func normalize(metadata: [String: String]?) -> [String: String] {
         metadata?.filter { !$0.value.isEmpty } ?? [:]
+    }
+
+    private func repeatCountHint(from info: JSONValue?) -> Int {
+        guard let info else { return 1 }
+        if case let .object(dict) = info, let value = dict["repeat_count"] {
+            switch value {
+            case .number(let number):
+                return max(1, Int(number.rounded()))
+            case .string(let string):
+                if let parsed = Double(string) {
+                    return max(1, Int(parsed.rounded()))
+                }
+            case .bool(let flag):
+                return flag ? 1 : 1
+            default:
+                break
+            }
+        }
+        return 1
     }
 
     private func makeEnvironmentContextEvent(text: String, timestamp: Date) -> TimelineEvent? {

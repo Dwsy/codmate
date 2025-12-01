@@ -115,6 +115,11 @@ struct GeminiSessionParser {
     for message in record.messages {
       let messageRows = self.rows(from: message)
       rows.append(contentsOf: messageRows)
+      if shouldInsertTurnBoundary(after: message, rows: messageRows),
+        let markerTimestamp = messageRows.last?.timestamp ?? parseDate(message.timestamp)
+      {
+        rows.append(makeTurnBoundaryRow(for: message, timestamp: markerTimestamp))
+      }
       if let last = messageRows.last?.timestamp, last > lastTimestamp {
         lastTimestamp = last
       }
@@ -171,6 +176,9 @@ struct GeminiSessionParser {
     switch loweredType {
     case "user":
       if !text.isEmpty {
+        if Self.isControlCommand(text) {
+          return results
+        }
         results.append(
           SessionRow(
             timestamp: timestamp,
@@ -270,6 +278,29 @@ struct GeminiSessionParser {
       }
     }
     return results
+  }
+
+  private func shouldInsertTurnBoundary(
+    after message: ConversationRecord.Message,
+    rows: [SessionRow]
+  ) -> Bool {
+    guard !rows.isEmpty else { return false }
+    return message.type.lowercased() == "gemini"
+  }
+
+  private func makeTurnBoundaryRow(
+    for message: ConversationRecord.Message,
+    timestamp: Date
+  ) -> SessionRow {
+    let payload = EventMessagePayload(
+      type: "turn_boundary",
+      message: message.id,
+      kind: message.type.lowercased(),
+      text: nil,
+      info: nil,
+      rateLimits: nil
+    )
+    return SessionRow(timestamp: timestamp, kind: .eventMessage(payload))
   }
 
   private func toolCallRow(
@@ -498,6 +529,16 @@ struct GeminiSessionParser {
       return "/" + dropped.joined(separator: "/")
     }
     return "/" + components.joined(separator: "/")
+  }
+
+  static func isControlCommand(_ rawText: String) -> Bool {
+    let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard trimmed.hasPrefix("/"), trimmed.count > 1 else { return false }
+    if trimmed.dropFirst().contains("/") { return false }
+    if trimmed.contains("\n") || trimmed.contains("\r") { return false }
+    let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_- ")
+    let scalars = trimmed.unicodeScalars.dropFirst()
+    return scalars.allSatisfy { allowed.contains($0) }
   }
 }
 

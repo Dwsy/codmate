@@ -196,6 +196,40 @@ extension SessionSummary {
     func withRemoteMetadata(source: SessionSource, remotePath: String) -> SessionSummary {
         return overridingSource(source, remotePath: remotePath)
     }
+
+    func overridingCounts(
+        userMessages: Int? = nil,
+        assistantMessages: Int? = nil,
+        toolInvocations: Int? = nil
+    ) -> SessionSummary {
+        SessionSummary(
+            id: id,
+            fileURL: fileURL,
+            fileSizeBytes: fileSizeBytes,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            activeDuration: activeDuration,
+            cliVersion: cliVersion,
+            cwd: cwd,
+            originator: originator,
+            instructions: instructions,
+            model: model,
+            approvalPolicy: approvalPolicy,
+            userMessageCount: userMessages ?? userMessageCount,
+            assistantMessageCount: assistantMessages ?? assistantMessageCount,
+            toolInvocationCount: toolInvocations ?? toolInvocationCount,
+            responseCounts: responseCounts,
+            turnContextCount: turnContextCount,
+            eventCount: eventCount,
+            lineCount: lineCount,
+            lastUpdatedAt: lastUpdatedAt,
+            source: source,
+            remotePath: remotePath,
+            userTitle: userTitle,
+            userComment: userComment,
+            taskId: taskId
+        )
+    }
 }
 
 enum SessionSortOrder: String, CaseIterable, Identifiable, Sendable {
