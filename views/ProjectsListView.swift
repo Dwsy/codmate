@@ -468,7 +468,6 @@ struct ProjectEditorSheet: View {
     var directory: String?
     var trustLevel: String?
     var overview: String?
-    var instructions: String?
     var profileId: String?
     var parentId: String?
   }
@@ -481,9 +480,7 @@ struct ProjectEditorSheet: View {
   @State private var directory: String = ""
   @State private var trustLevel: String = ""
   @State private var overview: String = ""
-  @State private var instructions: String = ""
   @State private var profileId: String = ""
-  @State private var profileModel: String? = nil
   @State private var profileSandbox: SandboxMode? = nil
   @State private var profileApproval: ApprovalPolicy? = nil
   @State private var profileFullAuto: Bool? = nil
@@ -498,8 +495,6 @@ struct ProjectEditorSheet: View {
     var directory: String
     var trustLevel: String
     var overview: String
-    var instructions: String
-    var profileModel: String?
     var profileSandbox: SandboxMode?
     var profileApproval: ApprovalPolicy?
     var profileFullAuto: Bool?
@@ -736,12 +731,10 @@ struct ProjectEditorSheet: View {
       trustLevel = p.trustLevel ?? "trusted"
       parentProjectId = p.parentId
       overview = p.overview ?? ""
-      instructions = p.instructions ?? ""
       profileId = p.profileId ?? ""
       let initialSources = p.sources.isEmpty ? ProjectSessionSource.allSet : p.sources
       sources = initialSources
       if let pr = p.profile {
-        profileModel = pr.model
         profileSandbox = pr.sandbox
         profileApproval = pr.approval
         profileFullAuto = pr.fullAuto
@@ -762,7 +755,6 @@ struct ProjectEditorSheet: View {
         if let v = pf.directory { directory = v }
         if let v = pf.trustLevel { trustLevel = v } else { trustLevel = "trusted" }
         if let v = pf.overview { overview = v }
-        if let v = pf.instructions { instructions = v }
         if let v = pf.profileId { profileId = v }
         if let v = pf.parentId { parentProjectId = v }
       }
@@ -804,7 +796,6 @@ struct ProjectEditorSheet: View {
   private func save() {
     let trust = trustLevel.trimmingCharacters(in: .whitespaces).isEmpty ? nil : trustLevel
     let ov = overview.trimmingCharacters(in: .whitespaces).isEmpty ? nil : overview
-    let instr = instructions.trimmingCharacters(in: .whitespaces).isEmpty ? nil : instructions
     // Profile ID: auto map to project ID by default
     let cleanedProfileId = profileId.trimmingCharacters(in: .whitespaces)
     let profile: String? = cleanedProfileId.isEmpty ? nil : cleanedProfileId
@@ -817,7 +808,7 @@ struct ProjectEditorSheet: View {
     switch mode {
     case .new:
       let id = generateId()
-      let projProfile = buildProjectProfile()
+      let projProfile = buildProjectProfile(originalModel: nil)
       let finalProfileId = profile ?? id
       let p = Project(
         id: id,
@@ -825,7 +816,7 @@ struct ProjectEditorSheet: View {
         directory: dirOpt,
         trustLevel: trust,
         overview: ov,
-        instructions: instr,
+        instructions: nil,
         profileId: finalProfileId,
         profile: projProfile,
         parentId: parentProjectId,
@@ -839,7 +830,7 @@ struct ProjectEditorSheet: View {
         isPresented = false
       }
     case .edit(let old):
-      let projProfile = buildProjectProfile()
+      let projProfile = buildProjectProfile(originalModel: old.profile?.model)
       let finalProfileId = profile ?? old.id
       let p = Project(
         id: old.id,
@@ -847,7 +838,7 @@ struct ProjectEditorSheet: View {
         directory: dirOpt,
         trustLevel: trust,
         overview: ov,
-        instructions: instr,
+        instructions: old.instructions, // Preserve existing instructions
         profileId: finalProfileId,
         profile: projProfile,
         parentId: parentProjectId,
@@ -887,9 +878,9 @@ struct ProjectEditorSheet: View {
     return nil
   }
 
-  private func buildProjectProfile() -> ProjectProfile? {
+  private func buildProjectProfile(originalModel: String?) -> ProjectProfile? {
     if (profileId.trimmingCharacters(in: .whitespaces).isEmpty)
-      && (profileModel?.isEmpty ?? true)
+      && (originalModel?.isEmpty ?? true)
       && profileSandbox == nil
       && profileApproval == nil
       && profileFullAuto == nil
@@ -898,8 +889,7 @@ struct ProjectEditorSheet: View {
       return nil
     }
     return ProjectProfile(
-      model: profileModel?.trimmingCharacters(in: .whitespaces).isEmpty == true
-        ? nil : profileModel,
+      model: originalModel,
       sandbox: profileSandbox,
       approval: profileApproval,
       fullAuto: profileFullAuto,
@@ -936,8 +926,6 @@ struct ProjectEditorSheet: View {
       directory: directory,
       trustLevel: trustLevel,
       overview: overview,
-      instructions: instructions,
-      profileModel: profileModel,
       profileSandbox: profileSandbox,
       profileApproval: profileApproval,
       profileFullAuto: profileFullAuto,
