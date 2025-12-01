@@ -2,9 +2,11 @@ import SwiftUI
 
 struct ProjectOverviewView: View {
   @ObservedObject var viewModel: ProjectOverviewViewModel
+  var project: Project
   var onSelectSession: (SessionSummary) -> Void
   var onResumeSession: (SessionSummary) -> Void // Keeping this for consistency, though not used in ProjectOverviewViewModel directly
   var onFocusToday: () -> Void // Keeping this for consistency, though not used in ProjectOverviewViewModel directly
+  var onEditProject: (Project) -> Void
 
   private func columns(for width: CGFloat) -> [GridItem] {
     let minWidth: CGFloat = 220
@@ -44,11 +46,34 @@ struct ProjectOverviewView: View {
 
   private var headerSection: some View {
     VStack(alignment: .leading, spacing: 6) {
-      Text("Project Overview") // Changed from Workspace Overview
-        .font(.largeTitle.weight(.semibold))
+      HStack(alignment: .center, spacing: 8) {
+        Text(projectDisplayName)
+          .font(.largeTitle.weight(.semibold))
+          .lineLimit(1)
+          .truncationMode(.tail)
+        Spacer()
+        if canEditProject {
+          Button {
+            onEditProject(project)
+          } label: {
+            Image(systemName: "gearshape")
+              .imageScale(.medium)
+          }
+          .buttonStyle(.plain)
+          .accessibilityLabel("Edit Project")
+          .help("Edit Project")
+        }
+      }
+
       Text("Updated \(snapshot.lastUpdated.formatted(date: .abbreviated, time: .shortened))")
         .font(.caption)
         .foregroundStyle(.secondary)
+
+      Text(projectOverviewLine)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .truncationMode(.tail)
     }
   }
 
@@ -78,6 +103,22 @@ struct ProjectOverviewView: View {
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
+  }
+
+  private var projectDisplayName: String {
+    let trimmed = project.name.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? "Untitled Project" : trimmed
+  }
+
+  private var projectOverviewLine: String {
+    if let overview = project.overview?.trimmingCharacters(in: .whitespacesAndNewlines), !overview.isEmpty {
+      return overview
+    }
+    return "Project Overview"
+  }
+
+  private var canEditProject: Bool {
+    project.id != SessionListViewModel.otherProjectId
   }
 
   private func heroMetric(title: String, value: String, detail: String) -> some View {

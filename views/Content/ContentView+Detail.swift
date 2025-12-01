@@ -136,7 +136,8 @@ extension ContentView {
           project: project,
           onSelectSession: { focusSessionFromOverview($0) },
           onResumeSession: { resumeFromList($0) },
-          onFocusToday: { focusTodayFromOverview() }
+          onFocusToday: { focusTodayFromOverview() },
+          onEditProject: { presentProjectEditor(for: $0) }
       )
       .id(project.id)
     } else {
@@ -188,8 +189,15 @@ extension ContentView {
     isListHidden = false
     if id == SessionListViewModel.otherProjectId {
       viewModel.projectWorkspaceMode = .sessions
-    } else if viewModel.projectWorkspaceMode == .overview {
+    } else if viewModel.projectWorkspaceMode == .overview
+                || viewModel.projectWorkspaceMode == .settings {
       viewModel.projectWorkspaceMode = .tasks
     }
+  }
+
+  func presentProjectEditor(for project: Project) {
+    guard project.id != SessionListViewModel.otherProjectId else { return }
+    projectEditorTarget = project
+    showProjectEditorSheet = true
   }
 }

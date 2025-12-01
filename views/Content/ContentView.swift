@@ -32,6 +32,8 @@ struct ContentView: View {
   // Persist content column (sessions list / review left pane) preferred width
   @State var contentColumnIdealWidth: CGFloat = 420
   @State var showSidebarNewProjectSheet = false
+  @State var showProjectEditorSheet = false
+  @State var projectEditorTarget: Project? = nil
   // When starting embedded sessions, record the initial command lines per-session
   @State var embeddedInitialCommands: [SessionSummary.ID: String] = [:]
   // Soft-return flag: when true, stopping embedded terminal should not change
@@ -179,6 +181,14 @@ struct ContentView: View {
     GeometryReader { geometry in
       navigationSplitView(geometry: geometry)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .sheet(isPresented: $showProjectEditorSheet, onDismiss: { projectEditorTarget = nil }) {
+          if let target = projectEditorTarget {
+            ProjectEditorSheet(isPresented: $showProjectEditorSheet, mode: .edit(existing: target))
+              .environmentObject(viewModel)
+          } else {
+            EmptyView()
+          }
+        }
     }
   }
 

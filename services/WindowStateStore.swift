@@ -125,7 +125,7 @@ final class WindowStateStore: ObservableObject {
     guard let rawValue = defaults.string(forKey: Keys.projectWorkspaceMode),
       let mode = ProjectWorkspaceMode(rawValue: rawValue)
     else {
-      return .tasks  // default
+      return .overview  // default to the Overview surface
     }
     return mode
   }

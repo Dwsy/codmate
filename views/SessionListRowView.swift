@@ -199,15 +199,22 @@ struct SessionListRowView: View {
                 reduceMotion ? 1.0 : (awaitingFollowup ? (breathing ? 1.0 : 0.55) : 1.0)
               )
           } else if let asset = branding.badgeAssetName {
-            Image(asset)
-              .resizable()
-              .renderingMode(.original)
-              .aspectRatio(contentMode: .fit)
-              .frame(width: 18, height: 18)
-              .modifier(
-                DarkModeInvertModifier(active: isSelected && !summary.source.isGemini)
-              )
-              .help(branding.displayName)
+            if isSelected && !summary.source.isGemini {
+              Image(asset)
+                .resizable()
+                .renderingMode(.template)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 18, height: 18)
+                .foregroundStyle(Color.white)
+                .help(branding.displayName)
+            } else {
+              Image(asset)
+                .resizable()
+                .renderingMode(.original)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 18, height: 18)
+                .help(branding.displayName)
+            }
           } else {
             Image(systemName: branding.symbolName)
               .foregroundStyle(isSelected ? Color.white : branding.iconColor)

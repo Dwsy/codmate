@@ -123,6 +123,13 @@ extension ContentView {
     if let pid = projectToApply {
       viewModel.setSelectedProject(pid)
       viewModel.requestProjectExpansion(for: pid)
+      if pid == SessionListViewModel.otherProjectId {
+        if viewModel.projectWorkspaceMode != .sessions {
+          viewModel.projectWorkspaceMode = .sessions
+        }
+      } else if viewModel.projectWorkspaceMode != .tasks {
+        viewModel.projectWorkspaceMode = .tasks
+      }
     }
     let referenceDate = summary.lastUpdatedAt ?? summary.startedAt
     let day = Calendar.current.startOfDay(for: referenceDate)

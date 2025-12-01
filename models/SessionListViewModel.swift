@@ -250,8 +250,8 @@ final class SessionListViewModel: ObservableObject {
   // Project-level Git Review panel state per project id
   @Published var projectReviewPanelStates: [String: ReviewPanelState] = [:]
 
-  // Project workspace mode (toolbar segmented): Tasks | Review
-  @Published var projectWorkspaceMode: ProjectWorkspaceMode = .tasks {
+  // Project workspace mode (toolbar segmented)
+  @Published var projectWorkspaceMode: ProjectWorkspaceMode = .overview {
     didSet {
       guard oldValue != projectWorkspaceMode else { return }
       windowStateStore.saveWorkspaceMode(projectWorkspaceMode)

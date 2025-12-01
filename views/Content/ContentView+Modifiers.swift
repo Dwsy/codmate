@@ -53,14 +53,16 @@ extension ContentView {
       }
       return
     }
-    // Single real project: restore its last workspace mode, default to Tasks; sanitize hidden modes
+    // Single real project: restore its last workspace mode, default to the Overview surface; sanitize hidden modes
     if viewModel.selectedProjectIDs.count == 1,
        let pid = viewModel.selectedProjectIDs.first,
        let project = viewModel.projects.first(where: { $0.id == pid }),
        let dir = project.directory, !dir.isEmpty {
-      var restored = viewModel.windowStateStore.restoreWorkspaceMode(for: pid) ?? .tasks
-      // Hide Overview/Memory for real projects: coerce to Tasks if persisted as hidden
-      if restored == .overview || restored == .memory { restored = .tasks }
+      var restored = viewModel.windowStateStore.restoreWorkspaceMode(for: pid) ?? .settings
+      // Legacy Overview/Memory/Sessions modes map back to the project Overview surface
+      if restored == .overview || restored == .memory || restored == .sessions {
+        restored = .settings
+      }
       if viewModel.projectWorkspaceMode != restored { viewModel.projectWorkspaceMode = restored }
     }
   }
@@ -203,10 +205,10 @@ extension ContentView {
         // Only show segmented control for specific projects (not All/Other)
         if viewModel.selectedProjectIDs.count == 1 && !isAllSelection() && !isOtherSelection() {
           let items: [SegmentedIconPicker<ProjectWorkspaceMode>.Item] = [
+            .init(title: "Overview", systemImage: "chart.bar", tag: .settings),
             .init(title: "Tasks", systemImage: "checklist", tag: .tasks),
             .init(title: "Review", systemImage: "doc.text.magnifyingglass", tag: .review),
-            .init(title: "Agents", systemImage: "book.pages", tag: .agents),
-            .init(title: "Overview", systemImage: "chart.bar", tag: .settings)
+            .init(title: "Agents", systemImage: "book.pages", tag: .agents)
           ]
           SegmentedIconPicker(items: items, selection: $viewModel.projectWorkspaceMode)
             .help("Project workspace mode")
