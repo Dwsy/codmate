@@ -11,6 +11,7 @@ struct TreeshakeOptions: Sendable, Equatable {
 
 actor ContextTreeshaker {
     private let loader = SessionTimelineLoader()
+    private let geminiParser = GeminiSessionParser()
     // Simple LRU cache for per-session slim markdown
     private struct Entry { let version: Date?; let optSig: String; let text: String }
     private var cache: [String: Entry] = [:]  // session.id -> entry
@@ -46,7 +47,7 @@ actor ContextTreeshaker {
 
         // Build slim markdown for a single session (no header)
         let turns: [ConversationTurn]
-        if let loaded = try? loader.load(url: s.fileURL) {
+        if let loaded = loadTurns(for: s) {
             if let kinds = options.visibleKinds { turns = loaded.filtering(visibleKinds: kinds) } else { turns = loaded }
         } else { turns = [] }
 
@@ -100,6 +101,47 @@ actor ContextTreeshaker {
         cache[s.id] = Entry(version: ver, optSig: sig, text: text)
         lruTouch(s.id)
         return text
+    }
+
+    private func loadTurns(for summary: SessionSummary) -> [ConversationTurn]? {
+        if summary.source.baseKind == .gemini {
+            return loadGeminiTurns(for: summary)
+        }
+        return try? loader.load(url: summary.fileURL)
+    }
+
+    private func loadGeminiTurns(for summary: SessionSummary) -> [ConversationTurn]? {
+        guard !summary.isRemote else { return nil }
+        let url = summary.fileURL
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        guard let hash = geminiProjectHash(from: url) else { return nil }
+        let resolvedPath: String? = {
+            let trimmed = summary.cwd.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }()
+        guard let parsed = geminiParser.parse(
+            at: url,
+            projectHash: hash,
+            resolvedProjectPath: resolvedPath
+        ) else { return nil }
+        return loader.turns(from: parsed.rows)
+    }
+
+    private func geminiProjectHash(from url: URL) -> String? {
+        let components = url.standardizedFileURL.pathComponents
+        for (index, component) in components.enumerated() where component == "tmp" {
+            let candidateIndex = index + 1
+            guard candidateIndex < components.count else { continue }
+            let candidate = components[candidateIndex]
+            if isValidGeminiHash(candidate) { return candidate }
+        }
+        return nil
+    }
+
+    private func isValidGeminiHash(_ value: String) -> Bool {
+        guard value.count == 64 else { return false }
+        let pattern = "^[0-9a-f]{64}$"
+        return value.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     func generateMarkdown(for sessions: [SessionSummary], options: TreeshakeOptions = TreeshakeOptions()) -> String {
