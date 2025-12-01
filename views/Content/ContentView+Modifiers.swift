@@ -64,6 +64,60 @@ extension ContentView {
       }
     }
   }
+
+  fileprivate func applyCalendarDefaults(
+    previousMode: ProjectWorkspaceMode?,
+    newMode: ProjectWorkspaceMode,
+    force: Bool = false
+  ) {
+    switch newMode {
+    case .overview:
+      if force || previousMode != .overview {
+        clearCalendarSelection()
+      }
+    case .settings:
+      if viewModel.selectedProjectIDs.count == 1,
+         (force || previousMode != .settings) {
+        clearCalendarSelection()
+      }
+    case .tasks:
+      guard pendingSelectionID == nil else { return }
+      if force || previousMode != .tasks {
+        ensureCalendarShowsToday()
+      }
+    default:
+      break
+    }
+  }
+
+  private func clearCalendarSelection() {
+    if viewModel.selectedDay != nil || !viewModel.selectedDays.isEmpty {
+      viewModel.setSelectedDay(nil)
+    }
+  }
+
+  private func ensureCalendarShowsToday() {
+    let cal = Calendar.current
+    let today = cal.startOfDay(for: Date())
+    var needsUpdate = false
+    if let current = viewModel.selectedDay {
+      if !cal.isDate(current, inSameDayAs: today) {
+        needsUpdate = true
+      }
+    } else {
+      needsUpdate = true
+    }
+    if viewModel.selectedDays.count != 1 || !viewModel.selectedDays.contains(today) {
+      needsUpdate = true
+    }
+    if needsUpdate {
+      viewModel.setSelectedDay(today)
+    }
+    let normalizedMonth = SessionListViewModel.normalizeMonthStart(today)
+    if normalizedMonth != viewModel.sidebarMonthStart {
+      viewModel.setSidebarMonthStart(today)
+    }
+  }
   func navigationSplitView(geometry: GeometryProxy) -> some View {
     let sidebarMaxWidth = geometry.size.width * 0.25
     _ = storeSidebarHidden
@@ -125,6 +179,12 @@ extension ContentView {
         DispatchQueue.main.async {
           enforceWorkspaceModeForSelection()
           syncListHiddenForWorkspaceMode()
+          applyCalendarDefaults(
+            previousMode: lastWorkspaceMode,
+            newMode: viewModel.projectWorkspaceMode,
+            force: true
+          )
+          lastWorkspaceMode = viewModel.projectWorkspaceMode
         }
       }
       .onChange(of: selection) { _, newSelection in
@@ -147,7 +207,9 @@ extension ContentView {
       .onChange(of: preferences.searchPanelStyle) { _, newStyle in
         handleSearchPanelStyleChange(newStyle)
       }
-      .onChange(of: viewModel.projectWorkspaceMode) { _, _ in
+      .onChange(of: viewModel.projectWorkspaceMode) { _, newMode in
+        applyCalendarDefaults(previousMode: lastWorkspaceMode, newMode: newMode)
+        lastWorkspaceMode = newMode
         syncListHiddenForWorkspaceMode()
       }
       .onChange(of: viewModel.selectedProjectIDs) { _, _ in

@@ -51,12 +51,12 @@ struct SessionNavigationView<ProjectsContent: View>: View {
     // Show calendar only for Overview, Tasks, or Sessions (Others)
     private var shouldShowCalendar: Bool {
         switch projectWorkspaceMode {
-        case .overview, .tasks:
+        case .overview, .tasks, .settings:
             return true
         case .sessions:
             // Sessions mode is only used for "Others" project
             return isAllOrOtherSelected
-        case .review, .agents, .memory, .settings:
+        case .review, .agents, .memory:
             return false
         }
     }

@@ -64,6 +64,7 @@ struct ContentView: View {
   @State var searchPopoverSize: CGSize = ContentView.defaultSearchPopoverSize
   @State var shouldBlockAutoSelection = false
   @State var popoverDismissDisabled = false
+  @State var lastWorkspaceMode: ProjectWorkspaceMode? = nil
   @StateObject var overviewViewModel: AllOverviewViewModel
   static let defaultSearchPopoverSize = CGSize(width: 440, height: 320)
   static let searchPopoverMinSize = CGSize(width: 380, height: 220)

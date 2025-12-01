@@ -62,9 +62,11 @@ final class ProjectOverviewViewModel: ObservableObject {
   }
 
   private func recomputeSnapshot() {
-    // Filter sessions to only include those belonging to this project from all sessions
-    let projectSessions: [SessionSummary] = sessionListViewModel.allSessions
-        .filter { sessionListViewModel.projectId(for: $0) == project.id }
+    // Use the currently filtered sections so calendar/date/search selections
+    // affect the statistics just like the middle session list.
+    let filteredSessions = sessionListViewModel.sections.flatMap { $0.sessions }
+    let projectSessions: [SessionSummary] = filteredSessions
+      .filter { sessionListViewModel.projectId(for: $0) == project.id }
 
     let now = Date()
     
