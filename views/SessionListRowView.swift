@@ -199,10 +199,7 @@ struct SessionListRowView: View {
               .aspectRatio(contentMode: .fit)
               .frame(width: 18, height: 18)
               .modifier(
-                DarkModeInvertModifier(
-                  active: summary.source.baseKind == .codex || summary.source.baseKind == .gemini
-                    && (colorScheme == .dark || isSelected)
-                )
+                DarkModeInvertModifier(active: isSelected)
               )
               .help(branding.displayName)
           } else {
