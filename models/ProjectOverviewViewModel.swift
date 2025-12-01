@@ -83,10 +83,11 @@ final class ProjectOverviewViewModel: ObservableObject {
     let recentTop = Array(
       projectSessions
         .sorted { anchorDate(for: $0) > anchorDate(for: $1) }
-        .prefix(6)
+        .prefix(5)
     )
 
     let sourceStats = buildSourceStats(from: projectSessions)
+    let activityData = projectSessions.generateChartData()
 
     snapshot = ProjectOverviewSnapshot(
       totalSessions: projectSessions.count,
@@ -97,6 +98,7 @@ final class ProjectOverviewViewModel: ObservableObject {
       totalToolInvocations: totalToolInvocations, // New field
       recentSessions: recentTop,
       sourceStats: sourceStats,
+      activityChartData: activityData,
       usageSnapshots: sessionListViewModel.usageSnapshots,
       lastUpdated: now
     )
@@ -184,6 +186,7 @@ struct ProjectOverviewSnapshot: Equatable {
   var totalToolInvocations: Int // New field
   var recentSessions: [SessionSummary]
   var sourceStats: [SourceStat]
+  var activityChartData: ActivityChartData
   var usageSnapshots: [UsageProviderKind: UsageProviderSnapshot]
   var lastUpdated: Date
 
@@ -196,6 +199,7 @@ struct ProjectOverviewSnapshot: Equatable {
     totalToolInvocations: 0,
     recentSessions: [],
     sourceStats: [],
+    activityChartData: .empty,
     usageSnapshots: [:],
     lastUpdated: .distantPast
   )

@@ -31,6 +31,11 @@ struct ProjectOverviewView: View {
       ScrollView {
         VStack(alignment: .leading, spacing: 20) {
           headerSection
+          
+          if !snapshot.activityChartData.points.isEmpty {
+             OverviewActivityChart(data: snapshot.activityChartData)
+          }
+
           heroSection(columns: cols)
           efficiencySection(columns: cols)
           recentSection
@@ -69,11 +74,7 @@ struct ProjectOverviewView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
 
-      Text(projectOverviewLine)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .truncationMode(.tail)
+
     }
   }
 
@@ -137,8 +138,6 @@ struct ProjectOverviewView: View {
   private func efficiencySection(columns: [GridItem]) -> some View {
     if !snapshot.sourceStats.isEmpty {
       VStack(alignment: .leading, spacing: 10) {
-        Text("Efficiency & Cost")
-          .font(.headline)
         LazyVGrid(columns: columns, spacing: 16) {
           ForEach(snapshot.sourceStats) { stat in
             OverviewCard {
