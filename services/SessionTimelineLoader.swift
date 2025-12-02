@@ -43,6 +43,9 @@ struct SessionTimelineLoader {
         switch row.kind {
         case .sessionMeta:
             return nil
+        case .assistantMessage:
+            // Assistant messages are handled by response_item events; skip here to avoid duplicates
+            return nil
         case let .turnContext(payload):
             var parts: [String] = []
             if let model = payload.model { parts.append("model: \(model)") }

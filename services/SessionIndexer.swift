@@ -88,7 +88,8 @@ actor SessionIndexer {
     )
     guard !sessionFiles.isEmpty else { return [] }
 
-    let cpuCount = max(2, ProcessInfo.processInfo.processorCount)
+    let cpuCount = ProcessInfo.processInfo.processorCount
+    let workerCount = max(2, cpuCount / 2)
     var summaries: [SessionSummary] = []
     var firstError: Error?
     summaries.reserveCapacity(sessionFiles.count)
@@ -149,7 +150,7 @@ actor SessionIndexer {
         }
       }
 
-      addNextTasks(cpuCount)
+      addNextTasks(workerCount)
 
       while let result = await group.next() {
         switch result {
@@ -512,10 +513,22 @@ actor SessionIndexer {
         builder.seedLastUpdated(tailDate)
       }
     }
+    // Lightweight token fallback for sources emitting token_count events.
+    if builder.totalTokens == 0,
+      shouldUseTokenFallback(for: url),
+      let snapshot = SessionTimelineLoader().loadLatestTokenUsageWithFallback(url: url),
+      let fallbackTokens = snapshot.totalTokens
+    {
+      builder.seedTotalTokens(fallbackTokens)
+    }
 
     if let result = builder.build(for: url) { return result }
-    // Fallback: full parse if we didn't capture session_meta early
     return try buildSummaryFull(for: url, builder: &builder)
+  }
+
+  private func shouldUseTokenFallback(for url: URL) -> Bool {
+    // Claude Code logs do not emit token_count events; skip the fallback to avoid extra scans.
+    return !url.path.contains("/.claude/")
   }
 
   private func buildSummaryFull(for url: URL, builder: inout SessionSummaryBuilder) throws
@@ -569,6 +582,7 @@ actor SessionIndexer {
       toolInvocationCount: base.toolInvocationCount,
       responseCounts: base.responseCounts,
       turnContextCount: base.turnContextCount,
+      totalTokens: base.totalTokens,
       eventCount: base.eventCount,
       lineCount: base.lineCount,
       lastUpdatedAt: base.lastUpdatedAt,

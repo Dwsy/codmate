@@ -1000,6 +1000,7 @@ extension TimeInterval {
           toolInvocationCount: 1,
           responseCounts: [:],
           turnContextCount: 5,
+          totalTokens: 740,
           eventCount: 6,
           lineCount: 89,
           lastUpdatedAt: Date().addingTimeInterval(-3600),
@@ -1025,6 +1026,7 @@ extension TimeInterval {
           toolInvocationCount: 2,
           responseCounts: ["reasoning": 1],
           turnContextCount: 7,
+          totalTokens: 1120,
           eventCount: 9,
           lineCount: 120,
           lastUpdatedAt: Date().addingTimeInterval(-9000),
@@ -1058,6 +1060,7 @@ extension TimeInterval {
           toolInvocationCount: 3,
           responseCounts: ["reasoning": 2],
           turnContextCount: 11,
+          totalTokens: 2100,
           eventCount: 14,
           lineCount: 200,
           lastUpdatedAt: Date().addingTimeInterval(-158400),
@@ -1068,7 +1071,7 @@ extension TimeInterval {
     ),
   ]
 
-  return SessionListColumnView(
+  SessionListColumnView(
     sections: mockSections,
     selection: .constant(Set<String>()),
     sortOrder: .constant(.mostRecent),

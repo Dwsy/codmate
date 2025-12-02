@@ -219,7 +219,7 @@ class ProjectWorkspaceViewModel: ObservableObject {
         }
 
         let totalDuration = projectSessions.reduce(0) { $0 + $1.duration }
-        let totalTokens = projectSessions.reduce(0) { $0 + $1.turnContextCount }
+        let totalTokens = projectSessions.reduce(0) { $0 + $1.actualTotalTokens }
         let totalEvents = projectSessions.reduce(0) { $0 + $1.eventCount }
 
         let projectTasks = tasks.filter { $0.projectId == projectId }

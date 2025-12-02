@@ -50,15 +50,16 @@ actor ClaudeSessionProvider {
         for case let url as URL in enumerator {
             guard url.pathExtension.lowercased() == "jsonl" else { continue }
             let fileSize = resolveFileSize(for: url)
-            guard let parsed = parser.parse(at: url, fileSize: fileSize) else { continue }
-            let s = parsed.summary
-            guard matches(scope: scope, summary: s) else { continue }
+            guard let summary = parser.parseSummary(at: url, fileSize: fileSize)
+                ?? parser.parse(at: url, fileSize: fileSize)?.summary
+            else { continue }
+            guard matches(scope: scope, summary: summary) else { continue }
 
-            if let existing = bestById[s.id] {
-                let pick = prefer(lhs: existing, rhs: s)
-                bestById[s.id] = pick
+            if let existing = bestById[summary.id] {
+                let pick = prefer(lhs: existing, rhs: summary)
+                bestById[summary.id] = pick
             } else {
-                bestById[s.id] = s
+                bestById[summary.id] = summary
             }
         }
 
@@ -83,8 +84,11 @@ actor ClaudeSessionProvider {
         for case let url as URL in enumerator {
             guard url.pathExtension.lowercased() == "jsonl" else { continue }
             let fileSize = resolveFileSize(for: url)
-            guard let parsed = parser.parse(at: url, fileSize: fileSize) else { continue }
-            results.append(parsed.summary)
+            if let summary = parser.parseSummary(at: url, fileSize: fileSize) {
+                results.append(summary)
+            } else if let parsed = parser.parse(at: url, fileSize: fileSize) {
+                results.append(parsed.summary)
+            }
         }
         return results
     }
@@ -162,6 +166,7 @@ actor ClaudeSessionProvider {
             toolInvocationCount: parsed.summary.toolInvocationCount,
             responseCounts: parsed.summary.responseCounts,
             turnContextCount: parsed.summary.turnContextCount,
+            totalTokens: parsed.summary.totalTokens,
             eventCount: parsed.summary.eventCount,
             lineCount: parsed.summary.lineCount,
             lastUpdatedAt: parsed.summary.lastUpdatedAt,

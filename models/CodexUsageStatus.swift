@@ -172,30 +172,6 @@ extension CodexUsageStatus {
     }
 }
 
-enum TokenFormatter {
-    static func string(from value: Int) -> String {
-        let absValue = abs(value)
-        switch absValue {
-        case 1_000_000...:
-            return format(value, divisor: 1_000_000, suffix: "M")
-        case 1_000...:
-            return format(value, divisor: 1_000, suffix: "K")
-        default:
-            return NumberFormatter.decimalFormatter.string(from: NSNumber(value: value)) ?? "\(value)"
-        }
-    }
-
-    private static func format(_ value: Int, divisor: Double, suffix: String) -> String {
-        let scaled = Double(value) / divisor
-        let formatter = NumberFormatter()
-        formatter.maximumFractionDigits = scaled < 10 ? 1 : 0
-        formatter.minimumFractionDigits = 0
-        formatter.numberStyle = .decimal
-        let body = formatter.string(from: NSNumber(value: scaled)) ?? "\(scaled)"
-        return body + suffix
-    }
-}
-
 enum UsageDurationFormatter {
     static func string(minutes: Double) -> String {
         if minutes >= 1440 {

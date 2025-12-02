@@ -8,6 +8,7 @@ struct SessionRow: Decodable {
         case timestamp
         case type
         case payload
+        case message
     }
 
     init(from decoder: Decoder) throws {
@@ -28,6 +29,10 @@ struct SessionRow: Decodable {
         case "response_item":
             let payload = try container.decode(ResponseItemPayload.self, forKey: .payload)
             kind = .responseItem(payload)
+        case "assistant":
+            // assistant messages use "message" field instead of "payload"
+            let message = try container.decode(AssistantMessage.self, forKey: .message)
+            kind = .assistantMessage(AssistantMessagePayload(message: message))
         default:
             let payload = try container.decode(JSONValue.self, forKey: .payload)
             kind = .unknown(type: type, payload: payload)
@@ -39,6 +44,7 @@ struct SessionRow: Decodable {
         case turnContext(TurnContextPayload)
         case eventMessage(EventMessagePayload)
         case responseItem(ResponseItemPayload)
+        case assistantMessage(AssistantMessagePayload)
         case unknown(type: String, payload: JSONValue)
     }
 }
@@ -127,6 +133,37 @@ struct ResponseSummaryItem: Decodable {
     let text: String?
 }
 
+struct MessageUsage: Decodable {
+    let inputTokens: Int?
+    let outputTokens: Int?
+    let cacheReadInputTokens: Int?
+    let cacheCreationInputTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case inputTokens = "input_tokens"
+        case outputTokens = "output_tokens"
+        case cacheReadInputTokens = "cache_read_input_tokens"
+        case cacheCreationInputTokens = "cache_creation_input_tokens"
+    }
+
+    /// Total tokens according to Claude Code billing formula:
+    /// input_tokens + output_tokens + cache_read_input_tokens + cache_creation_input_tokens
+    var totalTokens: Int {
+        (inputTokens ?? 0) + (outputTokens ?? 0) + (cacheReadInputTokens ?? 0) + (cacheCreationInputTokens ?? 0)
+    }
+}
+
+struct AssistantMessage: Decodable {
+    let id: String?
+    let type: String?
+    let role: String?
+    let usage: MessageUsage?
+}
+
+struct AssistantMessagePayload: Decodable {
+    let message: AssistantMessage?
+}
+
 enum JSONValue: Decodable {
     case string(String)
     case number(Double)
@@ -204,6 +241,7 @@ struct SessionSummaryBuilder {
     private(set) var toolInvocationCount: Int = 0
     private(set) var responseCounts: [String: Int] = [:]
     private(set) var turnContextCount: Int = 0
+    private(set) var totalTokens: Int = 0
     private(set) var eventCount: Int = 0
     private(set) var lineCount: Int = 0
     private(set) var fileSizeBytes: UInt64?
@@ -219,6 +257,12 @@ struct SessionSummaryBuilder {
 
     mutating func setSource(_ source: SessionSource) {
         self.source = source
+    }
+
+    mutating func seedTotalTokens(_ total: Int) {
+        if total > totalTokens {
+            totalTokens = total
+        }
     }
 
     mutating func seedLastUpdated(_ date: Date) {
@@ -266,6 +310,21 @@ struct SessionSummaryBuilder {
                 userMessageCount += 1
             } else if type == "agent_message" {
                 assistantMessageCount += 1
+            } else if type == "token_count" {
+                // Legacy: Parse "total: 123" from message string (kept for backward compatibility)
+                if let msg = payload.message, let range = msg.range(of: "total: ") {
+                    let substring = msg[range.upperBound...]
+                    let numStr = substring.prefix(while: { $0.isNumber })
+                    if let val = Int(numStr) {
+                         totalTokens = max(totalTokens, val)
+                    }
+                }
+                // Also try reading from info if available (future proofing)
+                else if let info = payload.info,
+                   case .object(let dict) = info,
+                   case .number(let total) = dict["total"] {
+                    totalTokens = max(totalTokens, Int(total))
+                }
             }
         case let .responseItem(payload):
             eventCount += 1
@@ -275,6 +334,13 @@ struct SessionSummaryBuilder {
             }
             if payload.type.contains("function_call") || payload.type.contains("tool_call") {
                 toolInvocationCount += 1
+            }
+        case let .assistantMessage(payload):
+            // Accumulate tokens from all assistant messages according to Claude Code formula:
+            // total = input_tokens + output_tokens + cache_read_input_tokens + cache_creation_input_tokens
+            assistantMessageCount += 1
+            if let usage = payload.message?.usage {
+                totalTokens += usage.totalTokens
             }
         case .unknown:
             lineCount += 0
@@ -315,6 +381,7 @@ struct SessionSummaryBuilder {
             toolInvocationCount: toolInvocationCount,
             responseCounts: responseCounts,
             turnContextCount: turnContextCount,
+            totalTokens: totalTokens,
             eventCount: eventCount,
             lineCount: lineCount,
             lastUpdatedAt: lastUpdatedAt,

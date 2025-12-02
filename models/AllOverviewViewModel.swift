@@ -77,7 +77,7 @@ final class AllOverviewViewModel: ObservableObject {
     }
 
     let totalDuration = sessions.reduce(0) { $0 + $1.duration }
-    let totalTokens = sessions.reduce(0) { $0 + $1.turnContextCount }
+    let totalTokens = sessions.reduce(0) { $0 + $1.actualTotalTokens }
     let userMessages = sessions.reduce(0) { $0 + $1.userMessageCount }
     let assistantMessages = sessions.reduce(0) { $0 + $1.assistantMessageCount }
 
@@ -119,7 +119,7 @@ final class AllOverviewViewModel: ObservableObject {
       guard count > 0 else { return nil }
       
       let totalDuration = group.reduce(0) { $0 + $1.duration }
-      let totalTokens = group.reduce(0) { $0 + $1.turnContextCount }
+      let totalTokens = group.reduce(0) { $0 + $1.actualTotalTokens }
       
       return AllOverviewSnapshot.SourceStat(
         kind: kind,
@@ -134,7 +134,7 @@ final class AllOverviewViewModel: ObservableObject {
     // Add "All" summary if there's data
     if !sessions.isEmpty {
       let totalDuration = sessions.reduce(0) { $0 + $1.duration }
-      let totalTokens = sessions.reduce(0) { $0 + $1.turnContextCount }
+      let totalTokens = sessions.reduce(0) { $0 + $1.actualTotalTokens }
       let count = sessions.count
       
       let allStat = AllOverviewSnapshot.SourceStat(

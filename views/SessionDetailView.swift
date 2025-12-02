@@ -589,6 +589,7 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         toolInvocationCount: 3,
         responseCounts: ["reasoning": 2],
         turnContextCount: 8,
+        totalTokens: 1200,
         eventCount: 12,
         lineCount: 156,
         lastUpdatedAt: Date().addingTimeInterval(-1800),
@@ -596,7 +597,7 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         remotePath: nil
     )
 
-    return SessionDetailView(
+    SessionDetailView(
         summary: mockSummary,
         isProcessing: false,
         onResume: { print("Resume session") },
@@ -628,6 +629,7 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         toolInvocationCount: 1,
         responseCounts: [:],
         turnContextCount: 5,
+        totalTokens: 650,
         eventCount: 6,
         lineCount: 89,
         lastUpdatedAt: Date().addingTimeInterval(-300),
@@ -635,7 +637,7 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         remotePath: nil
     )
 
-    return SessionDetailView(
+    SessionDetailView(
         summary: mockSummary,
         isProcessing: true,
         onResume: { print("Resume session") },

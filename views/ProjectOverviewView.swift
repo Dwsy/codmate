@@ -94,7 +94,7 @@ struct ProjectOverviewView: View {
         heroMetric(
           title: "Active Time",
           value: Self.durationFormatter.string(from: snapshot.totalDuration) ?? "—",
-          detail: "Tokens \(snapshot.totalTokens.formatted())"
+          detail: "Tokens \(TokenFormatter.short(snapshot.totalTokens))"
         )
         heroMetric(
           title: "Tool Invocations",
@@ -152,7 +152,7 @@ struct ProjectOverviewView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                   Label {
-                    Text("Total \(stat.totalTokens.formatted()) tokens")
+                    Text("Total \(TokenFormatter.short(stat.totalTokens)) tokens")
                   } icon: {
                     Image(systemName: "text.quote")
                   }

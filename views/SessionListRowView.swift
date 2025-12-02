@@ -385,6 +385,7 @@ extension SessionListRowView {}
     toolInvocationCount: 3,
     responseCounts: ["reasoning": 2],
     turnContextCount: 8,
+    totalTokens: 980,
     eventCount: 12,
     lineCount: 156,
     lastUpdatedAt: Date().addingTimeInterval(-1800),
@@ -392,7 +393,7 @@ extension SessionListRowView {}
     remotePath: nil
   )
 
-  return SessionListRowView(summary: mockSummary)
+  SessionListRowView(summary: mockSummary)
     .frame(width: 400, height: 120)
     .padding()
 }
@@ -416,6 +417,7 @@ extension SessionListRowView {}
     toolInvocationCount: 0,
     responseCounts: [:],
     turnContextCount: 3,
+    totalTokens: 320,
     eventCount: 3,
     lineCount: 45,
     lastUpdatedAt: Date().addingTimeInterval(-6900),
@@ -423,7 +425,7 @@ extension SessionListRowView {}
     remotePath: nil
   )
 
-  return SessionListRowView(summary: mockSummary)
+  SessionListRowView(summary: mockSummary)
     .frame(width: 300, height: 100)
     .padding()
 }
@@ -448,6 +450,7 @@ extension SessionListRowView {}
     toolInvocationCount: 0,
     responseCounts: [:],
     turnContextCount: 2,
+    totalTokens: 150,
     eventCount: 2,
     lineCount: 20,
     lastUpdatedAt: Date().addingTimeInterval(-10500),
@@ -455,7 +458,7 @@ extension SessionListRowView {}
     remotePath: nil
   )
 
-  return SessionListRowView(summary: mockSummary)
+  SessionListRowView(summary: mockSummary)
     .frame(width: 400, height: 100)
     .padding()
 }

@@ -345,8 +345,6 @@ private struct UsageSnapshotView: View {
     VStack(alignment: .leading, spacing: 12) {
       if snapshot.origin == .thirdParty {
         VStack(alignment: .leading, spacing: 8) {
-          Text("Custom provider active")
-            .font(.headline)
           Text(
             "Usage data isn't available while a custom provider is selected. Switch Active Provider back to (Built-in) to restore usage."
           )

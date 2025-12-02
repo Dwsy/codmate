@@ -90,7 +90,7 @@ final class ProjectOverviewViewModel: ObservableObject {
     }
 
     let totalDuration = projectSessions.reduce(0) { $0 + $1.duration }
-    let totalTokens = projectSessions.reduce(0) { $0 + $1.turnContextCount }
+    let totalTokens = projectSessions.reduce(0) { $0 + $1.actualTotalTokens }
     let userMessages = projectSessions.reduce(0) { $0 + $1.userMessageCount }
     let assistantMessages = projectSessions.reduce(0) { $0 + $1.assistantMessageCount }
     let totalToolInvocations = projectSessions.reduce(0) { $0 + $1.toolInvocationCount }
@@ -133,7 +133,7 @@ final class ProjectOverviewViewModel: ObservableObject {
       guard count > 0 else { return nil }
       
       let totalDuration = group.reduce(0) { $0 + $1.duration }
-      let totalTokens = group.reduce(0) { $0 + $1.turnContextCount }
+      let totalTokens = group.reduce(0) { $0 + $1.actualTotalTokens }
       
       return ProjectOverviewSnapshot.SourceStat(
         kind: kind,
@@ -148,7 +148,7 @@ final class ProjectOverviewViewModel: ObservableObject {
     // Add "All" summary if there's data
     if !sessions.isEmpty {
       let totalDuration = sessions.reduce(0) { $0 + $1.duration }
-      let totalTokens = sessions.reduce(0) { $0 + $1.turnContextCount }
+      let totalTokens = sessions.reduce(0) { $0 + $1.actualTotalTokens }
       let count = sessions.count
       
       let allStat = ProjectOverviewSnapshot.SourceStat(

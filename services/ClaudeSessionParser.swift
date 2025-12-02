@@ -9,6 +9,7 @@ struct ClaudeSessionParser {
     private let decoder: JSONDecoder
     private let newline: UInt8 = 0x0A
     private let carriageReturn: UInt8 = 0x0D
+    private let chunkSize = 64 * 1024
 
     init() {
         self.decoder = FlexibleDecoders.iso8601Flexible()
@@ -27,6 +28,54 @@ struct ClaudeSessionParser {
             if let sid = line.sessionId, !sid.isEmpty { return sid }
         }
         return nil
+    }
+
+    /// Streaming summary-only parse to reduce memory for bulk indexing.
+    func parseSummary(at url: URL, fileSize: UInt64? = nil) -> SessionSummary? {
+        let filename = url.deletingPathExtension().lastPathComponent
+        if filename.hasPrefix("agent-") {
+            return nil
+        }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+
+        var buffer = Data()
+        var accumulator = SummaryAccumulator()
+        var lineCount = 0
+
+        func processLine(_ data: Data) {
+            guard let line = decodeLine(data) else { return }
+            if line.isSidechain == true { return }
+            accumulator.consume(line)
+            lineCount += 1
+        }
+
+        while true {
+            guard let chunk = try? handle.read(upToCount: chunkSize) else { break }
+            if chunk.isEmpty {
+                break
+            }
+            buffer.append(chunk)
+            while let idx = buffer.firstIndex(of: newline) {
+                let lineRange = buffer.startIndex..<idx
+                let line = buffer[lineRange]
+                let removeEnd = buffer.index(after: idx)
+                buffer.removeSubrange(buffer.startIndex..<removeEnd)
+                if line.isEmpty { continue }
+                let trimmed = line.last == carriageReturn ? line.dropLast() : line[...]
+                if !trimmed.isEmpty { processLine(Data(trimmed)) }
+            }
+        }
+        if !buffer.isEmpty {
+            let trimmed = buffer.last == carriageReturn ? buffer.dropLast() : buffer[...]
+            if !trimmed.isEmpty { processLine(Data(trimmed)) }
+        }
+
+        return accumulator.buildSummary(
+            url: url,
+            fileSize: fileSize,
+            lineCount: lineCount
+        )
     }
 
     func parse(at url: URL, fileSize: UInt64? = nil) -> ClaudeParsedLog? {
@@ -49,7 +98,8 @@ struct ClaudeSessionParser {
             guard let line = decodeLine(Data(slice)) else { continue }
             let renderedText = line.message.flatMap(renderFlatText)
             let model = line.message?.model
-            accumulator.consume(line, renderedText: renderedText, model: model)
+            let usageTokens = line.message?.usage?.totalTokens
+            accumulator.consume(line, renderedText: renderedText, model: model, usageTokens: usageTokens)
             rows.append(contentsOf: convert(line))
         }
 
@@ -61,6 +111,7 @@ struct ClaudeSessionParser {
                 metaRow: metaRow,
                 contextRow: contextRow,
                 additionalRows: rows,
+                totalTokens: accumulator.totalTokens,
                 lastTimestamp: accumulator.lastTimestamp) else {
             return nil
         }
@@ -223,11 +274,13 @@ struct ClaudeSessionParser {
         metaRow: SessionRow,
         contextRow: SessionRow?,
         additionalRows: [SessionRow],
+        totalTokens: Int,
         lastTimestamp: Date?
     ) -> SessionSummary? {
         var builder = SessionSummaryBuilder()
         builder.setSource(.claudeLocal)
         builder.setFileSize(fileSize)
+        builder.seedTotalTokens(totalTokens)
 
         builder.observe(metaRow)
         if let contextRow { builder.observe(contextRow) }
@@ -306,8 +359,14 @@ struct ClaudeSessionParser {
         var instructions: String?
         var firstTimestamp: Date?
         var lastTimestamp: Date?
+        var totalTokens: Int = 0
 
-        mutating func consume(_ line: ClaudeLogLine, renderedText: String?, model: String?) {
+        mutating func consume(
+            _ line: ClaudeLogLine,
+            renderedText: String?,
+            model: String?,
+            usageTokens: Int?
+        ) {
             if let sid = line.sessionId, sessionId == nil { sessionId = sid }
             if let aid = line.agentId, agentId == nil { agentId = aid }
             if let ver = line.version, version == nil { version = ver }
@@ -322,6 +381,9 @@ struct ClaudeSessionParser {
             }
             if self.model == nil, let model, !model.isEmpty {
                 self.model = model
+            }
+            if let usageTokens, usageTokens > 0 {
+                totalTokens &+= usageTokens
             }
         }
 
@@ -365,6 +427,47 @@ struct ClaudeSessionParser {
         let role: String?
         let model: String?
         let content: ClaudeMessageContent?
+        let usage: ClaudeUsage?
+
+        enum CodingKeys: String, CodingKey {
+            case role
+            case model
+            case content
+            case usage
+        }
+    }
+
+    private struct ClaudeUsage: Decodable {
+        let inputTokens: Int?
+        let outputTokens: Int?
+        let cacheReadInputTokens: Int?
+        let cacheCreationInputTokens: Int?
+        let cacheCreation: CacheCreation?
+
+        enum CodingKeys: String, CodingKey {
+            case inputTokens = "input_tokens"
+            case outputTokens = "output_tokens"
+            case cacheReadInputTokens = "cache_read_input_tokens"
+            case cacheCreationInputTokens = "cache_creation_input_tokens"
+            case cacheCreation = "cache_creation"
+        }
+
+        struct CacheCreation: Decodable {
+            let ephemeral5m: Int?
+            let ephemeral1h: Int?
+
+            enum CodingKeys: String, CodingKey {
+                case ephemeral5m = "ephemeral_5m_input_tokens"
+                case ephemeral1h = "ephemeral_1h_input_tokens"
+            }
+        }
+
+        var totalTokens: Int {
+            let creation = (cacheCreationInputTokens ?? 0) +
+                (cacheCreation?.ephemeral5m ?? 0) +
+                (cacheCreation?.ephemeral1h ?? 0)
+            return (inputTokens ?? 0) + (outputTokens ?? 0) + (cacheReadInputTokens ?? 0) + creation
+        }
     }
 
     private enum ClaudeMessageContent: Decodable {
@@ -397,6 +500,87 @@ struct ClaudeSessionParser {
         let input: JSONValue?
         let toolUseId: String?
         let content: JSONValue?
+    }
+
+    private struct SummaryAccumulator {
+        var sessionId: String?
+        var version: String?
+        var cwd: String?
+        var model: String?
+        var firstTimestamp: Date?
+        var lastTimestamp: Date?
+        var userMessageCount = 0
+        var assistantMessageCount = 0
+        var toolInvocationCount = 0
+        var responseCounts: [String: Int] = [:]
+        var totalTokens = 0
+
+        mutating func consume(_ line: ClaudeLogLine) {
+            guard let type = line.type else { return }
+            if let sid = line.sessionId, sessionId == nil { sessionId = sid }
+            if let ver = line.version, version == nil { version = ver }
+            if let path = line.cwd, cwd == nil { cwd = path }
+            if let m = line.message?.model, model == nil, !m.isEmpty { model = m }
+            if let ts = line.timestamp {
+                if firstTimestamp == nil || ts < firstTimestamp! { firstTimestamp = ts }
+                if lastTimestamp == nil || ts > lastTimestamp! { lastTimestamp = ts }
+            }
+
+            switch type {
+            case "user":
+                userMessageCount &+= 1
+            case "assistant":
+                assistantMessageCount &+= 1
+                if let usage = line.message?.usage {
+                    totalTokens &+= usage.totalTokens
+                }
+                toolInvocationCount &+= countToolCalls(in: line.message)
+            default:
+                break
+            }
+        }
+
+        func buildSummary(url: URL, fileSize: UInt64?, lineCount: Int) -> SessionSummary? {
+            guard let sessionId, let started = firstTimestamp, let cwd else { return nil }
+            let summary = SessionSummary(
+                id: sessionId,
+                fileURL: url,
+                fileSizeBytes: fileSize,
+                startedAt: started,
+                endedAt: lastTimestamp,
+                activeDuration: nil,
+                cliVersion: "claude-code \(version ?? "unknown")",
+                cwd: cwd,
+                originator: "Claude Code",
+                instructions: nil,
+                model: model,
+                approvalPolicy: nil,
+                userMessageCount: userMessageCount,
+                assistantMessageCount: assistantMessageCount,
+                toolInvocationCount: toolInvocationCount,
+                responseCounts: responseCounts,
+                turnContextCount: 0,
+                totalTokens: totalTokens,
+                eventCount: userMessageCount + assistantMessageCount,
+                lineCount: lineCount,
+                lastUpdatedAt: lastTimestamp,
+                source: .claudeLocal,
+                remotePath: nil
+            )
+            return summary
+        }
+
+        private func countToolCalls(in message: ClaudeMessage?) -> Int {
+            guard let message else { return 0 }
+            switch message.content {
+            case .blocks(let blocks):
+                return blocks.reduce(0) { partial, block in
+                    partial + (block.type == "tool_use" ? 1 : 0)
+                }
+            case .string, .none:
+                return 0
+            }
+        }
     }
 }
 

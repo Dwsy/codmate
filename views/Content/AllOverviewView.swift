@@ -74,7 +74,7 @@ struct AllOverviewView: View {
         heroMetric(
           title: "Active Time",
           value: Self.durationFormatter.string(from: snapshot.totalDuration) ?? "—",
-          detail: "Tokens \(snapshot.totalTokens.formatted())"
+          detail: "Tokens \(TokenFormatter.short(snapshot.totalTokens))"
         )
         heroMetric(
           title: "Projects",
@@ -113,13 +113,13 @@ struct AllOverviewView: View {
                 }
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Label {
-                        Text("Total \(stat.totalTokens.formatted()) tokens")
-                    } icon: {
-                        Image(systemName: "text.quote")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                  Label {
+                    Text("Total \(TokenFormatter.short(stat.totalTokens)) tokens")
+                  } icon: {
+                    Image(systemName: "text.quote")
+                  }
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
                     
                     Label {
                         Text("Avg \(Self.durationFormatter.string(from: stat.avgDuration) ?? "—")")

@@ -21,6 +21,7 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
     var toolInvocationCount: Int
     let responseCounts: [String: Int]
     let turnContextCount: Int
+    let totalTokens: Int?
     let eventCount: Int
     let lineCount: Int
     let lastUpdatedAt: Date?
@@ -38,6 +39,10 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
         if let activeDuration { return activeDuration }
         guard let end = endedAt ?? lastUpdatedAt else { return 0 }
         return end.timeIntervalSince(startedAt)
+    }
+
+    var actualTotalTokens: Int {
+        return totalTokens ?? 0
     }
 
     var displayName: String {
@@ -177,6 +182,7 @@ extension SessionSummary {
             toolInvocationCount: toolInvocationCount,
             responseCounts: responseCounts,
             turnContextCount: turnContextCount,
+            totalTokens: totalTokens,
             eventCount: eventCount,
             lineCount: lineCount,
             lastUpdatedAt: lastUpdatedAt,
@@ -215,6 +221,7 @@ extension SessionSummary {
             toolInvocationCount: toolInvocations ?? toolInvocationCount,
             responseCounts: responseCounts,
             turnContextCount: turnContextCount,
+            totalTokens: totalTokens,
             eventCount: eventCount,
             lineCount: lineCount,
             lastUpdatedAt: lastUpdatedAt,
