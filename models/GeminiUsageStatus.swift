@@ -14,7 +14,13 @@ struct GeminiUsageStatus: Equatable {
   let buckets: [Bucket]
 
   func asProviderSnapshot() -> UsageProviderSnapshot {
-    let metrics: [UsageMetricSnapshot] = buckets.map { bucket in
+    // Filter buckets to only show models that have been used (remainingFraction < 1.0)
+    let usedBuckets = buckets.filter { bucket in
+      guard let remaining = bucket.remainingFraction else { return false }
+      return remaining < 1.0
+    }
+
+    let metrics: [UsageMetricSnapshot] = usedBuckets.map { bucket in
       let remaining = bucket.remainingFraction?.clamped01()
       let percentText: String? = {
         guard let remaining else { return nil }
@@ -32,6 +38,13 @@ struct GeminiUsageStatus: Equatable {
         return nil
       }()
 
+      // Debug: Log resetTime
+      if let resetTime = bucket.resetTime {
+        NSLog("[GeminiUsage] Creating metric for \(label), resetTime: \(resetTime)")
+      } else {
+        NSLog("[GeminiUsage] Creating metric for \(label), resetTime is nil!")
+      }
+
       return UsageMetricSnapshot(
         kind: .quota,
         label: label,
@@ -45,13 +58,25 @@ struct GeminiUsageStatus: Equatable {
 
     let availability: UsageProviderSnapshot.Availability = metrics.isEmpty ? .empty : .ready
 
+    // Count total models with quota
+    let totalModels = buckets.count
+    let statusMessage: String? = {
+      if availability == .empty {
+        if totalModels > 0 {
+          return "No models used yet. Quotas available for \(totalModels) models."
+        }
+        return "No Gemini usage data."
+      }
+      return nil
+    }()
+
     return UsageProviderSnapshot(
       provider: .gemini,
       title: UsageProviderKind.gemini.displayName,
       availability: availability,
       metrics: metrics,
       updatedAt: updatedAt,
-      statusMessage: availability == .empty ? "No Gemini usage data." : nil,
+      statusMessage: statusMessage,
       origin: .builtin
     )
   }

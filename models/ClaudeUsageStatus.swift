@@ -50,21 +50,21 @@ struct ClaudeUsageStatus: Equatable {
 
     private var fiveHourProgress: Double? {
         guard let used = fiveHourUsedMinutes, fiveHourWindowMinutes > 0 else { return nil }
-        return used / fiveHourWindowMinutes
+        let remaining = max(0, fiveHourWindowMinutes - used)
+        return remaining / fiveHourWindowMinutes
     }
 
     private var weeklyProgress: Double? {
         guard let used = weeklyUsedMinutes, weeklyWindowMinutes > 0 else { return nil }
-        return used / weeklyWindowMinutes
+        let remaining = max(0, weeklyWindowMinutes - used)
+        return remaining / weeklyWindowMinutes
     }
 
     private var sessionProgress: Double? {
         guard let expiresAt = sessionExpiresAt else { return nil }
         let sessionDuration: TimeInterval = 8 * 3600 // 8 hours in seconds
-        let remaining = expiresAt.timeIntervalSince(updatedAt)
-        let elapsed = sessionDuration - remaining
-        let progress = elapsed / sessionDuration
-        return progress
+        let remaining = max(0, expiresAt.timeIntervalSince(updatedAt))
+        return remaining / sessionDuration
     }
 
     func asProviderSnapshot() -> UsageProviderSnapshot {

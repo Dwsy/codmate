@@ -29,7 +29,7 @@ struct GeminiUsageAPIClient {
         formatter.timeStyle = .short
         return "Gemini credential expired on \(formatter.string(from: date))."
       case .projectNotFound:
-        return "Gemini project ID not found. Set GOOGLE_CLOUD_PROJECT or run gemini login."
+        return "Gemini project ID not found. For personal Google accounts, try running gemini CLI to complete onboarding. For workspace accounts, set GOOGLE_CLOUD_PROJECT."
       case .requestFailed(let code):
         return "Gemini usage API returned status \(code)."
       case .emptyResponse:
@@ -53,28 +53,67 @@ struct GeminiUsageAPIClient {
     let updatedAt: TimeInterval?
   }
 
-  private struct LoadProjectResponse: Decodable {
-    struct Project: Decodable { let id: String?; let name: String? }
-    let cloudaicompanionProjectId: String?
-    let project: Project?
+  private struct LoadCodeAssistResponse: Decodable {
+    struct Tier: Decodable {
+      let id: String?
+      let name: String?
+      let isDefault: Bool?
+    }
+
+    struct Project: Decodable {
+      let id: String?
+      let name: String?
+    }
+
+    let currentTier: Tier?
+    let allowedTiers: [Tier]?
+    let cloudaicompanionProject: String?
+    let cloudaicompanionProjectObject: Project?
 
     init(from decoder: Decoder) throws {
       let container = try decoder.container(keyedBy: CodingKeys.self)
+
+      currentTier = try? container.decodeIfPresent(Tier.self, forKey: .currentTier)
+      allowedTiers = try? container.decodeIfPresent([Tier].self, forKey: .allowedTiers)
+
+      // Handle cloudaicompanionProject as string or object
       if let rawString = try? container.decodeIfPresent(String.self, forKey: .cloudaicompanionProject) {
-        self.cloudaicompanionProjectId = rawString
-        self.project = nil
-        return
+        self.cloudaicompanionProject = rawString
+        self.cloudaicompanionProjectObject = nil
+      } else if let obj = try? container.decodeIfPresent(Project.self, forKey: .cloudaicompanionProject) {
+        self.cloudaicompanionProject = obj.id ?? obj.name
+        self.cloudaicompanionProjectObject = obj
+      } else {
+        self.cloudaicompanionProject = nil
+        self.cloudaicompanionProjectObject = nil
       }
-      if let obj = try? container.decodeIfPresent(Project.self, forKey: .cloudaicompanionProject) {
-        self.cloudaicompanionProjectId = obj.id ?? obj.name
-        self.project = obj
-        return
-      }
-      self.cloudaicompanionProjectId = nil
-      self.project = nil
     }
 
-    private enum CodingKeys: String, CodingKey { case cloudaicompanionProject }
+    private enum CodingKeys: String, CodingKey {
+      case currentTier
+      case allowedTiers
+      case cloudaicompanionProject
+    }
+  }
+
+  private struct OnboardUserRequest: Encodable {
+    let tierId: String
+    let cloudaicompanionProject: String?
+    let metadata: [String: String]
+  }
+
+  private struct OnboardUserResponse: Decodable {
+    struct Project: Decodable {
+      let id: String?
+      let name: String?
+    }
+
+    struct ResponseData: Decodable {
+      let cloudaicompanionProject: Project?
+    }
+
+    let done: Bool?
+    let response: ResponseData?
   }
 
   private struct QuotaResponse: Decodable {
@@ -195,6 +234,7 @@ struct GeminiUsageAPIClient {
     let envProject = ProcessInfo.processInfo.environment["GOOGLE_CLOUD_PROJECT"]
       ?? ProcessInfo.processInfo.environment["GOOGLE_CLOUD_PROJECT_ID"]
 
+    // Step 1: Call loadCodeAssist to check user status
     guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist")
     else {
       return envProject
@@ -224,15 +264,151 @@ struct GeminiUsageAPIClient {
 
     let (data, response) = try await URLSession.shared.data(for: request)
     guard let http = response as? HTTPURLResponse else { return envProject }
-    guard (200..<300).contains(http.statusCode) else { throw ClientError.requestFailed(http.statusCode) }
-
-    if let parsed = try? JSONDecoder().decode(LoadProjectResponse.self, from: data) {
-      if let id = parsed.cloudaicompanionProjectId, !id.isEmpty { return id }
-      if let name = parsed.project?.name, !name.isEmpty { return name }
-      if let id = parsed.project?.id, !id.isEmpty { return id }
+    guard (200..<300).contains(http.statusCode) else {
+      throw ClientError.requestFailed(http.statusCode)
     }
 
-    return envProject
+    // Debug: Log raw response
+    if let rawJSON = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+      NSLog("[GeminiUsage] loadCodeAssist response: \(rawJSON)")
+    }
+
+    guard let loadResult = try? JSONDecoder().decode(LoadCodeAssistResponse.self, from: data) else {
+      NSLog("[GeminiUsage] Failed to decode loadCodeAssist response")
+      return envProject
+    }
+
+    // Step 2: Check if user is already onboarded (has currentTier)
+    if let currentTier = loadResult.currentTier {
+      NSLog("[GeminiUsage] User already onboarded with tier: \(currentTier.id ?? "unknown")")
+      // User is already onboarded
+      if let project = loadResult.cloudaicompanionProject, !project.isEmpty {
+        NSLog("[GeminiUsage] Found project from loadCodeAssist: \(project)")
+        return project
+      }
+      // Has tier but no project - use env var or throw error
+      if let env = envProject, !env.isEmpty {
+        NSLog("[GeminiUsage] Using project from environment: \(env)")
+        return env
+      }
+      // For some tiers (like free-tier), project might be assigned later
+      // Continue to onboard flow
+      NSLog("[GeminiUsage] No project found, will attempt onboarding")
+    }
+
+    // Step 3: New user needs to be onboarded
+    guard let allowedTiers = loadResult.allowedTiers,
+          !allowedTiers.isEmpty else {
+      NSLog("[GeminiUsage] No allowed tiers found in response")
+      // No tiers available - fallback to env or throw
+      if let env = envProject, !env.isEmpty {
+        return env
+      }
+      throw ClientError.projectNotFound
+    }
+
+    // Find default tier
+    guard let defaultTier = allowedTiers.first(where: { $0.isDefault == true }) ?? allowedTiers.first,
+          let tierId = defaultTier.id else {
+      NSLog("[GeminiUsage] No default tier found")
+      throw ClientError.projectNotFound
+    }
+
+    NSLog("[GeminiUsage] Starting onboarding for tier: \(tierId)")
+
+    // Step 4: Call onboardUser
+    let isFree = tierId == "free-tier"
+    let projectId = try await onboardUser(
+      token: token,
+      tierId: tierId,
+      cloudaicompanionProject: isFree ? nil : envProject
+    )
+
+    if let project = projectId, !project.isEmpty {
+      return project
+    }
+
+    // Fallback to env var
+    if let env = envProject, !env.isEmpty {
+      return env
+    }
+
+    throw ClientError.projectNotFound
+  }
+
+  private func onboardUser(
+    token: String,
+    tierId: String,
+    cloudaicompanionProject: String?
+  ) async throws -> String? {
+    guard let url = URL(string: "https://cloudcode-pa.googleapis.com/v1internal:onboardUser")
+    else {
+      return nil
+    }
+
+    var metadata: [String: String] = [
+      "ideType": "IDE_UNSPECIFIED",
+      "platform": "PLATFORM_UNSPECIFIED",
+      "pluginType": "GEMINI"
+    ]
+    if let project = cloudaicompanionProject, !project.isEmpty {
+      metadata["duetProject"] = project
+    }
+
+    let requestBody = OnboardUserRequest(
+      tierId: tierId,
+      cloudaicompanionProject: cloudaicompanionProject,
+      metadata: metadata
+    )
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("application/json", forHTTPHeaderField: "Accept")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.timeoutInterval = 30
+
+    guard let bodyData = try? JSONEncoder().encode(requestBody) else {
+      throw ClientError.requestFailed(-1)
+    }
+    request.httpBody = bodyData
+
+    // Poll until the long-running operation is complete (max 12 attempts = 60 seconds)
+    let maxAttempts = 12
+    var attempts = 0
+
+    while attempts < maxAttempts {
+      let (data, response) = try await URLSession.shared.data(for: request)
+      guard let http = response as? HTTPURLResponse else {
+        throw ClientError.requestFailed(-1)
+      }
+      guard (200..<300).contains(http.statusCode) else {
+        throw ClientError.requestFailed(http.statusCode)
+      }
+
+      guard let result = try? JSONDecoder().decode(OnboardUserResponse.self, from: data) else {
+        throw ClientError.decodingFailed
+      }
+
+      // Check if operation is complete
+      if result.done == true {
+        let projectId = result.response?.cloudaicompanionProject?.id
+          ?? result.response?.cloudaicompanionProject?.name
+        NSLog("[GeminiUsage] Onboarding completed, project ID: \(projectId ?? "nil")")
+        return projectId
+      }
+
+      // Not done yet, wait and retry
+      attempts += 1
+      NSLog("[GeminiUsage] Onboarding not complete, attempt \(attempts)/\(maxAttempts), retrying in 5s...")
+      if attempts < maxAttempts {
+        try await Task.sleep(nanoseconds: 5_000_000_000) // 5 seconds
+      }
+    }
+
+    // Polling timeout
+    NSLog("[GeminiUsage] Onboarding polling timeout after \(maxAttempts) attempts")
+    throw ClientError.requestFailed(-2)
   }
 
   private func retrieveQuota(token: String, projectId: String?) async throws -> [GeminiUsageStatus.Bucket] {
@@ -258,14 +434,37 @@ struct GeminiUsageAPIClient {
     guard let http = response as? HTTPURLResponse else { throw ClientError.requestFailed(-1) }
     guard (200..<300).contains(http.statusCode) else { throw ClientError.requestFailed(http.statusCode) }
 
+    // Debug: Log raw quota response
+    if let rawJSON = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+      NSLog("[GeminiUsage] retrieveUserQuota response: \(rawJSON)")
+    }
+
     guard let payload = try? JSONDecoder().decode(QuotaResponse.self, from: data) else {
       throw ClientError.decodingFailed
     }
 
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     let buckets: [GeminiUsageStatus.Bucket] = (payload.buckets ?? []).map { bucket in
-      let reset: Date? = bucket.resetTime.flatMap { formatter.date(from: $0) }
+      let reset: Date? = bucket.resetTime.flatMap { resetTimeString in
+        // Try parsing with fractional seconds first
+        let formatterWithFractional = ISO8601DateFormatter()
+        formatterWithFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatterWithFractional.date(from: resetTimeString) {
+          NSLog("[GeminiUsage] Parsed resetTime with fractional seconds: \(resetTimeString) -> \(date)")
+          return date
+        }
+
+        // Fallback: try without fractional seconds
+        let formatterWithoutFractional = ISO8601DateFormatter()
+        formatterWithoutFractional.formatOptions = [.withInternetDateTime]
+        if let date = formatterWithoutFractional.date(from: resetTimeString) {
+          NSLog("[GeminiUsage] Parsed resetTime without fractional seconds: \(resetTimeString) -> \(date)")
+          return date
+        }
+
+        NSLog("[GeminiUsage] Failed to parse resetTime: \(resetTimeString)")
+        return nil
+      }
+
       return GeminiUsageStatus.Bucket(
         modelId: bucket.modelId,
         tokenType: bucket.tokenType,
@@ -274,6 +473,8 @@ struct GeminiUsageAPIClient {
         resetTime: reset
       )
     }
+
+    NSLog("[GeminiUsage] Retrieved \(buckets.count) buckets, \(buckets.filter { $0.resetTime != nil }.count) have resetTime")
     return buckets
   }
 

@@ -34,9 +34,9 @@ struct UsageStatusControl: View {
   private func content(referenceDate: Date) -> some View {
     HStack(spacing: 8) {
       let rows = providerRows(at: referenceDate)
-      let outerState = ringState(for: .claude, relativeTo: referenceDate)
-      let middleState = ringState(for: .codex, relativeTo: referenceDate)
-      let innerState = ringState(for: .gemini, relativeTo: referenceDate)
+      let outerState = ringState(for: .gemini, relativeTo: referenceDate)
+      let middleState = ringState(for: .claude, relativeTo: referenceDate)
+      let innerState = ringState(for: .codex, relativeTo: referenceDate)
 
       Button {
         showPopover.toggle()
@@ -47,15 +47,15 @@ struct UsageStatusControl: View {
             middleState: middleState,
             innerState: innerState
           )
-          VStack(alignment: .leading, spacing: 0) {
+          VStack(alignment: .leading, spacing: -1.5) {
             if rows.isEmpty {
               Text("Usage unavailable")
-                .font(.system(size: 9))
+                .font(.system(size: 8))
                 .foregroundStyle(.secondary)
             } else {
               ForEach(rows, id: \.provider) { row in
                 Text(row.text)
-                  .font(.system(size: 9))
+                  .font(.system(size: 8))
                   .lineLimit(1)
               }
             }
@@ -65,13 +65,9 @@ struct UsageStatusControl: View {
           .clipped()
         }
         .animation(.easeInOut(duration: 0.2), value: isHovering)
-        .padding(.leading, 5)
-        .padding(.vertical, 5)
-        .padding(.trailing, isHovering ? 9 : 5)
-        .background(
-          Capsule(style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor))
-        )
+        .padding(.leading, 4)
+        .padding(.vertical, 4)
+        .padding(.trailing, isHovering ? 8 : 4)
         .contentShape(Capsule(style: .continuous))
       }
       .buttonStyle(.plain)
@@ -109,7 +105,8 @@ struct UsageStatusControl: View {
         let percent = urgent?.percentText ?? "—"
         let info: String
         if let urgent = urgent, let reset = urgent.resetDate {
-          info = resetCountdown(from: reset, kind: urgent.kind) ?? resetFormatter.string(from: reset)
+          info =
+            resetCountdown(from: reset, kind: urgent.kind) ?? resetFormatter.string(from: reset)
         } else if let minutes = urgent?.fallbackWindowMinutes {
           info = "\(minutes)m window"
         } else {
@@ -188,19 +185,19 @@ private struct TripleUsageDonutView: View {
   var body: some View {
     ZStack {
       Circle()
-        .stroke(Color.secondary.opacity(0.25), lineWidth: 4)
+        .stroke(Color.secondary.opacity(0.25), lineWidth: 2)
         .frame(width: 22, height: 22)
-      ring(for: outerState, lineWidth: 5, size: 22)
+      ring(for: outerState, lineWidth: 2, size: 22)
 
       Circle()
-        .stroke(Color.secondary.opacity(0.22), lineWidth: 4)
+        .stroke(Color.secondary.opacity(0.22), lineWidth: 2)
         .frame(width: 16, height: 16)
-      ring(for: middleState, lineWidth: 4, size: 16)
+      ring(for: middleState, lineWidth: 2, size: 16)
 
       Circle()
-        .stroke(Color.secondary.opacity(0.2), lineWidth: 4)
+        .stroke(Color.secondary.opacity(0.2), lineWidth: 2)
         .frame(width: 10, height: 10)
-      ring(for: innerState, lineWidth: 4, size: 10)
+      ring(for: innerState, lineWidth: 2, size: 10)
     }
   }
 
@@ -245,7 +242,7 @@ private struct UsageStatusPopover: View {
 
   @ViewBuilder
   private func content(referenceDate: Date) -> some View {
-    let providers = UsageProviderKind.allCases
+    let providers: [UsageProviderKind] = [.codex, .claude, .gemini]
     VStack(alignment: .leading, spacing: 12) {
       ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
         VStack(alignment: .leading, spacing: 8) {
@@ -320,7 +317,7 @@ private struct UsageStatusPopover: View {
     switch provider {
     case .codex: return "ChatGPTIcon"
     case .claude: return "ClaudeIcon"
-    case .gemini: return nil
+    case .gemini: return "GeminiIcon"
     }
   }
 
@@ -442,9 +439,10 @@ private struct MetricDisplayState {
     }
   }
 
-  private static func remainingText(for metric: UsageMetricSnapshot, referenceDate: Date) -> String? {
+  private static func remainingText(for metric: UsageMetricSnapshot, referenceDate: Date) -> String?
+  {
     guard let resetDate = metric.resetDate else {
-      return metric.usageText // Fallback to cached text if no reset date
+      return metric.usageText  // Fallback to cached text if no reset date
     }
 
     let remaining = resetDate.timeIntervalSince(referenceDate)
@@ -495,7 +493,7 @@ private struct MetricDisplayState {
 
   private static func resetDescription(for metric: UsageMetricSnapshot) -> String {
     if let date = metric.resetDate {
-      let prefix = metric.kind == .sessionExpiry ? "Expires at " : "Resets "
+      let prefix = metric.kind == .sessionExpiry ? "Expires at " : ""
       return prefix + Self.resetFormatter.string(from: date)
     }
     if let minutes = metric.fallbackWindowMinutes {

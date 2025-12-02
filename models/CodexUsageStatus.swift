@@ -57,14 +57,16 @@ extension CodexUsageStatus {
 
     var primaryPercentText: String? {
         guard let percent = primaryWindowUsedPercent else { return nil }
-        return NumberFormatter.compactPercentFormatter.string(from: NSNumber(value: percent / 100.0))
-            ?? String(format: "%.0f%%", percent)
+        let remainingPercent = 100.0 - percent
+        return NumberFormatter.compactPercentFormatter.string(from: NSNumber(value: remainingPercent / 100.0))
+            ?? String(format: "%.0f%%", remainingPercent)
     }
 
     var secondaryPercentText: String? {
         guard let percent = secondaryWindowUsedPercent else { return nil }
-        return NumberFormatter.compactPercentFormatter.string(from: NSNumber(value: percent / 100.0))
-            ?? String(format: "%.0f%%", percent)
+        let remainingPercent = 100.0 - percent
+        return NumberFormatter.compactPercentFormatter.string(from: NSNumber(value: remainingPercent / 100.0))
+            ?? String(format: "%.0f%%", remainingPercent)
     }
 
     var primaryUsageText: String? {
@@ -85,12 +87,14 @@ extension CodexUsageStatus {
 
     var primaryProgress: Double? {
         guard let percent = primaryWindowUsedPercent else { return nil }
-        return percent / 100.0
+        let remainingPercent = 100.0 - percent
+        return remainingPercent / 100.0
     }
 
     var secondaryProgress: Double? {
         guard let percent = secondaryWindowUsedPercent else { return nil }
-        return percent / 100.0
+        let remainingPercent = 100.0 - percent
+        return remainingPercent / 100.0
     }
 
     func asProviderSnapshot() -> UsageProviderSnapshot {

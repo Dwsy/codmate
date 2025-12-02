@@ -635,7 +635,7 @@ final class SessionListViewModel: ObservableObject {
         if geminiOrigin == .thirdParty {
           self.setUsageSnapshot(.gemini, Self.thirdPartyUsageSnapshot(for: .gemini))
         } else {
-          self.setInitialGeminiPlaceholder()
+          self.refreshGeminiUsageStatus()
         }
       }
     }
@@ -762,6 +762,7 @@ final class SessionListViewModel: ObservableObject {
       if claudeUsageAutoRefreshEnabled {
         refreshClaudeUsageStatus()
       }
+      refreshGeminiUsageStatus()
       schedulePathTreeRefresh()
     } catch {
       if token == activeRefreshToken {
@@ -2281,10 +2282,6 @@ extension SessionListViewModel {
 
   private func setInitialClaudePlaceholder() {
     self.setClaudeUsagePlaceholder("Load Claude usage", action: .refresh)
-  }
-
-  private func setInitialGeminiPlaceholder() {
-    self.setGeminiUsagePlaceholder("Load Gemini usage", action: .refresh)
   }
 
   private func setClaudeUsagePlaceholder(
