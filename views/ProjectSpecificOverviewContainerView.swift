@@ -27,6 +27,9 @@ struct ProjectSpecificOverviewContainerView: View {
             onSelectSession: onSelectSession,
             onResumeSession: onResumeSession,
             onFocusToday: onFocusToday,
+            onSelectDate: { date in
+                sessionListViewModel.setSelectedDay(date)
+            },
             onEditProject: onEditProject
         )
         // Update the project in the ViewModel if it changes from outside

@@ -3,6 +3,7 @@ import Charts
 
 struct OverviewActivityChart: View {
     let data: ActivityChartData
+    var onSelectDate: ((Date) -> Void)?
     
     @State private var selectedMetric: Metric = .count
     @State private var hiddenSources: Set<SessionSource.Kind> = []
@@ -189,6 +190,12 @@ struct OverviewActivityChart: View {
                                                 }
                                             case .ended:
                                                 hoverDate = nil
+                                            }
+                                        }
+                                        .onTapGesture(count: 1, coordinateSpace: .local) { location in
+                                            if let date = proxy.value(atX: location.x, as: Date.self),
+                                               let snapped = snapDate(date, dates: uniqueDates) {
+                                                onSelectDate?(snapped)
                                             }
                                         }
                                 }

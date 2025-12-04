@@ -5,6 +5,7 @@ struct AllOverviewView: View {
   var onSelectSession: (SessionSummary) -> Void
   var onResumeSession: (SessionSummary) -> Void
   var onFocusToday: () -> Void
+  var onSelectDate: (Date) -> Void
   var onSelectProject: (String) -> Void
 
   private func columns(for width: CGFloat) -> [GridItem] {
@@ -34,7 +35,7 @@ struct AllOverviewView: View {
             OverviewLoadingPlaceholder()
           } else {
             if !snapshot.activityChartData.points.isEmpty {
-               OverviewActivityChart(data: snapshot.activityChartData)
+               OverviewActivityChart(data: snapshot.activityChartData, onSelectDate: onSelectDate)
             }
             heroSection(columns: cols)
             efficiencySection(columns: cols)

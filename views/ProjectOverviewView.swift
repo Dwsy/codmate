@@ -6,6 +6,7 @@ struct ProjectOverviewView: View {
   var onSelectSession: (SessionSummary) -> Void
   var onResumeSession: (SessionSummary) -> Void  // Keeping this for consistency, though not used in ProjectOverviewViewModel directly
   var onFocusToday: () -> Void  // Keeping this for consistency, though not used in ProjectOverviewViewModel directly
+  var onSelectDate: (Date) -> Void
   var onEditProject: (Project) -> Void
 
   private func columns(for width: CGFloat) -> [GridItem] {
@@ -33,7 +34,7 @@ struct ProjectOverviewView: View {
           headerSection
           
           if !snapshot.activityChartData.points.isEmpty {
-             OverviewActivityChart(data: snapshot.activityChartData)
+             OverviewActivityChart(data: snapshot.activityChartData, onSelectDate: onSelectDate)
           }
 
           heroSection(columns: cols)

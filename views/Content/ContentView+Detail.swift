@@ -127,6 +127,7 @@ extension ContentView {
         onSelectSession: { focusSessionFromOverview($0) },
         onResumeSession: { resumeFromList($0) },
         onFocusToday: { focusTodayFromOverview() }, // No longer visible but still part of API
+        onSelectDate: { focusDateFromOverview($0) },
         onSelectProject: { focusProjectFromOverview(id: $0) }
       )
     } else if let project = currentSelectedProject() {
@@ -182,6 +183,15 @@ extension ContentView {
     viewModel.selectedDays = [today]
     viewModel.setSidebarMonthStart(today)
     isListHidden = false
+  }
+
+  func focusDateFromOverview(_ date: Date) {
+      let calendar = Calendar.current
+      let day = calendar.startOfDay(for: date)
+      viewModel.selectedDay = day
+      viewModel.selectedDays = [day]
+      viewModel.setSidebarMonthStart(day)
+      isListHidden = false
   }
 
   func focusProjectFromOverview(id: String) {
