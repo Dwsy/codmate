@@ -552,6 +552,15 @@ struct ClaudeSessionParser {
         var tokenCacheRead: Int = 0
         var tokenCacheCreation: Int = 0
         var seenMessageIds: Set<String> = []
+        var usageByMessageId: [String: UsageSnapshot] = [:]
+
+        struct UsageSnapshot {
+            let total: Int
+            let input: Int
+            let output: Int
+            let cacheRead: Int
+            let cacheCreation: Int
+        }
 
         mutating func consume(
             _ line: ClaudeLogLine,
@@ -577,17 +586,49 @@ struct ClaudeSessionParser {
             let messageId = line.message?.id
             let isNewMessage = messageId.map { seenMessageIds.insert($0).inserted } ?? true
 
-            if isNewMessage, let usage = line.message?.usage {
-                totalTokens &+= usage.totalTokens
-                tokenInput &+= usage.inputTokens ?? 0
-                tokenOutput &+= usage.outputTokens ?? 0
-                tokenCacheRead &+= usage.cacheReadInputTokens ?? 0
-                let creation = (usage.cacheCreationInputTokens ?? 0) +
-                    (usage.cacheCreation?.ephemeral5m ?? 0) +
-                    (usage.cacheCreation?.ephemeral1h ?? 0)
-                tokenCacheCreation &+= creation
-            } else if isNewMessage, let usageTokens, usageTokens > 0 {
-                totalTokens &+= usageTokens
+            if let usage = line.message?.usage {
+                let snapshot = UsageSnapshot(
+                    total: usage.totalTokens,
+                    input: usage.inputTokens ?? 0,
+                    output: usage.outputTokens ?? 0,
+                    cacheRead: usage.cacheReadInputTokens ?? 0,
+                    cacheCreation: (usage.cacheCreationInputTokens ?? 0)
+                        + (usage.cacheCreation?.ephemeral5m ?? 0)
+                        + (usage.cacheCreation?.ephemeral1h ?? 0)
+                )
+                applyUsage(snapshot: snapshot, messageId: messageId, isNewMessage: isNewMessage)
+            } else if let usageTokens, usageTokens > 0 {
+                let snapshot = UsageSnapshot(total: usageTokens, input: 0, output: 0, cacheRead: 0, cacheCreation: 0)
+                applyUsage(snapshot: snapshot, messageId: messageId, isNewMessage: isNewMessage)
+            }
+        }
+
+        private mutating func applyUsage(snapshot: UsageSnapshot, messageId: String?, isNewMessage: Bool) {
+            // For messages with IDs, accumulate deltas (streamed usage updates share the same ID)
+            if let messageId {
+                let previous = usageByMessageId[messageId]
+                let deltaTotal = snapshot.total - (previous?.total ?? 0)
+                let deltaInput = snapshot.input - (previous?.input ?? 0)
+                let deltaOutput = snapshot.output - (previous?.output ?? 0)
+                let deltaCacheRead = snapshot.cacheRead - (previous?.cacheRead ?? 0)
+                let deltaCacheCreation = snapshot.cacheCreation - (previous?.cacheCreation ?? 0)
+
+                if deltaTotal > 0 { totalTokens &+= deltaTotal }
+                if deltaInput > 0 { tokenInput &+= deltaInput }
+                if deltaOutput > 0 { tokenOutput &+= deltaOutput }
+                if deltaCacheRead > 0 { tokenCacheRead &+= deltaCacheRead }
+                if deltaCacheCreation > 0 { tokenCacheCreation &+= deltaCacheCreation }
+                usageByMessageId[messageId] = snapshot
+                return
+            }
+
+            // Messages without IDs: retain legacy behavior to avoid over-counting duplicated lines.
+            if isNewMessage {
+                totalTokens &+= snapshot.total
+                tokenInput &+= snapshot.input
+                tokenOutput &+= snapshot.output
+                tokenCacheRead &+= snapshot.cacheRead
+                tokenCacheCreation &+= snapshot.cacheCreation
             }
         }
 

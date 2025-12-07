@@ -226,19 +226,22 @@ struct SessionDetailView: View {
                 }
                 .task(id: instructionsExpanded) {
                     guard instructionsExpanded else { return }
+                    guard instructionsText == nil else { return }
+
+                    if let cached = await viewModel.cachedInstructions(for: summary), !cached.isEmpty {
+                        instructionsText = cached
+                        return
+                    }
+
                     guard !summary.source.isRemote else {
-                        instructionsText = nil
                         instructionsLoading = false
                         return
                     }
-                    if instructionsText == nil
-                        && (summary.instructions == nil || summary.instructions?.isEmpty == true)
-                    {
-                        instructionsLoading = true
-                        defer { instructionsLoading = false }
-                        if let loaded = try? loader.loadInstructions(url: summary.fileURL) {
-                            instructionsText = loaded
-                        }
+
+                    instructionsLoading = true
+                    defer { instructionsLoading = false }
+                    if let loaded = try? loader.loadInstructions(url: summary.fileURL) {
+                        instructionsText = loaded
                     }
                 }
             } label: {

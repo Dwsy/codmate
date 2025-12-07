@@ -102,7 +102,7 @@ final class SessionListViewModel: ObservableObject {
   let preferences: SessionPreferencesStore
   private var sessionsRoot: URL { preferences.sessionsRoot }
 
-  private let indexer: SessionIndexer
+  internal let indexer: SessionIndexer
   let actions: SessionActions
   var allSessions: [SessionSummary] = [] {
     didSet {
@@ -3696,6 +3696,12 @@ extension SessionListViewModel {
 
   func projectId(for sessionId: String, source: ProjectSessionSource) -> String? {
     projectMemberships[membershipKey(for: sessionId, source: source)]
+  }
+
+  func cachedInstructions(for summary: SessionSummary) async -> String? {
+    let projectId = projectId(for: summary)
+    let keys = SessionIndexSQLiteStore.candidateProjectKeys(projectId: projectId, cwd: summary.cwd)
+    return await indexer.cachedInstructions(forKeys: keys)
   }
 
   func sessionSummary(for id: String) -> SessionSummary? {

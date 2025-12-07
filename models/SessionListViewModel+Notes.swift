@@ -25,6 +25,8 @@ extension SessionListViewModel {
             notesSnapshot[session.id] = updatedNote
         }
 
+        await indexer.updateUserMetadata(sessionId: session.id, title: titleValue, comment: commentValue)
+
         // Update the session in place to preserve sorting and trigger didSet observer
         allSessions = allSessions.map { s in
             guard s.id == session.id else { return s }

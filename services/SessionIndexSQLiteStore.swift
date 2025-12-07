@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import OSLog
 import SQLite3
@@ -32,7 +33,8 @@ enum SessionIndexSQLiteStoreError: Error {
 
 /// SQLite 持久化缓存，负责 sessions 汇总数据的存储与读取。
   actor SessionIndexSQLiteStore {
-    static let schemaVersion = 1
+    static let schemaVersion = 2
+    static let instructionsPreviewLimit = 128
 
     private let logger = Logger(subsystem: "io.umate.codmate", category: "SessionIndexSQLiteStore")
     private let dbURL: URL
@@ -46,8 +48,12 @@ enum SessionIndexSQLiteStoreError: Error {
     } else {
       directory = fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".codmate", isDirectory: true)
     }
+    let legacyURL = directory.appendingPathComponent("sessionIndex-v3.db")
+    if fileManager.fileExists(atPath: legacyURL.path) {
+      try? fileManager.removeItem(at: legacyURL)
+    }
     try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-    dbURL = directory.appendingPathComponent("sessionIndex-v3.db")
+    dbURL = directory.appendingPathComponent("sessionIndex-v4.db")
   }
 
   // MARK: - Public API
@@ -55,6 +61,8 @@ enum SessionIndexSQLiteStoreError: Error {
   func reset() throws {
     closeDatabase()
     try? FileManager.default.removeItem(at: dbURL)
+    let legacy = dbURL.deletingLastPathComponent().appendingPathComponent("sessionIndex-v3.db")
+    try? FileManager.default.removeItem(at: legacy)
   }
 
   /// 更新全量索引完成时间和记录数。
@@ -257,6 +265,7 @@ enum SessionIndexSQLiteStoreError: Error {
     fileModificationTime: Date?,
     fileSize: UInt64?,
     tokenBreakdown: SessionTokenBreakdown?,
+    fullInstructions: String? = nil,
     parseError: String? = nil,
     parseLevel: String = "full"  // "metadata" | "full" | "enriched"
   ) throws {
@@ -287,6 +296,11 @@ enum SessionIndexSQLiteStoreError: Error {
         }
       }
     }
+
+    let resolvedProjectKey = Self.resolveProjectKey(projectId: project, cwd: summary.cwd)
+    let normalizedFullInstructions = Self.normalizeInstructions(fullInstructions ?? summary.instructions)
+    let instructionsPreview = Self.instructionsPreview(from: normalizedFullInstructions)
+    let cachedSummary = summary.withInstructionPreview(instructionsPreview)
 
     let sql = """
     INSERT INTO sessions (
@@ -357,48 +371,48 @@ enum SessionIndexSQLiteStoreError: Error {
     }
     defer { sqlite3_finalize(stmt) }
 
-    let responseCountsJSON = (try? JSONEncoder().encode(summary.responseCounts)).flatMap {
+    let responseCountsJSON = (try? JSONEncoder().encode(cachedSummary.responseCounts)).flatMap {
       String(data: $0, encoding: .utf8)
     }
-    let summaryData = try JSONEncoder().encode(summary)
+    let summaryData = try JSONEncoder().encode(cachedSummary)
 
-    bindText(stmt, index: 1, value: summary.id)
-    bindText(stmt, index: 2, value: summary.fileURL.path)
+    bindText(stmt, index: 1, value: cachedSummary.id)
+    bindText(stmt, index: 2, value: cachedSummary.fileURL.path)
     bindDate(stmt, index: 3, value: fileModificationTime)
     bindInt64(stmt, index: 4, value: fileSize.map(Int64.init))
     sqlite3_bind_int(stmt, 5, Int32(Self.schemaVersion))
     bindText(stmt, index: 6, value: parseError)
     bindText(stmt, index: 7, value: project)
-    let sourceEncoding = encode(source: summary.source)
+    let sourceEncoding = encode(source: cachedSummary.source)
     bindText(stmt, index: 8, value: sourceEncoding.kind)
     bindText(stmt, index: 9, value: sourceEncoding.host)
-    bindDate(stmt, index: 10, value: summary.startedAt)
-    bindDate(stmt, index: 11, value: summary.endedAt)
-    bindDate(stmt, index: 12, value: summary.lastUpdatedAt)
-    bindDouble(stmt, index: 13, value: summary.activeDuration)
-    bindText(stmt, index: 14, value: summary.cliVersion)
-    bindText(stmt, index: 15, value: summary.cwd)
-    bindText(stmt, index: 16, value: summary.originator)
-    bindText(stmt, index: 17, value: summary.instructions)
-    bindText(stmt, index: 18, value: summary.model)
-    bindText(stmt, index: 19, value: summary.approvalPolicy)
-    sqlite3_bind_int(stmt, 20, Int32(summary.userMessageCount))
-    sqlite3_bind_int(stmt, 21, Int32(summary.assistantMessageCount))
-    sqlite3_bind_int(stmt, 22, Int32(summary.toolInvocationCount))
-    sqlite3_bind_int(stmt, 23, Int32(summary.responseCounts["reasoning"] ?? 0))
+    bindDate(stmt, index: 10, value: cachedSummary.startedAt)
+    bindDate(stmt, index: 11, value: cachedSummary.endedAt)
+    bindDate(stmt, index: 12, value: cachedSummary.lastUpdatedAt)
+    bindDouble(stmt, index: 13, value: cachedSummary.activeDuration)
+    bindText(stmt, index: 14, value: cachedSummary.cliVersion)
+    bindText(stmt, index: 15, value: cachedSummary.cwd)
+    bindText(stmt, index: 16, value: cachedSummary.originator)
+    bindText(stmt, index: 17, value: instructionsPreview)
+    bindText(stmt, index: 18, value: cachedSummary.model)
+    bindText(stmt, index: 19, value: cachedSummary.approvalPolicy)
+    sqlite3_bind_int(stmt, 20, Int32(cachedSummary.userMessageCount))
+    sqlite3_bind_int(stmt, 21, Int32(cachedSummary.assistantMessageCount))
+    sqlite3_bind_int(stmt, 22, Int32(cachedSummary.toolInvocationCount))
+    sqlite3_bind_int(stmt, 23, Int32(cachedSummary.responseCounts["reasoning"] ?? 0))
     bindText(stmt, index: 24, value: responseCountsJSON)
-    sqlite3_bind_int(stmt, 25, Int32(summary.turnContextCount))
+    sqlite3_bind_int(stmt, 25, Int32(cachedSummary.turnContextCount))
     bindInt(stmt, index: 26, value: tokenBreakdown?.input)
     bindInt(stmt, index: 27, value: tokenBreakdown?.output)
     bindInt(stmt, index: 28, value: tokenBreakdown?.cacheRead)
     bindInt(stmt, index: 29, value: tokenBreakdown?.cacheCreation)
-    bindInt(stmt, index: 30, value: summary.totalTokens)
-    sqlite3_bind_int(stmt, 31, Int32(summary.eventCount))
-    sqlite3_bind_int(stmt, 32, Int32(summary.lineCount))
-    bindText(stmt, index: 33, value: summary.remotePath)
-    bindText(stmt, index: 34, value: summary.userTitle)
-    bindText(stmt, index: 35, value: summary.userComment)
-    bindText(stmt, index: 36, value: summary.taskId?.uuidString)
+    bindInt(stmt, index: 30, value: cachedSummary.totalTokens)
+    sqlite3_bind_int(stmt, 31, Int32(cachedSummary.eventCount))
+    sqlite3_bind_int(stmt, 32, Int32(cachedSummary.lineCount))
+    bindText(stmt, index: 33, value: cachedSummary.remotePath)
+    bindText(stmt, index: 34, value: cachedSummary.userTitle)
+    bindText(stmt, index: 35, value: cachedSummary.userComment)
+    bindText(stmt, index: 36, value: cachedSummary.taskId?.uuidString)
     sqlite3_bind_int(stmt, 37, 0) // has_terminal (placeholder)
     sqlite3_bind_int(stmt, 38, 0) // has_review (placeholder)
     bindData(stmt, index: 39, data: summaryData)
@@ -409,6 +423,33 @@ enum SessionIndexSQLiteStoreError: Error {
     guard stepResult == SQLITE_DONE else {
       throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
     }
+
+    if let resolvedProjectKey, let normalizedFullInstructions {
+      try upsertProject(
+        projectKey: resolvedProjectKey,
+        fullInstructions: normalizedFullInstructions,
+        preview: instructionsPreview
+      )
+    }
+  }
+
+  /// Fetch full instructions for the first matching project key.
+  func fetchProjectInstructions(keys: [String]) throws -> String? {
+    try openIfNeeded()
+    guard !keys.isEmpty else { return nil }
+    let sql = "SELECT instructions_full FROM projects WHERE project_key = ?1 LIMIT 1"
+    for key in keys {
+      var stmt: OpaquePointer?
+      guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+        throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
+      }
+      defer { sqlite3_finalize(stmt) }
+      sqlite3_bind_text(stmt, 1, key, -1, SQLITE_TRANSIENT)
+      if sqlite3_step(stmt) == SQLITE_ROW {
+        return columnText(stmt, index: 0)
+      }
+    }
+    return nil
   }
 
   /// Update project assignment for a session without touching other fields.
@@ -422,6 +463,50 @@ enum SessionIndexSQLiteStoreError: Error {
     defer { sqlite3_finalize(stmt) }
     bindText(stmt, index: 1, value: project)
     sqlite3_bind_text(stmt, 2, sessionId, -1, SQLITE_TRANSIENT)
+    guard sqlite3_step(stmt) == SQLITE_DONE else {
+      throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
+    }
+  }
+
+  func updateUserMetadata(sessionId: String, title: String?, comment: String?) throws {
+    try openIfNeeded()
+    let sql = "UPDATE sessions SET user_title = ?1, user_comment = ?2 WHERE session_id = ?3"
+    var stmt: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+      throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
+    }
+    defer { sqlite3_finalize(stmt) }
+    bindText(stmt, index: 1, value: title)
+    bindText(stmt, index: 2, value: comment)
+    sqlite3_bind_text(stmt, 3, sessionId, -1, SQLITE_TRANSIENT)
+    guard sqlite3_step(stmt) == SQLITE_DONE else {
+      throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
+    }
+  }
+
+  private func upsertProject(
+    projectKey: String,
+    fullInstructions: String,
+    preview: String?
+  ) throws {
+    try openIfNeeded()
+    let sql = """
+    INSERT INTO projects (project_key, instructions_full, instructions_preview, updated_at)
+    VALUES (?1, ?2, ?3, ?4)
+    ON CONFLICT(project_key) DO UPDATE SET
+      instructions_full=excluded.instructions_full,
+      instructions_preview=excluded.instructions_preview,
+      updated_at=excluded.updated_at
+    """
+    var stmt: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+      throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
+    }
+    defer { sqlite3_finalize(stmt) }
+    sqlite3_bind_text(stmt, 1, projectKey, -1, SQLITE_TRANSIENT)
+    sqlite3_bind_text(stmt, 2, fullInstructions, -1, SQLITE_TRANSIENT)
+    bindText(stmt, index: 3, value: preview)
+    bindDate(stmt, index: 4, value: Date())
     guard sqlite3_step(stmt) == SQLITE_DONE else {
       throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
     }
@@ -608,6 +693,26 @@ enum SessionIndexSQLiteStoreError: Error {
       parse_level TEXT DEFAULT 'metadata',
       parsed_at REAL
     );
+    CREATE TABLE IF NOT EXISTS projects (
+      project_key TEXT PRIMARY KEY,
+      instructions_full TEXT,
+      instructions_preview TEXT,
+      updated_at REAL
+    );
+    CREATE TABLE IF NOT EXISTS timeline_previews (
+      session_id TEXT NOT NULL,
+      turn_id TEXT NOT NULL,
+      turn_index INTEGER NOT NULL,
+      timestamp REAL NOT NULL,
+      user_preview TEXT,
+      outputs_preview TEXT,
+      output_count INTEGER,
+      has_tool_calls INTEGER,
+      has_thinking INTEGER,
+      file_mtime REAL,
+      file_size INTEGER,
+      PRIMARY KEY (session_id, turn_id)
+    );
     """
     try exec(createSQL)
     try exec("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);")
@@ -615,6 +720,7 @@ enum SessionIndexSQLiteStoreError: Error {
     try exec("CREATE INDEX IF NOT EXISTS idx_sessions_started ON sessions(started_at);")
     try exec("CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source);")
     try exec("CREATE INDEX IF NOT EXISTS idx_sessions_parse_level ON sessions(parse_level);")
+    try exec("CREATE INDEX IF NOT EXISTS idx_timeline_previews_session ON timeline_previews(session_id);")
   }
 
   @discardableResult
@@ -631,6 +737,50 @@ enum SessionIndexSQLiteStoreError: Error {
       throw SessionIndexSQLiteStoreError.stepFailed("Unknown SQLite error")
     }
     return code
+  }
+
+  // MARK: - Instructions & project key helpers
+
+  static func normalizeInstructions(_ text: String?) -> String? {
+    guard let text else { return nil }
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
+
+  static func instructionsPreview(from text: String?) -> String? {
+    guard let text else { return nil }
+    let collapsed = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.joined(separator: " ")
+    guard !collapsed.isEmpty else { return nil }
+    if collapsed.count <= instructionsPreviewLimit { return collapsed }
+    let idx = collapsed.index(collapsed.startIndex, offsetBy: instructionsPreviewLimit)
+    return String(collapsed[..<idx])
+  }
+
+  static func resolveProjectKey(projectId: String?, cwd: String?) -> String? {
+    if let projectId, !projectId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return projectId.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    guard let cwd else { return nil }
+    return makeCwdHash(from: cwd)
+  }
+
+  static func candidateProjectKeys(projectId: String?, cwd: String?) -> [String] {
+    var keys: [String] = []
+    if let projectId, !projectId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      keys.append(projectId.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    if let cwd, let cwdHash = makeCwdHash(from: cwd) {
+      if !keys.contains(cwdHash) { keys.append(cwdHash) }
+    }
+    return keys
+  }
+
+  private static func makeCwdHash(from cwd: String) -> String? {
+    let expanded = (cwd as NSString).expandingTildeInPath
+    let canonical = URL(fileURLWithPath: expanded).standardizedFileURL.path
+    guard let data = canonical.data(using: .utf8) else { return nil }
+    let digest = SHA256.hash(data: data)
+    return digest.map { String(format: "%02x", $0) }.joined()
   }
 
   private var errorMessage: String {

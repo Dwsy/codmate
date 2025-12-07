@@ -223,6 +223,40 @@ extension SessionSummary {
         return s
     }
 
+    func withInstructionPreview(_ preview: String?) -> SessionSummary {
+        var s = SessionSummary(
+            id: id,
+            fileURL: fileURL,
+            fileSizeBytes: fileSizeBytes,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            activeDuration: activeDuration,
+            cliVersion: cliVersion,
+            cwd: cwd,
+            originator: originator,
+            instructions: preview,
+            model: model,
+            approvalPolicy: approvalPolicy,
+            userMessageCount: userMessageCount,
+            assistantMessageCount: assistantMessageCount,
+            toolInvocationCount: toolInvocationCount,
+            responseCounts: responseCounts,
+            turnContextCount: turnContextCount,
+            totalTokens: totalTokens,
+            tokenBreakdown: tokenBreakdown,
+            eventCount: eventCount,
+            lineCount: lineCount,
+            lastUpdatedAt: lastUpdatedAt,
+            source: source,
+            remotePath: remotePath,
+            userTitle: userTitle,
+            userComment: userComment,
+            taskId: taskId
+        )
+        s.parseLevel = parseLevel
+        return s
+    }
+
     func withRemoteMetadata(source: SessionSource, remotePath: String) -> SessionSummary {
         return overridingSource(source, remotePath: remotePath)
     }

@@ -294,29 +294,31 @@ actor SessionIndexer {
               }
               
               guard let result = summary else { return .success(nil) }
+              let (cachedSummary, normalizedFullInstructions) = self.prepareSummaryForCache(result)
               
               // Track zero-token stability to avoid re-scans next time if still zero
               await self.updateZeroTokenStable(
-                path: url.path, modificationDate: modificationDate, tokens: result.actualTotalTokens)
+                path: url.path, modificationDate: modificationDate, tokens: cachedSummary.actualTotalTokens)
               // Persist to SQLite (best-effort)
               do {
                 try await self.sqliteStore.upsert(
-                  summary: result,
+                  summary: cachedSummary,
                   project: nil,
                   fileModificationTime: modificationDate,
                   fileSize: fileSize.flatMap { UInt64($0) },
-                  tokenBreakdown: result.tokenBreakdown,
+                  tokenBreakdown: cachedSummary.tokenBreakdown,
+                  fullInstructions: normalizedFullInstructions,
                   parseError: nil,
-                  parseLevel: result.parseLevel?.rawValue ?? "metadata")
+                  parseLevel: cachedSummary.parseLevel?.rawValue ?? "metadata")
               } catch {
                 self.logger.error(
                   "Failed to persist session summary: \(error.localizedDescription, privacy: .public) path=\(url.path, privacy: .public)"
                 )
               }
               await self.store(
-                summary: result, for: url as NSURL,
+                summary: cachedSummary, for: url as NSURL,
                 modificationDate: modificationDate)
-              return .success(result)
+              return .success(cachedSummary)
             } catch {
               return .failure(error)
             }
@@ -417,6 +419,11 @@ actor SessionIndexer {
     return try? await sqliteStore.fetchOverviewAggregate(scope: scope)
   }
 
+  func cachedInstructions(forKeys keys: [String]) async -> String? {
+    guard !keys.isEmpty else { return nil }
+    return try? await sqliteStore.fetchProjectInstructions(keys: keys)
+  }
+
   /// Current cache coverage (sources present + meta).
   func currentCoverage() async -> SessionIndexCoverage? {
     return try? await sqliteStore.fetchCoverage()
@@ -426,23 +433,32 @@ actor SessionIndexer {
   func cacheExternalSummaries(_ summaries: [SessionSummary]) async {
     guard !summaries.isEmpty else { return }
     for summary in summaries {
+      let (cachedSummary, normalizedFullInstructions) = prepareSummaryForCache(summary)
       do {
         try await sqliteStore.upsert(
-          summary: summary,
+          summary: cachedSummary,
           project: nil,
           fileModificationTime: nil,
-          fileSize: summary.fileSizeBytes,
-          tokenBreakdown: summary.tokenBreakdown,
+          fileSize: cachedSummary.fileSizeBytes,
+          tokenBreakdown: cachedSummary.tokenBreakdown,
+          fullInstructions: normalizedFullInstructions,
           parseError: nil
         )
       } catch {
-        logger.error("Failed to cache external summary \(summary.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        logger.error("Failed to cache external summary \(cachedSummary.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
       }
     }
     logger.info("Cached external summaries count=\(summaries.count, privacy: .public)")
   }
 
   // MARK: - Private
+
+  nonisolated private func prepareSummaryForCache(_ summary: SessionSummary) -> (SessionSummary, String?) {
+    let normalizedFull = SessionIndexSQLiteStore.normalizeInstructions(summary.instructions)
+    let preview = SessionIndexSQLiteStore.instructionsPreview(from: normalizedFull)
+    let cached = summary.withInstructionPreview(preview)
+    return (cached, normalizedFull)
+  }
 
   private func cachedSummary(for key: NSURL, modificationDate: Date?) -> SessionSummary? {
     guard let entry = cache.object(forKey: key) else {
@@ -1058,15 +1074,18 @@ actor SessionIndexer {
     )
     enriched.parseLevel = .enriched
 
+    let (cachedEnriched, normalizedFullInstructions) = prepareSummaryForCache(enriched)
+
     // Persist to in-memory and disk caches keyed by mtime
-    store(summary: enriched, for: url as NSURL, modificationDate: values.contentModificationDate)
+    store(summary: cachedEnriched, for: url as NSURL, modificationDate: values.contentModificationDate)
     do {
       try await sqliteStore.upsert(
-        summary: enriched,
+        summary: cachedEnriched,
         project: nil,
         fileModificationTime: values.contentModificationDate,
         fileSize: values.fileSize.flatMap { UInt64($0) },
-        tokenBreakdown: enriched.tokenBreakdown,
+        tokenBreakdown: cachedEnriched.tokenBreakdown,
+        fullInstructions: normalizedFullInstructions,
         parseError: nil,
         parseLevel: "enriched")  // Full parse + activeDuration computation
     } catch {
@@ -1074,7 +1093,7 @@ actor SessionIndexer {
         "Failed to persist enriched summary: \(error.localizedDescription, privacy: .public) path=\(url.path, privacy: .public)"
       )
     }
-    return enriched
+    return cachedEnriched
   }
 
   // Compute sum of turn durations: for each turn, duration = (last output timestamp - user message timestamp).
@@ -1244,6 +1263,15 @@ actor SessionIndexer {
     }
   }
 
+  /// Persist user-provided title/comment into the SQLite cache for consistency.
+  func updateUserMetadata(sessionId: String, title: String?, comment: String?) async {
+    do {
+      try await sqliteStore.updateUserMetadata(sessionId: sessionId, title: title, comment: comment)
+    } catch {
+      logger.error("Failed to update user metadata for \(sessionId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+    }
+  }
+
   /// Returns cached summaries when a full index already exists.
   func cachedAllSummaries() async throws -> [SessionSummary]? {
     return try await cachedAllSummariesFromMeta()
@@ -1344,29 +1372,32 @@ extension SessionIndexer: SessionProvider {
           failedCount += 1
           continue
         }
+        let (cachedSummary, normalizedFullInstructions) = prepareSummaryForCache(summary)
 
         // Update SQLite cache
         do {
           try await sqliteStore.upsert(
-            summary: summary,
+            summary: cachedSummary,
             project: nil,
             fileModificationTime: mtime,
             fileSize: fileSize,
-            tokenBreakdown: summary.tokenBreakdown,
-            parseError: nil
+            tokenBreakdown: cachedSummary.tokenBreakdown,
+            fullInstructions: normalizedFullInstructions,
+            parseError: nil,
+            parseLevel: cachedSummary.parseLevel?.rawValue ?? "full"
           )
         } catch {
-          logger.error("reindexFiles: failed to update cache for \(summary.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+          logger.error("reindexFiles: failed to update cache for \(cachedSummary.id, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
 
         // Update in-memory cache
         if let mtime {
-          cache.setObject(CacheEntry(modificationDate: mtime, summary: summary), forKey: url as NSURL)
+          cache.setObject(CacheEntry(modificationDate: mtime, summary: cachedSummary), forKey: url as NSURL)
         }
 
-        results.append(summary)
+        results.append(cachedSummary)
 
-        logger.debug("reindexFiles: successfully reindexed \(summary.id, privacy: .public) (\(summary.fileURL.lastPathComponent, privacy: .public))")
+        logger.debug("reindexFiles: successfully reindexed \(cachedSummary.id, privacy: .public) (\(cachedSummary.fileURL.lastPathComponent, privacy: .public))")
       } catch {
         logger.error("reindexFiles: error processing \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
         failedCount += 1
