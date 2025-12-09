@@ -16,6 +16,17 @@ final class CodexVM: ObservableObject {
     case low, medium, high
     var id: String { rawValue }
   }
+  enum FeatureOverrideState: String, Identifiable {
+    case inherit, forceOn, forceOff
+    var id: String { rawValue }
+  }
+  struct FeatureFlag: Identifiable, Equatable {
+    let name: String
+    let stage: String
+    let defaultEnabled: Bool
+    var overrideState: FeatureOverrideState
+    var id: String { name }
+  }
   enum OtelKind: String, Identifiable {
     case http, grpc
     var id: String { rawValue }
@@ -44,6 +55,10 @@ final class CodexVM: ObservableObject {
   @Published var sandboxMode: SandboxMode = .workspaceWrite
   @Published var approvalPolicy: ApprovalPolicy = .onRequest
   @Published var runtimeDirty = false
+  // Features
+  @Published var featureFlags: [FeatureFlag] = []
+  @Published var featuresLoading: Bool = false
+  @Published var featureError: String?
 
   // Notifications
   @Published var tuiNotifications: Bool = false
@@ -68,7 +83,9 @@ final class CodexVM: ObservableObject {
   @Published var lastError: String?
 
   private let service = CodexConfigService()
+  private let featuresService = CodexFeaturesService()
   private let providersRegistry = ProvidersRegistryService()
+  private var featureDefaults: [String: Bool] = [:]
   // Debounce tasks
   private var debounceProviderTask: Task<Void, Never>? = nil
   private var debounceModelTask: Task<Void, Never>? = nil
@@ -89,6 +106,7 @@ final class CodexVM: ObservableObject {
     await loadRegistryBindings()
     await loadNotifications()
     await loadPrivacy()
+    await loadFeatures()
     await reloadRawConfig()
   }
 
@@ -451,6 +469,62 @@ final class CodexVM: ObservableObject {
   func applyApproval() async {
     do { try await service.setApprovalPolicy(approvalPolicy.rawValue) } catch {
       lastError = "Save failed"
+    }
+  }
+
+  // Features
+  func loadFeatures() async {
+    featuresLoading = true
+    featureError = nil
+    do {
+      async let overridesTask = service.featureOverrides()
+      let infos = try await featuresService.listFeatures()
+      let overrides = await overridesTask
+      var defaults = featureDefaults
+      var rows: [FeatureFlag] = []
+      for info in infos {
+        let base = defaults[info.name] ?? info.enabled
+        defaults[info.name] = base
+        let state: FeatureOverrideState
+        if let override = overrides[info.name] { state = override ? .forceOn : .forceOff }
+        else { state = .inherit }
+        rows.append(FeatureFlag(name: info.name, stage: info.stage, defaultEnabled: base, overrideState: state))
+      }
+      featureDefaults = defaults
+      featureFlags = rows
+    } catch {
+      featureFlags = []
+      if let localized = (error as? LocalizedError)?.errorDescription {
+        featureError = localized
+      } else {
+        featureError = "Failed to load features"
+      }
+    }
+    featuresLoading = false
+  }
+
+  func setFeatureOverride(name: String, state: FeatureOverrideState) {
+    if let idx = featureFlags.firstIndex(where: { $0.name == name }) {
+      featureFlags[idx].overrideState = state
+    }
+    Task { await self.applyFeatureOverride(name: name, state: state) }
+  }
+
+  private func overrideValue(for state: FeatureOverrideState) -> Bool? {
+    switch state {
+    case .inherit: return nil
+    case .forceOn: return true
+    case .forceOff: return false
+    }
+  }
+
+  private func applyFeatureOverride(name: String, state: FeatureOverrideState) async {
+    do {
+      let value = overrideValue(for: state)
+      try await service.setFeatureOverride(name: name, value: value)
+      await loadFeatures()
+    } catch {
+      featureError = "Failed to update \(name)"
     }
   }
 

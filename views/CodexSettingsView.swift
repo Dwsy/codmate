@@ -20,8 +20,7 @@ struct CodexSettingsView: View {
                 }
                 Spacer(minLength: 8)
                 Link(
-                    destination: URL(
-                        string: "https://github.com/openai/codex/blob/main/docs/config.md")!
+                    destination: URL(string: "https://developers.openai.com/codex/cli")!
                 ) {
                     Label("Docs", systemImage: "questionmark.circle")
                         .labelStyle(.iconOnly)
@@ -33,6 +32,7 @@ struct CodexSettingsView: View {
             TabView {
                 Tab("Provider", systemImage: "server.rack") { providerPane }
                 Tab("Runtime", systemImage: "gearshape.2") { runtimePane }
+                Tab("Features", systemImage: "wand.and.stars") { featuresPane }
                 Tab("Notifications", systemImage: "bell") { notificationsPane }
                 Tab("Privacy", systemImage: "lock.shield") { privacyPane }
                 Tab("Raw Config", systemImage: "doc.text") { rawConfigPane }
@@ -202,6 +202,85 @@ struct CodexSettingsView: View {
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                     }
+        }
+    }
+
+    // MARK: - Features Pane
+    private var featuresPane: some View {
+        SettingsTabContent {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Feature Flags").font(.subheadline).fontWeight(.medium)
+                        Text("Inspect codex CLI features and override individual flags.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    HStack(spacing: 8) {
+                        Button {
+                            Task { await codexVM.loadFeatures() }
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                        .controlSize(.small)
+                        .disabled(codexVM.featuresLoading)
+                        if codexVM.featuresLoading {
+                            ProgressView().controlSize(.small)
+                        }
+                    }
+                }
+                if let err = codexVM.featureError {
+                    Text(err).font(.caption).foregroundStyle(.red)
+                }
+                if codexVM.featureFlags.isEmpty {
+                    Text(codexVM.featuresLoading ? "Loading features…" : "No features reported by codex CLI.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    let stageWidth: CGFloat = 120
+                    let overrideWidth: CGFloat = 180
+                    let flags = codexVM.featureFlags
+                    VStack(spacing: 10) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Feature")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text("Stage")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(width: stageWidth, alignment: .leading)
+                            Text("Override")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(width: overrideWidth, alignment: .trailing)
+                        }
+                        Divider()
+                        ForEach(Array(flags.enumerated()), id: \.element.id) { index, feature in
+                            HStack(alignment: .center, spacing: 12) {
+                                Text(feature.name)
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                Text(feature.stage.capitalized)
+                                    .font(.subheadline)
+                                    .frame(width: stageWidth, alignment: .leading)
+                                Toggle("", isOn: overrideToggleBinding(for: feature))
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
+                                    .frame(width: overrideWidth, alignment: .trailing)
+                                    .disabled(codexVM.featuresLoading)
+                            }
+                            if index < flags.count - 1 {
+                                Divider()
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -421,4 +500,34 @@ struct CodexSettingsView: View {
         Divider()
     }
 
+    private func overrideToggleBinding(for feature: CodexVM.FeatureFlag) -> Binding<Bool> {
+        Binding(
+            get: {
+                guard let live = codexVM.featureFlags.first(where: { $0.id == feature.id }) else {
+                    return feature.defaultEnabled
+                }
+                switch live.overrideState {
+                case .inherit: return live.defaultEnabled
+                case .forceOn: return true
+                case .forceOff: return false
+                }
+            },
+            set: { newValue in
+                guard let live = codexVM.featureFlags.first(where: { $0.id == feature.id }) else {
+                    codexVM.setFeatureOverride(
+                        name: feature.name,
+                        state: newValue == feature.defaultEnabled ? .inherit : (newValue ? .forceOn : .forceOff)
+                    )
+                    return
+                }
+                let desired: CodexVM.FeatureOverrideState
+                if newValue == live.defaultEnabled {
+                    desired = .inherit
+                } else {
+                    desired = newValue ? .forceOn : .forceOff
+                }
+                codexVM.setFeatureOverride(name: live.name, state: desired)
+            }
+        )
+    }
 }

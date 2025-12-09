@@ -152,6 +152,25 @@ actor CodexConfigService {
     func setSandboxMode(_ mode: String?) throws { try setTopLevelString("sandbox_mode", value: mode) }
     func setApprovalPolicy(_ policy: String?) throws { try setTopLevelString("approval_policy", value: policy) }
 
+    // MARK: - Features overrides
+
+    func featureOverrides() -> [String: Bool] {
+        let text = (try? String(contentsOf: paths.configURL, encoding: .utf8)) ?? ""
+        return parseFeatureOverrides(from: text)
+    }
+
+    func setFeatureOverride(name: String, value: Bool?) throws {
+        var text = (try? String(contentsOf: paths.configURL, encoding: .utf8)) ?? ""
+        var overrides = parseFeatureOverrides(from: text)
+        if let value {
+            overrides[name] = value
+        } else {
+            overrides.removeValue(forKey: name)
+        }
+        text = rewriteFeaturesBlock(in: text, overrides: overrides)
+        try writeConfig(text)
+    }
+
     // MARK: - TUI notifications and notify bridge
 
     func getTuiNotifications() -> Bool {
@@ -608,7 +627,10 @@ actor CodexConfigService {
         for (idx, raw) in lines.enumerated() {
             let t = raw.trimmingCharacters(in: .whitespaces)
             if t == header { start = idx; continue }
-            if start != nil && t.hasPrefix("[") { end = idx; break }
+            if start != nil && (t.hasPrefix("[") || t == mcpBeginMarker || t == mcpEndMarker) {
+                end = idx
+                break
+            }
         }
 
         if let start {
@@ -697,6 +719,37 @@ actor CodexConfigService {
             out += "\n"
         }
         return out
+    }
+
+    private func rewriteFeaturesBlock(in text: String, overrides: [String: Bool]) -> String {
+        var stripped = replaceTableBlock(header: "[features]", body: nil, in: text)
+        let entries = overrides.sorted(by: { $0.key < $1.key }).map { key, value in
+            "\(key) = \(value ? "true" : "false")"
+        }
+        guard !entries.isEmpty else { return stripped }
+        if !stripped.hasSuffix("\n") { stripped += "\n" }
+        if !stripped.hasSuffix("\n\n") { stripped += "\n" }
+        stripped += "[features]\n"
+        stripped += "# managed-by=codmate\n"
+        stripped += entries.joined(separator: "\n") + "\n\n"
+        return stripped
+    }
+
+    private func parseFeatureOverrides(from text: String) -> [String: Bool] {
+        let body = parseTableBody(table: "[features]", from: text)
+        var overrides: [String: Bool] = [:]
+        for raw in body {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty, !line.hasPrefix("#"), let eq = line.firstIndex(of: "=") else { continue }
+            let key = line[..<eq].trimmingCharacters(in: .whitespaces)
+            let value = line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces).lowercased()
+            if value == "true" {
+                overrides[key] = true
+            } else if value == "false" {
+                overrides[key] = false
+            }
+        }
+        return overrides
     }
 
     private func stripProviderLikeBlocks(from text: String) -> String {
