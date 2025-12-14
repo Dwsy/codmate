@@ -25,7 +25,9 @@ extension ContentView {
         projectWorkspaceMode: viewModel.projectWorkspaceMode,
         isAllOrOtherSelected: isAllSelected || isOtherSelected
       ) {
-        ProjectsListView()
+        ProjectsListView(onEditProject: { project in
+          presentProjectEditor(for: project)
+        })
           .environmentObject(viewModel)
       }
       .navigationSplitViewColumnWidth(min: 260, ideal: 260, max: 260)

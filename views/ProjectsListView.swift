@@ -4,8 +4,7 @@ import UniformTypeIdentifiers
 
 struct ProjectsListView: View {
   @EnvironmentObject private var viewModel: SessionListViewModel
-  @State private var editingProject: Project? = nil
-  @State private var showEdit = false
+  let onEditProject: (Project) -> Void
   @State private var showNewProject = false
   @State private var newParentProject: Project? = nil
   @State private var pendingDelete: Project? = nil
@@ -97,12 +96,6 @@ struct ProjectsListView: View {
         var merged = viewModel.expandedProjectIDs
         merged.formUnion(ids)
         viewModel.expandedProjectIDs = merged
-      }
-    }
-    .sheet(isPresented: $showEdit) {
-      if let project = editingProject {
-        ProjectEditorSheet(isPresented: $showEdit, mode: .edit(existing: project))
-          .environmentObject(viewModel)
       }
     }
     .sheet(isPresented: $showNewProject, onDismiss: { newParentProject = nil }) {
@@ -202,9 +195,8 @@ struct ProjectsListView: View {
       viewModel: viewModel,
       expanded: expandedBinding,
       onTap: { handleSelection(for: $0) },
-      onDoubleTap: {
-        editingProject = $0
-        showEdit = true
+      onDoubleTap: { project in
+        onEditProject(project)
       },
       onNewSession: { viewModel.newSession(project: $0) },
       onNewSubproject: { parent in
@@ -219,9 +211,8 @@ struct ProjectsListView: View {
           projectId: project.id
         )
       },
-      onEdit: {
-        editingProject = $0
-        showEdit = true
+      onEdit: { project in
+        onEditProject(project)
       },
       onDelete: { project in
         pendingDelete = project
