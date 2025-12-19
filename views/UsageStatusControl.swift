@@ -7,6 +7,10 @@ struct UsageStatusControl: View {
 
   @State private var showPopover = false
   @State private var isHovering = false
+  @State private var hoverPhase: Double = 0
+  @State private var hoverLockoutActive = false
+
+  private static let hoverAnimation = Animation.easeInOut(duration: 0.2)
 
   private static let countdownFormatter: DateComponentsFormatter = {
     let formatter = DateComponentsFormatter()
@@ -64,7 +68,7 @@ struct UsageStatusControl: View {
           .frame(maxWidth: isHovering ? .infinity : 0, alignment: .leading)
           .clipped()
         }
-        .animation(.easeInOut(duration: 0.2), value: isHovering)
+        .animation(Self.hoverAnimation, value: isHovering)
         .padding(.leading, 4)
         .padding(.vertical, 4)
         .padding(.trailing, isHovering ? 8 : 4)
@@ -74,7 +78,29 @@ struct UsageStatusControl: View {
       .help("View usage snapshots for Codex, Claude, and Gemini")
       .focusable(false)
       .onHover { hovering in
-        withAnimation(.easeInOut(duration: 0.2)) { isHovering = hovering }
+        if hovering {
+          guard !hoverLockoutActive else { return }
+          withAnimation(Self.hoverAnimation) {
+            isHovering = true
+            hoverPhase = 1
+          }
+        } else {
+          if isHovering {
+            hoverLockoutActive = true
+          }
+          withAnimation(Self.hoverAnimation) {
+            isHovering = false
+            hoverPhase = 0
+          }
+        }
+      }
+      .onAnimationCompleted(for: hoverPhase) {
+        guard hoverPhase == 0 else { return }
+        hoverLockoutActive = false
+      }
+      .onDisappear {
+        hoverLockoutActive = false
+        hoverPhase = 0
       }
       .popover(isPresented: $showPopover, arrowEdge: .top) {
         UsageStatusPopover(
@@ -168,6 +194,40 @@ struct UsageStatusControl: View {
       return "\(verb) \(formatted)"
     }
     return nil
+  }
+}
+
+private struct AnimationCompletionObserverModifier<Value>: AnimatableModifier
+where Value: VectorArithmetic {
+  var animatableData: Value {
+    didSet { notifyIfFinished() }
+  }
+
+  private let targetValue: Value
+  private let completion: () -> Void
+
+  init(observedValue: Value, completion: @escaping () -> Void) {
+    self.animatableData = observedValue
+    self.targetValue = observedValue
+    self.completion = completion
+  }
+
+  func body(content: Content) -> some View {
+    content
+  }
+
+  private func notifyIfFinished() {
+    guard animatableData == targetValue else { return }
+    DispatchQueue.main.async { completion() }
+  }
+}
+
+private extension View {
+  func onAnimationCompleted<Value: VectorArithmetic>(
+    for value: Value,
+    completion: @escaping () -> Void
+  ) -> some View {
+    modifier(AnimationCompletionObserverModifier(observedValue: value, completion: completion))
   }
 }
 
