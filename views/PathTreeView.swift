@@ -17,7 +17,16 @@ struct PathTreeView: View {
             .environment(\.defaultMinListRowHeight, 16)
             .environment(\.controlSize, .small)
         } else {
-            ContentUnavailableView("No Directories", systemImage: "folder")
+            if #available(macOS 14.0, *) {
+                ContentUnavailableView("No Directories", systemImage: "folder")
+            } else {
+                UnavailableStateView(
+                    "No Directories",
+                    systemImage: "folder",
+                    titleFont: .callout
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 }

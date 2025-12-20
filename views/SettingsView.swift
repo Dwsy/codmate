@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-@available(macOS 15.0, *)
 struct SettingsView: View {
   @ObservedObject var preferences: SessionPreferencesStore
   @Binding private var selectedCategory: SettingCategory
@@ -76,8 +75,8 @@ struct SettingsView: View {
           .task { await codexVM.loadAll() }
           .navigationSplitViewColumnWidth(min: 640, ideal: 800, max: 1800)
       }
-      .navigationSplitViewStyle(.balanced)
-      .toolbar(removing: .sidebarToggle)
+      .codmateNavigationSplitViewBalancedIfAvailable()
+      .codmateToolbarRemovingSidebarToggleIfAvailable()
     }
     .frame(minWidth: 900, minHeight: 520)
   }
@@ -229,23 +228,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
           Text("Timeline & Markdown").font(.headline).fontWeight(.semibold)
           settingsCard {
-            visibilitySection(
-              title: "Timeline visibility",
-              systemImage: "text.bubble",
-              description:
-                "Choose which message types appear in the conversation timeline",
-              selection: $preferences.timelineVisibleKinds,
-              defaults: MessageVisibilityKind.timelineDefault
-            )
-            gridDivider
-            visibilitySection(
-              title: "Markdown export",
-              systemImage: "doc.text",
-              description:
-                "Choose which message types are included when exporting Markdown",
-              selection: $preferences.markdownVisibleKinds,
-              defaults: MessageVisibilityKind.markdownDefault
-            )
+            messageTypeVisibilitySection()
           }
         }
 
@@ -315,50 +298,62 @@ struct SettingsView: View {
     }
   }
 
-  // MARK: - Visibility Section (full-width header + wrapping options)
+  // MARK: - Message Type Visibility Section
   @ViewBuilder
-  private func visibilitySection(
-    title: String,
-    systemImage: String,
-    description: String,
-    selection: Binding<Set<MessageVisibilityKind>>,
-    defaults: Set<MessageVisibilityKind>
-  ) -> some View {
+  private func messageTypeVisibilitySection() -> some View {
     VStack(alignment: .leading, spacing: 8) {
-      // Header block: title + description with tighter spacing to match File Paths (4pt)
       VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .firstTextBaseline) {
-          Label(title, systemImage: systemImage)
+          Label("Message Type", systemImage: "text.bubble")
             .font(.subheadline).fontWeight(.medium)
           Spacer(minLength: 8)
-          Button("Restore Defaults") { selection.wrappedValue = defaults }
-            .buttonStyle(.bordered)
+          Button("Restore Defaults") {
+            preferences.timelineVisibleKinds = MessageVisibilityKind.timelineDefault
+            preferences.markdownVisibleKinds = MessageVisibilityKind.markdownDefault
+          }
+          .buttonStyle(.bordered)
         }
-        Text(description)
+        Text("Choose which message types appear in Timeline and Markdown export")
           .font(.caption).foregroundColor(.secondary)
       }
 
-      // Options: left-to-right, equal spacing, wrap to next line naturally
-      let order: [MessageVisibilityKind] = [
-        .user, .assistant, .tool, .syncing, .environment, .reasoning, .tokenUsage,
-        .infoOther,
-      ]
-      LazyVGrid(
-        columns: Array(
-          repeating: GridItem(.flexible(minimum: 120), alignment: .leading),
-          count: 4
-        ),
-        alignment: .leading,
-        spacing: 8
-      ) {
-        ForEach(order, id: \.self) { kind in
-          HStack(spacing: 8) {
-            Toggle("", isOn: binding(selection, kind))
-              .labelsHidden()
-              .toggleStyle(.switch)
-              .controlSize(.small)
-            Text(kind.title)
+      Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+        GridRow {
+          Text("Message Type")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Text("Timeline Visibility")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Text("Markdown Export")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+
+        GridRow {
+          Divider().gridCellColumns(3)
+        }
+
+        ForEach(messageTypeRows) { row in
+          GridRow {
+            Text(row.title)
               .font(.subheadline)
+            if let kind = row.kind {
+              Toggle("", isOn: binding($preferences.timelineVisibleKinds, kind))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            } else {
+              Color.clear.frame(width: 36, height: 20)
+            }
+            if let kind = row.kind {
+              Toggle("", isOn: binding($preferences.markdownVisibleKinds, kind))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            } else {
+              Color.clear.frame(width: 36, height: 20)
+            }
           }
         }
       }
@@ -377,6 +372,32 @@ struct SettingsView: View {
         selection.wrappedValue = s
       }
     )
+  }
+
+  private struct MessageTypeRow: Identifiable {
+    let id: String
+    let title: String
+    let kind: MessageVisibilityKind?
+    let level: Int
+    let isGroup: Bool
+  }
+
+  private var messageTypeRows: [MessageTypeRow] {
+    [
+      MessageTypeRow(id: MessageVisibilityKind.user.rawValue, title: "User Message", kind: .user, level: 0, isGroup: false),
+      MessageTypeRow(id: MessageVisibilityKind.assistant.rawValue, title: "Assistant Message", kind: .assistant, level: 0, isGroup: false),
+      MessageTypeRow(id: MessageVisibilityKind.tool.rawValue, title: "Tool Invocation", kind: .tool, level: 0, isGroup: false),
+      MessageTypeRow(id: MessageVisibilityKind.reasoning.rawValue, title: "Reasoning", kind: .reasoning, level: 0, isGroup: false),
+      MessageTypeRow(id: MessageVisibilityKind.tokenUsage.rawValue, title: "Token Usage", kind: .tokenUsage, level: 0, isGroup: false),
+      MessageTypeRow(id: MessageVisibilityKind.environmentContext.rawValue, title: "Environment Context", kind: .environmentContext, level: 0, isGroup: false),
+      MessageTypeRow(id: MessageVisibilityKind.turnContext.rawValue, title: "Turn Context", kind: .turnContext, level: 0, isGroup: false),
+      MessageTypeRow(id: MessageVisibilityKind.sessionMeta.rawValue, title: "Session Meta", kind: .sessionMeta, level: 0, isGroup: false),
+      MessageTypeRow(id: MessageVisibilityKind.taskInstructions.rawValue, title: "Task Instructions", kind: .taskInstructions, level: 0, isGroup: false),
+      MessageTypeRow(id: MessageVisibilityKind.compaction.rawValue, title: "Compaction", kind: .compaction, level: 0, isGroup: false),
+      MessageTypeRow(id: MessageVisibilityKind.turnAborted.rawValue, title: "Turn Aborted", kind: .turnAborted, level: 0, isGroup: false),
+      MessageTypeRow(id: MessageVisibilityKind.ghostSnapshot.rawValue, title: "Ghost Snapshot", kind: .ghostSnapshot, level: 0, isGroup: false),
+      MessageTypeRow(id: MessageVisibilityKind.infoOther.rawValue, title: "Other Info", kind: .infoOther, level: 0, isGroup: false)
+    ]
   }
 
   private var codexSettings: some View {
@@ -751,6 +772,15 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
           LabeledContent("Version") { Text(versionString) }
           LabeledContent("Build Timestamp") { Text(buildTimestampString) }
+          if let tag = gitTagString {
+            LabeledContent("Git Tag") { Text(tag) }
+          }
+          if let commit = gitCommitString {
+            LabeledContent("Git Commit") { Text(commit) }
+          }
+          if let state = gitStateString {
+            LabeledContent("Working Tree") { Text(state) }
+          }
           LabeledContent("Latest Release") {
             Link(releasesURL.absoluteString, destination: releasesURL)
           }
@@ -783,6 +813,27 @@ struct SettingsView: View {
     let version = info?["CFBundleShortVersionString"] as? String ?? "—"
     let build = info?["CFBundleVersion"] as? String ?? "—"
     return "\(version) (\(build))"
+  }
+
+  private var gitTagString: String? {
+    guard let raw = Bundle.main.infoDictionary?["CodMateGitTag"] as? String,
+      !raw.isEmpty
+    else { return nil }
+    return raw
+  }
+
+  private var gitCommitString: String? {
+    guard let raw = Bundle.main.infoDictionary?["CodMateGitCommit"] as? String,
+      !raw.isEmpty
+    else { return nil }
+    return raw
+  }
+
+  private var gitStateString: String? {
+    guard let raw = Bundle.main.infoDictionary?["CodMateGitDirty"] as? String else { return nil }
+    if raw == "1" { return "Dirty" }
+    if raw == "0" { return "Clean" }
+    return nil
   }
 
   private var buildTimestampString: String {
@@ -973,7 +1024,7 @@ struct SettingsView: View {
           DispatchQueue.main.async { reloadRemoteHosts() }
         }
       }
-      .onChange(of: permissionsManager.hasPermission(for: .sshConfig)) { _, granted in
+      .onChange(of: permissionsManager.hasPermission(for: .sshConfig)) { granted in
         if granted {
           reloadRemoteHosts()
         } else {

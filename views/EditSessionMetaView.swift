@@ -18,7 +18,7 @@ struct EditSessionMetaView: View {
                 Text("Comment (optional)").font(.subheadline)
                 TextEditor(text: $viewModel.editComment)
                     .font(.body)
-                    .textEditorStyle(.plain)
+                    .codmatePlainTextEditorStyleIfAvailable()
                     .scrollContentBackground(.hidden)
                     .frame(minHeight: 120)
                     .padding(8) // use outer padding; avoid inner padding that can clip first baseline on macOS

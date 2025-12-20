@@ -96,7 +96,7 @@ struct GitReviewSettingsView: View {
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.25))
                             )
-                            .onChange(of: draftTemplate) { _, newVal in
+                            .onChange(of: draftTemplate) { newVal in
                                 preferences.commitPromptTemplate = newVal
                             }
                     }

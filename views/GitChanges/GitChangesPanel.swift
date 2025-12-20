@@ -100,6 +100,158 @@ struct GitChangesPanel: View {
   private let repoSearchService = RepoContentSearchService()
 
   var body: some View {
+    var view = AnyView(rootContent)
+    view = AnyView(view.onReceive(NotificationCenter.default.publisher(for: .codMateRepoAuthorizationChanged)) { _ in
+      // Only the left/combined pane should trigger repo re-attachment
+      if regionLayout == .combined || regionLayout == .leftOnly {
+        vm.attach(to: workingDirectory)
+      }
+    })
+    view = AnyView(view.alert("Discard changes?", isPresented: $showDiscardAlert) {
+      Button("Discard", role: .destructive) {
+        let paths = pendingDiscardPaths
+        let includeStaged = pendingDiscardIncludesStaged
+        pendingDiscardPaths = []
+        pendingDiscardIncludesStaged = true
+        Task { await vm.discard(paths: paths, includeStaged: includeStaged) }
+      }
+      Button("Cancel", role: .cancel) {
+        pendingDiscardPaths = []
+        pendingDiscardIncludesStaged = true
+      }
+    } message: {
+      let count = pendingDiscardPaths.count
+      if pendingDiscardIncludesStaged {
+        Text(
+          "This will permanently discard staged and unstaged changes for \(count) file\(count == 1 ? "" : "s")."
+        )
+      } else {
+        Text(
+          "This will permanently discard unstaged changes for \(count) file\(count == 1 ? "" : "s"). Staged changes (if any) will be preserved."
+        )
+      }
+    })
+    view = AnyView(view.confirmationDialog(
+      "Commit changes?",
+      isPresented: $showCommitConfirm,
+      titleVisibility: .visible
+    ) {
+      Button("Commit", role: .destructive) { Task { await vm.commit() } }
+      Button("Cancel", role: .cancel) {}
+    } message: {
+      let msg = vm.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+      if msg.isEmpty {
+        Text("This will create a commit for staged changes.")
+      } else {
+        Text("Commit message:\n\n\(msg)")
+      }
+    })
+    view = AnyView(view.task(id: workingDirectory) {
+      // Avoid double attach from both halves; left/combined is the source of truth
+      if regionLayout == .combined || regionLayout == .leftOnly {
+        vm.attach(to: workingDirectory, fallbackProjectDirectory: projectDirectory)
+      }
+    })
+    view = AnyView(view.task(id: vm.repoRoot?.path) {
+      browserNodes = []
+      displayedBrowserRows = []
+      browserTreeError = nil
+      if (regionLayout == .combined || regionLayout == .leftOnly) && mode == .browser {
+        reloadBrowserTreeIfNeeded(force: true)
+      }
+      let trimmed = treeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+      if (regionLayout == .combined || regionLayout == .leftOnly) && !trimmed.isEmpty {
+        await MainActor.run {
+          handleTreeQueryChange(treeQuery)
+        }
+      }
+    })
+    view = AnyView(view.onChange(of: mode) { newMode in
+      if newMode == .browser {
+        if regionLayout == .combined || regionLayout == .leftOnly {
+          reloadBrowserTreeIfNeeded()
+          if let selectedPath = vm.selectedPath { ensureBrowserPathExpanded(selectedPath) }
+        }
+      }
+    })
+    view = AnyView(
+      view.modifier(
+        LifecycleModifier(
+          expandedDirsStaged: $expandedDirsStaged,
+          expandedDirsUnstaged: $expandedDirsUnstaged,
+          expandedDirsBrowser: $expandedDirsBrowser,
+          savedState: $savedState,
+          mode: $mode,
+          vm: vm,
+          treeQuery: treeQuery,
+          onSearchQueryChanged: { handleTreeQueryChange($0) },
+          onRebuildNodes: rebuildNodes,
+          onRebuildDisplayed: rebuildDisplayed,
+          onEnsureExpandAll: ensureExpandAllIfNeeded,
+          onRebuildBrowserDisplayed: rebuildBrowserDisplayed,
+          onRefreshBrowserTree: { reloadBrowserTreeIfNeeded(force: false) }
+        )
+      )
+    )
+    view = AnyView(view.onDisappear {
+      contentSearchTask?.cancel()
+      contentSearchTask = nil
+    })
+    view = AnyView(view.onAppear {
+      diffModePreviewPreference = vm.showPreviewInsteadOfDiff
+      // Restore mode on appear
+      mode = savedState.mode
+    })
+    view = AnyView(view.onChange(of: savedState.mode) { newVal in
+      if mode != newVal { mode = newVal }
+    })
+    view = AnyView(view.onChange(of: vm.showPreviewInsteadOfDiff) { newValue in
+      if mode == .diff {
+        diffModePreviewPreference = newValue
+      }
+    })
+    view = AnyView(view.onChange(of: mode) { newMode in
+      switch newMode {
+      case .browser:
+        // Explorer always shows preview on the right
+        if !vm.showPreviewInsteadOfDiff { vm.showPreviewInsteadOfDiff = true }
+      case .diff:
+        // Diff mode must always render diff view
+        if vm.showPreviewInsteadOfDiff { vm.showPreviewInsteadOfDiff = false }
+      case .graph:
+        // no-op; detail rendering managed by Graph container
+        break
+      }
+      savedState.mode = newMode
+    })
+    view = AnyView(view.onChange(of: vm.repoRoot) { newRoot in
+      if newRoot == nil {
+        forcedBrowserDueToMissingRepo = true
+        if mode != .browser {
+          mode = .browser
+        }
+        if !vm.showPreviewInsteadOfDiff {
+          vm.showPreviewInsteadOfDiff = true
+        }
+      } else if forcedBrowserDueToMissingRepo {
+        forcedBrowserDueToMissingRepo = false
+        let target = savedState.mode
+        mode = target
+        if target == .diff {
+          vm.showPreviewInsteadOfDiff = diffModePreviewPreference
+        } else if !vm.showPreviewInsteadOfDiff {
+          vm.showPreviewInsteadOfDiff = true
+        }
+      }
+    })
+    view = AnyView(view.onChange(of: vm.selectedPath) { _ in })
+    view = AnyView(view.onChange(of: leftColumnWidth) { newW in
+      WindowStateStore().saveReviewLeftPaneWidth(newW)
+    })
+    return view
+  }
+
+  private var rootContent: some View {
     Group {
       if vm.repoRoot == nil && vm.isResolvingRepo {
         VStack(spacing: 16) {
@@ -132,151 +284,6 @@ struct GitChangesPanel: View {
       } else {
         contentWithPresentation
       }
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .codMateRepoAuthorizationChanged)) { _ in
-      // Only the left/combined pane should trigger repo re-attachment
-      if regionLayout == .combined || regionLayout == .leftOnly {
-        vm.attach(to: workingDirectory)
-      }
-    }
-    .alert("Discard changes?", isPresented: $showDiscardAlert) {
-      Button("Discard", role: .destructive) {
-        let paths = pendingDiscardPaths
-        let includeStaged = pendingDiscardIncludesStaged
-        pendingDiscardPaths = []
-        pendingDiscardIncludesStaged = true
-        Task { await vm.discard(paths: paths, includeStaged: includeStaged) }
-      }
-      Button("Cancel", role: .cancel) {
-        pendingDiscardPaths = []
-        pendingDiscardIncludesStaged = true
-      }
-    } message: {
-      let count = pendingDiscardPaths.count
-      if pendingDiscardIncludesStaged {
-        Text(
-          "This will permanently discard staged and unstaged changes for \(count) file\(count == 1 ? "" : "s")."
-        )
-      } else {
-        Text(
-          "This will permanently discard unstaged changes for \(count) file\(count == 1 ? "" : "s"). Staged changes (if any) will be preserved."
-        )
-      }
-    }
-    .confirmationDialog(
-      "Commit changes?",
-      isPresented: $showCommitConfirm,
-      titleVisibility: .visible
-    ) {
-      Button("Commit", role: .destructive) { Task { await vm.commit() } }
-      Button("Cancel", role: .cancel) {}
-    } message: {
-      let msg = vm.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-      if msg.isEmpty {
-        Text("This will create a commit for staged changes.")
-      } else {
-        Text("Commit message:\n\n\(msg)")
-      }
-    }
-    .task(id: workingDirectory) {
-      // Avoid double attach from both halves; left/combined is the source of truth
-      if regionLayout == .combined || regionLayout == .leftOnly {
-        vm.attach(to: workingDirectory, fallbackProjectDirectory: projectDirectory)
-      }
-    }
-    .task(id: vm.repoRoot?.path) {
-      browserNodes = []
-      displayedBrowserRows = []
-      browserTreeError = nil
-      if (regionLayout == .combined || regionLayout == .leftOnly) && mode == .browser {
-        reloadBrowserTreeIfNeeded(force: true)
-      }
-      let trimmed = treeQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-      if (regionLayout == .combined || regionLayout == .leftOnly) && !trimmed.isEmpty {
-        await MainActor.run {
-          handleTreeQueryChange(treeQuery)
-        }
-      }
-    }
-    .onChange(of: mode) { oldMode, newMode in
-      if newMode == .browser {
-        if regionLayout == .combined || regionLayout == .leftOnly {
-          reloadBrowserTreeIfNeeded()
-          if let selectedPath = vm.selectedPath { ensureBrowserPathExpanded(selectedPath) }
-        }
-      }
-    }
-    .modifier(
-      LifecycleModifier(
-        expandedDirsStaged: $expandedDirsStaged,
-        expandedDirsUnstaged: $expandedDirsUnstaged,
-        expandedDirsBrowser: $expandedDirsBrowser,
-        savedState: $savedState,
-        mode: $mode,
-        vm: vm,
-        treeQuery: treeQuery,
-        onSearchQueryChanged: { handleTreeQueryChange($0) },
-        onRebuildNodes: rebuildNodes,
-        onRebuildDisplayed: rebuildDisplayed,
-        onEnsureExpandAll: ensureExpandAllIfNeeded,
-        onRebuildBrowserDisplayed: rebuildBrowserDisplayed,
-        onRefreshBrowserTree: { reloadBrowserTreeIfNeeded(force: false) }
-      )
-    )
-    .onDisappear {
-      contentSearchTask?.cancel()
-      contentSearchTask = nil
-    }
-    .onAppear {
-      diffModePreviewPreference = vm.showPreviewInsteadOfDiff
-      // Restore mode on appear
-      mode = savedState.mode
-    }
-    .onChange(of: savedState.mode) { _, newVal in
-      if mode != newVal { mode = newVal }
-    }
-    .onChange(of: vm.showPreviewInsteadOfDiff) { _, newValue in
-      if mode == .diff {
-        diffModePreviewPreference = newValue
-      }
-    }
-    .onChange(of: mode) { _, newMode in
-      switch newMode {
-      case .browser:
-        // Explorer always shows preview on the right
-        if !vm.showPreviewInsteadOfDiff { vm.showPreviewInsteadOfDiff = true }
-      case .diff:
-        // Diff mode must always render diff view
-        if vm.showPreviewInsteadOfDiff { vm.showPreviewInsteadOfDiff = false }
-      case .graph:
-        // no-op; detail rendering managed by Graph container
-        break
-      }
-      savedState.mode = newMode
-    }
-    .onChange(of: vm.repoRoot) { _, newRoot in
-      if newRoot == nil {
-        forcedBrowserDueToMissingRepo = true
-        if mode != .browser {
-          mode = .browser
-        }
-        if !vm.showPreviewInsteadOfDiff {
-          vm.showPreviewInsteadOfDiff = true
-        }
-      } else if forcedBrowserDueToMissingRepo {
-        forcedBrowserDueToMissingRepo = false
-        let target = savedState.mode
-        mode = target
-        if target == .diff {
-          vm.showPreviewInsteadOfDiff = diffModePreviewPreference
-        } else if !vm.showPreviewInsteadOfDiff {
-          vm.showPreviewInsteadOfDiff = true
-        }
-      }
-    }
-    .onChange(of: vm.selectedPath) { _, _ in }
-    .onChange(of: leftColumnWidth) { _, newW in
-      WindowStateStore().saveReviewLeftPaneWidth(newW)
     }
   }
 

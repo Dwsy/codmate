@@ -188,13 +188,13 @@ extension ContentView {
           lastWorkspaceMode = viewModel.projectWorkspaceMode
         }
       }
-      .onChange(of: selection) { _, newSelection in
+      .onChange(of: selection) { newSelection in
         // Save session selection whenever it changes
         viewModel.windowStateStore.saveSessionSelection(selectedIDs: newSelection, primaryId: selectionPrimaryId)
         viewModel.updateSelection(newSelection)
         viewModel.scheduleSelectedSessionsRefresh(sessionIds: newSelection)
       }
-      .onChange(of: selectionPrimaryId) { _, newPrimaryId in
+      .onChange(of: selectionPrimaryId) { newPrimaryId in
         // Save primary ID whenever it changes
         viewModel.windowStateStore.saveSessionSelection(selectedIDs: selection, primaryId: newPrimaryId)
       }
@@ -207,15 +207,15 @@ extension ContentView {
           NotificationCenter.default.post(name: .codMateFocusGlobalSearch, object: nil)
         }
       )
-      .onChange(of: preferences.searchPanelStyle) { _, newStyle in
+      .onChange(of: preferences.searchPanelStyle) { newStyle in
         handleSearchPanelStyleChange(newStyle)
       }
-      .onChange(of: viewModel.projectWorkspaceMode) { _, newMode in
+      .onChange(of: viewModel.projectWorkspaceMode) { newMode in
         applyCalendarDefaults(previousMode: lastWorkspaceMode, newMode: newMode)
         lastWorkspaceMode = newMode
         syncListHiddenForWorkspaceMode()
       }
-      .onChange(of: viewModel.selectedProjectIDs) { _, _ in
+      .onChange(of: viewModel.selectedProjectIDs) { _ in
         // Enforce Overview only when the selection truly is All/Other.
         // Dispatching to the next run loop avoids racing with List(selection:)
         // rebinds that momentarily emit an empty selection while re-rendering.
@@ -228,7 +228,7 @@ extension ContentView {
 
   func applyTaskAndChangeModifiers<V: View>(to view: V) -> some View {
     let v1 = view.task { await viewModel.refreshSessions(force: true) }
-    let v2 = v1.onChange(of: viewModel.sections) { _, _ in
+    let v2 = v1.onChange(of: viewModel.sections) { _ in
       // Avoid mutating selection while search popover is opening/active to prevent focus loss/auto-dismiss
       if !shouldBlockAutoSelection {
         applyPendingSelectionIfNeeded()
@@ -236,7 +236,7 @@ extension ContentView {
       }
       reconcilePendingEmbeddedRekeys()
     }
-    let v3 = v2.onChange(of: selection) { _, newSel in
+    let v3 = v2.onChange(of: selection) { newSel in
       // 当搜索弹出开启时，立即释放并回拉焦点；否则不要在选择变化时强制归一化，
       // 以免点击空白导致又被选中首项。
       if shouldBlockAutoSelection && preferences.searchPanelStyle == .popover {
@@ -252,12 +252,12 @@ extension ContentView {
       }
       lastSelectionSnapshot = newSel
     }
-    let v4 = v3.onChange(of: viewModel.errorMessage) { _, message in
+    let v4 = v3.onChange(of: viewModel.errorMessage) { message in
       guard let message else { return }
       alertState = AlertState(title: "Operation Failed", message: message)
       viewModel.errorMessage = nil
     }
-    let v5 = v4.onChange(of: viewModel.pendingEmbeddedProjectNew) { _, project in
+    let v5 = v4.onChange(of: viewModel.pendingEmbeddedProjectNew) { project in
       guard let project else { return }
       startEmbeddedNewForProject(project)
       viewModel.pendingEmbeddedProjectNew = nil

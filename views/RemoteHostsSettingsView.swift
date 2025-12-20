@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 
-@available(macOS 15.0, *)
 struct RemoteHostsSettingsPane: View {
     @ObservedObject var preferences: SessionPreferencesStore
     @EnvironmentObject private var viewModel: SessionListViewModel
@@ -63,7 +62,7 @@ struct RemoteHostsSettingsPane: View {
                 DispatchQueue.main.async { reloadRemoteHosts() }
             }
         }
-        .onChange(of: permissionsManager.hasPermission(for: .sshConfig)) { _, granted in
+        .onChange(of: permissionsManager.hasPermission(for: .sshConfig)) { granted in
             if granted { reloadRemoteHosts() } else { availableRemoteHosts = [] }
         }
     }

@@ -1,6 +1,5 @@
 import SwiftUI
 
-@available(macOS 15.0, *)
 struct MCPServerTargetToggle: View {
     let provider: UsageProviderKind
     @Binding var isOn: Bool

@@ -159,6 +159,7 @@ extension ContentView {
         // Fallback: if Claude session produced non-empty turns but all filtered out by current preferences,
         // relax filter to include assistant messages to avoid empty exports.
         let finalTurns: [ConversationTurn]
+        let builderKinds: Set<MessageVisibilityKind>
         if turns.isEmpty, session.source.baseKind == .claude, !allTurns.isEmpty {
             let relaxed: Set<MessageVisibilityKind> = [.user, .assistant]
             finalTurns = allTurns.compactMap { turn in
@@ -167,53 +168,23 @@ extension ContentView {
                 if !userAllowed && keptOutputs.isEmpty { return nil }
                 return ConversationTurn(id: turn.id, timestamp: turn.timestamp, userMessage: userAllowed ? turn.userMessage : nil, outputs: keptOutputs)
             }
+            builderKinds = relaxed
         } else {
             finalTurns = turns
+            builderKinds = kinds
         }
-        var lines: [String] = []
-        lines.append("# \(session.displayName)")
-        lines.append("")
-        lines.append("- Started: \(session.startedAt)")
-        if let end = session.lastUpdatedAt { lines.append("- Last Updated: \(end)") }
-        if let model = session.model { lines.append("- Model: \(model)") }
-        if let approval = session.approvalPolicy { lines.append("- Approval Policy: \(approval)") }
-        lines.append("")
-        for turn in finalTurns {
-            if let user = turn.userMessage {
-                lines.append("**User** · \(user.timestamp)")
-                if let text = user.text, !text.isEmpty { lines.append(text) }
-            }
-            let assistantLabel = session.source.branding.displayName
-            for event in turn.outputs {
-                let prefix: String
-                switch event.actor {
-                case .assistant: prefix = "**\(assistantLabel)**"
-                case .tool: prefix = "**Tool**"
-                case .info: prefix = "**Info**"
-                case .user: prefix = "**User**"
-                }
-                lines.append("")
-                lines.append("\(prefix) · \(event.timestamp)")
-                if let title = event.title { lines.append("> \(title)") }
-                if let text = event.text, !text.isEmpty { lines.append(text) }
-                if let meta = event.metadata, !meta.isEmpty {
-                    for key in meta.keys.sorted() {
-                        lines.append("- \(key): \(meta[key] ?? "")")
-                    }
-                }
-                if event.repeatCount > 1 {
-                    lines.append("- repeated: ×\(event.repeatCount)")
-                }
-            }
-            lines.append("")
-        }
-        let md = lines.joined(separator: "\n")
         let panel = NSSavePanel()
         panel.title = "Export Markdown"
         panel.allowedContentTypes = [.plainText]
         let base = sanitizedExportFileName(session.effectiveTitle, fallback: session.displayName)
         panel.nameFieldStringValue = base + ".md"
         if panel.runModal() == .OK, let url = panel.url {
+            let md = MarkdownExportBuilder.build(
+                session: session,
+                turns: finalTurns,
+                visibleKinds: builderKinds,
+                exportURL: url
+            )
             try? md.data(using: .utf8)?.write(to: url)
         }
     }

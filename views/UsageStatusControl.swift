@@ -294,7 +294,7 @@ private struct UsageStatusPopover: View {
     .frame(width: 300)
     .focusable(false)
     .onAppear { maybeTriggerClaudeAutoRefresh(now: Date()) }
-    .onChange(of: snapshots[.claude]?.updatedAt ?? nil) { _, _ in
+    .onChange(of: snapshots[.claude]?.updatedAt ?? nil) { _ in
       maybeTriggerClaudeAutoRefresh(now: Date())
     }
     .onDisappear { didTriggerClaudeAutoRefresh = false }

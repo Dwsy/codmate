@@ -59,7 +59,7 @@ extension GitChangesPanel {
                 VStack(alignment: .leading, spacing: 6) {
                     TextEditor(text: $vm.commitMessage)
                         .font(.system(.body))
-                        .textEditorStyle(.plain)
+                        .codmatePlainTextEditorStyleIfAvailable()
                         .frame(minHeight: minH)
                         .frame(height: min(maxH, max(minH, commitEditorHeight)))
                         .padding(6)

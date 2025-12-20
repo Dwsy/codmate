@@ -31,7 +31,7 @@ extension GitChangesPanel {
             )
 
             view = AnyView(
-                view.onChange(of: vm.treeSnapshot) { _, _ in
+                view.onChange(of: vm.treeSnapshot) { _ in
                     onRebuildNodes()
                     onEnsureExpandAll()
                     if mode == .browser { onRefreshBrowserTree() }
@@ -39,7 +39,7 @@ extension GitChangesPanel {
             )
 
             view = AnyView(
-                view.onChange(of: treeQuery) { _, newValue in
+                view.onChange(of: treeQuery) { newValue in
                     onSearchQueryChanged(newValue)
                     onRebuildDisplayed()
                     onRebuildBrowserDisplayed()
@@ -47,50 +47,50 @@ extension GitChangesPanel {
             )
 
             view = AnyView(
-                view.onChange(of: expandedDirsStaged) { _, newVal in
+                view.onChange(of: expandedDirsStaged) { newVal in
                     savedState.expandedDirsStaged = newVal
                 }
             )
 
             view = AnyView(
-                view.onChange(of: expandedDirsUnstaged) { _, newVal in
+                view.onChange(of: expandedDirsUnstaged) { newVal in
                     savedState.expandedDirsUnstaged = newVal
                 }
             )
 
             view = AnyView(
-                view.onChange(of: expandedDirsBrowser) { _, newVal in
+                view.onChange(of: expandedDirsBrowser) { newVal in
                     savedState.expandedDirsBrowser = newVal
                     onRebuildBrowserDisplayed()
                 }
             )
 
             view = AnyView(
-                view.onChange(of: vm.selectedPath) { _, newVal in
+                view.onChange(of: vm.selectedPath) { newVal in
                     savedState.selectedPath = newVal
                 }
             )
 
             view = AnyView(
-                view.onChange(of: vm.selectedSide) { _, newVal in
+                view.onChange(of: vm.selectedSide) { newVal in
                     savedState.selectedSideStaged = (newVal == .staged)
                 }
             )
 
             view = AnyView(
-                view.onChange(of: vm.showPreviewInsteadOfDiff) { _, newVal in
+                view.onChange(of: vm.showPreviewInsteadOfDiff) { newVal in
                     savedState.showPreview = newVal
                 }
             )
 
             view = AnyView(
-                view.onChange(of: vm.commitMessage) { _, newVal in
+                view.onChange(of: vm.commitMessage) { newVal in
                     savedState.commitMessage = newVal
                 }
             )
 
             view = AnyView(
-                view.onChange(of: mode) { _, newVal in
+                view.onChange(of: mode) { newVal in
                     savedState.mode = newVal
                     if newVal == .browser {
                         onRebuildBrowserDisplayed()
@@ -101,7 +101,7 @@ extension GitChangesPanel {
 
             // Persist Graph visibility flag when it changes
             view = AnyView(
-                view.onChange(of: savedState.showGraph) { _, _ in
+                view.onChange(of: savedState.showGraph) { _ in
                     // No-op: wiring point retained for completeness
                 }
             )

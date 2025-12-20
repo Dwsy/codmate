@@ -1,6 +1,5 @@
 import SwiftUI
 
-@available(macOS 15.0, *)
 struct ProvidersSettingsView: View {
   @StateObject private var vm = ProvidersVM()
   @State private var pendingDeleteId: String?
@@ -26,7 +25,7 @@ struct ProvidersSettingsView: View {
         }
       )
     ) { ProviderEditorSheet(vm: vm) }
-    .presentationSizing(.automatic)
+    .codmatePresentationSizingIfAvailable()
     .task {
       await vm.loadAll()
       await vm.loadTemplates()
@@ -186,15 +185,20 @@ struct ProvidersSettingsView: View {
 
   // MARK: - Helper Views
 
+  @ViewBuilder
   private func settingsScroll<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-    ScrollView {
+    let scroll = ScrollView {
       content()
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(.top, 24)
         .padding(.horizontal, 24)
         .padding(.bottom, 32)
     }
-    .scrollClipDisabled()
+    if #available(macOS 14.0, *) {
+      scroll.scrollClipDisabled()
+    } else {
+      scroll
+    }
   }
 
   @ViewBuilder
@@ -224,7 +228,7 @@ struct ProvidersSettingsView: View {
               }
               .labelsHidden()
               .frame(maxWidth: .infinity, alignment: .trailing)
-              .onChange(of: vm.activeCodexProviderId) { _, newVal in
+              .onChange(of: vm.activeCodexProviderId) { newVal in
                 Task { await vm.applyActiveCodexProvider(newVal) }
               }
             }
@@ -263,7 +267,7 @@ struct ProvidersSettingsView: View {
               }
               .labelsHidden()
               .frame(maxWidth: .infinity, alignment: .trailing)
-              .onChange(of: vm.activeClaudeProviderId) { _, newVal in
+              .onChange(of: vm.activeClaudeProviderId) { newVal in
                 Task { await vm.applyActiveClaudeProvider(newVal) }
               }
             }
@@ -279,7 +283,6 @@ struct ProvidersSettingsView: View {
 }
 
 // MARK: - Editor Sheet (Standard vs Advanced)
-@available(macOS 15.0, *)
 private struct ProviderEditorSheet: View {
   @ObservedObject var vm: ProvidersVM
   @Environment(\.dismiss) private var dismiss
@@ -463,7 +466,7 @@ private struct ProviderEditorSheet: View {
         TableColumn("Model ID") { row in
           if let binding = vm.bindingModelId(for: row.id) {
             TextField("vendor model id", text: binding)
-              .onChange(of: binding.wrappedValue) { _, newValue in
+              .onChange(of: binding.wrappedValue) { newValue in
                 vm.handleModelIDChange(for: row.id, newValue: newValue)
               }
           }
@@ -510,7 +513,6 @@ private struct ProviderEditorSheet: View {
 
 }
 // MARK: - ViewModel (Codex-first)
-@available(macOS 15.0, *)
 @MainActor
 final class ProvidersVM: ObservableObject {
 

@@ -29,7 +29,7 @@ set -euo pipefail
 #   VERSION (if set, will override Marketing Version at export time when possible)
 #   SANDBOX=on|off (default: off). When on, force App Sandbox entitlements (Mac App Store-style)
 #   APPSTORE_SIM=1 to compile with APPSTORE condition (mimic Mac App Store build-time gating)
-#   MIN_MACOS (default: 15.0) sets MACOSX_DEPLOYMENT_TARGET for all targets including packages
+#   MIN_MACOS (default: derived from Xcode build settings) sets MACOSX_DEPLOYMENT_TARGET for all targets including packages
 #
 
 SCHEME="${SCHEME:-}"
@@ -78,12 +78,19 @@ fi
 
 # ------------------------------
 # Versioning strategy
-# - BASE_VERSION: semantic version you set (e.g., 1.4.0). Defaults to 0.0.0
+# - BASE_VERSION: required semantic version (e.g., 1.4.0). You can also set VERSION as an alias.
 # - BUILD_NUMBER_STRATEGY: date | git | counter (default: date)
 # - BUILD_COUNTER_FILE: when strategy=counter, stores/increments the counter (default: $BUILD_DIR/build-number)
 # These values are applied to Xcode as MARKETING_VERSION (CFBundleShortVersionString)
 # and CURRENT_PROJECT_VERSION (CFBundleVersion). The DMG name uses "BASE_VERSION+BUILD_NUMBER".
-BASE_VERSION="${BASE_VERSION:-${VERSION:-0.0.0}}"
+if [[ -z "${BASE_VERSION:-}" ]]; then
+  if [[ -n "${VERSION:-}" ]]; then
+    BASE_VERSION="$VERSION"
+  else
+    echo "[error] BASE_VERSION (or VERSION) is required. Example: BASE_VERSION=0.4.4 ./scripts/macos-build-notarized-dmg.sh" >&2
+    exit 1
+  fi
+fi
 BUILD_NUMBER_STRATEGY="${BUILD_NUMBER_STRATEGY:-date}"
 
 compute_build_number() {
@@ -150,7 +157,32 @@ fi
 echo "[info] Using scheme '$SCHEME' with configuration '$CONFIG'"
 
 # Force a modern macOS deployment target to avoid arm64 + 10.13 mismatches in Swift packages
-MIN_MACOS="${MIN_MACOS:-15.0}"
+resolve_min_macos() {
+  local target_name="CodMate"
+  local resolved=""
+  local settings=""
+
+  settings="$(xcodebuild -project "$PROJECT" -target "$target_name" -configuration "$CONFIG" -showBuildSettings 2>/dev/null || true)"
+  if [[ -z "$settings" ]]; then
+    settings="$(xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration "$CONFIG" -showBuildSettings 2>/dev/null || true)"
+  fi
+
+  resolved="$(
+    printf "%s\n" "$settings" \
+      | sed -n 's/.*MACOSX_DEPLOYMENT_TARGET = \([0-9][0-9.]*\).*/\1/p' \
+      | head -n 1
+  )"
+  echo "$resolved"
+}
+
+MIN_MACOS="${MIN_MACOS:-}"
+if [[ -z "$MIN_MACOS" ]]; then
+  MIN_MACOS="$(resolve_min_macos)"
+fi
+if [[ -z "$MIN_MACOS" ]]; then
+  echo "[error] Failed to resolve MACOSX_DEPLOYMENT_TARGET from Xcode settings. Set MIN_MACOS explicitly."
+  exit 1
+fi
 EXTRA_XC_ARGS+=("MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS}")
 echo "[info] MIN_MACOS=${MIN_MACOS} → MACOSX_DEPLOYMENT_TARGET=${MIN_MACOS}"
 

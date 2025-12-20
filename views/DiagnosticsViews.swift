@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 
-@available(macOS 15.0, *)
 struct DiagnosticsSection: View {
     @ObservedObject var preferences: SessionPreferencesStore
     @State private var running = false
@@ -201,7 +200,6 @@ struct DiagnosticsSection: View {
     }
 }
 
-@available(macOS 15.0, *)
 struct DiagnosticsReportView: View {
     let result: SessionsDiagnostics
     var body: some View {
@@ -237,7 +235,6 @@ struct DiagnosticsReportView: View {
     }
 }
 
-@available(macOS 15.0, *)
 struct DiagnosticsProbeView: View {
     let p: SessionsDiagnostics.Probe
     var body: some View {
@@ -263,7 +260,6 @@ struct DiagnosticsProbeView: View {
     }
 }
 
-@available(macOS 15.0, *)
 struct DataPairReportView: View {
     let current: SessionsDiagnostics.Probe
     let defaultProbe: SessionsDiagnostics.Probe

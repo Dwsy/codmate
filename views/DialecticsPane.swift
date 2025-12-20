@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 
-@available(macOS 15.0, *)
 struct DialecticsPane: View {
     @ObservedObject var preferences: SessionPreferencesStore
     @StateObject private var vm = DialecticsVM()
@@ -338,7 +337,6 @@ struct DialecticsPane: View {
     }
 }
 
-@available(macOS 15.0, *)
 extension DialecticsPane {
     private func authorizeFolder(_ suggested: URL) {
         let panel = NSOpenPanel()

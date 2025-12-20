@@ -269,9 +269,9 @@ private struct GlobalSearchPanelContent: View {
     let match = String(text[startIdx..<midIdx])
     let suffix = String(text[midIdx...])
     return Text(prefix)
-      .foregroundStyle(.secondary)
-      + Text(match).foregroundStyle(Color.accentColor)
-      + Text(suffix).foregroundStyle(.secondary)
+      .foregroundColor(.secondary)
+      + Text(match).foregroundColor(Color.accentColor)
+      + Text(suffix).foregroundColor(.secondary)
   }
 
   private func clean(_ text: String) -> String {

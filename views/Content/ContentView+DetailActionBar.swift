@@ -868,7 +868,7 @@ private struct PromptsPopover: View {
         .textFieldStyle(.roundedBorder)
         .frame(width: 320)
         .focused($searchFocused)
-        .onChange(of: query) { _, _ in reload() }
+        .onChange(of: query) { _ in reload() }
 
       ScrollView {
         VStack(alignment: .leading, spacing: 0) {

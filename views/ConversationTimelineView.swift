@@ -31,7 +31,7 @@ struct ConversationTimelineView: View {
     .onAppear {
       layout.updateOrder(turns.map(\.id))
     }
-    .onChange(of: turns.map(\.id)) { _, newValue in
+    .onChange(of: turns.map(\.id)) { newValue in
       layout.updateOrder(newValue)
     }
     .onDisappear {

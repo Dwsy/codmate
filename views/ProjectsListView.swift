@@ -41,7 +41,16 @@ struct ProjectsListView: View {
   ) -> some View {
     List(selection: selectionBinding) {
       if tree.isEmpty {
-        ContentUnavailableView("No Projects", systemImage: "square.grid.2x2")
+        if #available(macOS 14.0, *) {
+          ContentUnavailableView("No Projects", systemImage: "square.grid.2x2")
+        } else {
+          UnavailableStateView(
+            "No Projects",
+            systemImage: "square.grid.2x2",
+            titleFont: .callout
+          )
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
       } else {
         ForEach(tree) { node in
           makeProjectTreeNodeView(
@@ -860,179 +869,194 @@ struct ProjectEditorSheet: View {
   private let labelColWidth: CGFloat = 120
   private let fieldColWidth: CGFloat = 360
 
+  private var generalTabView: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+        GridRow {
+          Text("Name")
+            .font(.subheadline)
+            .frame(width: labelColWidth, alignment: .trailing)
+          TextField("Display name", text: $name)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: fieldColWidth, alignment: .leading)
+        }
+        GridRow {
+          Text("Directory")
+            .font(.subheadline)
+            .frame(width: labelColWidth, alignment: .trailing)
+          HStack(spacing: 8) {
+            TextField("/absolute/path", text: $directory)
+              .textFieldStyle(.roundedBorder)
+              .frame(maxWidth: .infinity)
+            Button("Choose…") { chooseDirectory() }
+          }
+          .frame(width: fieldColWidth, alignment: .leading)
+        }
+        GridRow {
+          Text("Parent Project")
+            .font(.subheadline)
+            .frame(width: labelColWidth, alignment: .trailing)
+          Picker(
+            "",
+            selection: Binding(
+              get: { parentProjectId ?? "(none)" },
+              set: { parentProjectId = $0 == "(none)" ? nil : $0 })
+          ) {
+            Text("(none)").tag("(none)")
+            ForEach(viewModel.projects.filter { $0.id != (modeSelfId()) }, id: \.id) { p in
+              Text(p.name.isEmpty ? p.id : p.name).tag(p.id)
+            }
+          }
+          .labelsHidden()
+          .frame(width: fieldColWidth, alignment: .leading)
+        }
+        GridRow {
+          Text("Trust Level")
+            .font(.subheadline)
+            .frame(width: labelColWidth, alignment: .trailing)
+          Picker("", selection: trustLevelBinding) {
+            Text("trusted").tag("trusted")
+            Text("untrusted").tag("untrusted")
+          }
+          .labelsHidden()
+          .pickerStyle(.segmented)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        GridRow {
+          Text("Sources")
+            .font(.subheadline)
+            .frame(width: labelColWidth, alignment: .trailing)
+          HStack(spacing: 16) {
+            ForEach(ProjectSessionSource.allCases) { source in
+              Toggle(source.displayName, isOn: binding(for: source))
+                .toggleStyle(.checkbox)
+            }
+          }
+          .frame(width: fieldColWidth, alignment: .leading)
+        }
+        GridRow(alignment: .top) {
+          Text("Overview")
+            .font(.subheadline)
+            .frame(width: labelColWidth, alignment: .trailing)
+          VStack(alignment: .leading, spacing: 6) {
+            TextEditor(text: $overview)
+              .font(.body)
+              .frame(minHeight: 88, maxHeight: 120)
+              .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                  .stroke(Color.secondary.opacity(0.2))
+              )
+          }
+          .frame(width: fieldColWidth, alignment: .leading)
+        }
+      }
+    }
+    .padding(16)
+  }
+
+  private var profileTabView: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Project Profile (applies to new sessions)")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+
+      // Sandbox + Approval (left-aligned)
+      Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+        GridRow {
+          Text("Sandbox")
+            .font(.subheadline)
+            .frame(width: labelColWidth, alignment: .trailing)
+          Picker(
+            "",
+            selection: Binding(
+              get: { profileSandbox ?? .workspaceWrite }, set: { profileSandbox = $0 })
+          ) {
+            ForEach(SandboxMode.allCases) { s in Text(s.title).tag(s) }
+          }
+          .labelsHidden()
+          .pickerStyle(.segmented)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        GridRow {
+          Text("Approval")
+            .font(.subheadline)
+            .frame(width: labelColWidth, alignment: .trailing)
+          Picker(
+            "",
+            selection: Binding(
+              get: { profileApproval ?? .onRequest }, set: { profileApproval = $0 })
+          ) {
+            ForEach(ApprovalPolicy.allCases) { a in Text(a.title).tag(a) }
+          }
+          .labelsHidden()
+          .pickerStyle(.segmented)
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        GridRow {
+          Text("Presets")
+            .font(.subheadline)
+            .frame(width: labelColWidth, alignment: .trailing)
+          HStack(spacing: 12) {
+            Toggle(
+              "Full Auto",
+              isOn: Binding(get: { profileFullAuto ?? false }, set: { profileFullAuto = $0 }))
+            Toggle(
+              "Danger Bypass",
+              isOn: Binding(
+                get: { profileDangerBypass ?? false }, set: { profileDangerBypass = $0 }))
+          }
+          .frame(width: fieldColWidth, alignment: .leading)
+        }
+      }
+
+      Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
+        GridRow {
+          Text("PATH Prepend")
+            .font(.subheadline)
+            .frame(width: labelColWidth, alignment: .trailing)
+          TextField("/opt/custom/bin:/project/bin", text: $profilePathPrependText)
+            .textFieldStyle(.roundedBorder)
+            .frame(width: fieldColWidth, alignment: .leading)
+        }
+        GridRow(alignment: .top) {
+          Text("Environment")
+            .font(.subheadline)
+            .frame(width: labelColWidth, alignment: .trailing)
+          VStack(alignment: .leading, spacing: 6) {
+            TextEditor(text: $profileEnvText)
+              .font(.system(.body, design: .monospaced))
+              .frame(minHeight: 100, maxHeight: 180)
+              .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
+            Text("One per line: KEY=VALUE. Will export as export KEY='VALUE'.").font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          .frame(width: fieldColWidth, alignment: .leading)
+        }
+      }
+      Text(
+        "These settings apply to new sessions of this project and map to --model / -s / -a / --full-auto / --dangerously-bypass-approvals-and-sandbox. The CLI may also load the named profile (auto-mapped to project ID)."
+      ).font(.caption).foregroundStyle(.secondary)
+    }
+    .padding(16)
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       Text(modeTitle).font(.title3).fontWeight(.semibold)
 
-      TabView {
-        Tab("General", systemImage: "gearshape") {
-          VStack(alignment: .leading, spacing: 12) {
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
-              GridRow {
-                Text("Name")
-                  .font(.subheadline)
-                  .frame(width: labelColWidth, alignment: .trailing)
-                TextField("Display name", text: $name)
-                  .textFieldStyle(.roundedBorder)
-                  .frame(width: fieldColWidth, alignment: .leading)
-              }
-              GridRow {
-                Text("Directory")
-                  .font(.subheadline)
-                  .frame(width: labelColWidth, alignment: .trailing)
-                HStack(spacing: 8) {
-                  TextField("/absolute/path", text: $directory)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: .infinity)
-                  Button("Choose…") { chooseDirectory() }
-                }
-                .frame(width: fieldColWidth, alignment: .leading)
-              }
-              GridRow {
-                Text("Parent Project")
-                  .font(.subheadline)
-                  .frame(width: labelColWidth, alignment: .trailing)
-                Picker(
-                  "",
-                  selection: Binding(
-                    get: { parentProjectId ?? "(none)" },
-                    set: { parentProjectId = $0 == "(none)" ? nil : $0 })
-                ) {
-                  Text("(none)").tag("(none)")
-                  ForEach(viewModel.projects.filter { $0.id != (modeSelfId()) }, id: \.id) { p in
-                    Text(p.name.isEmpty ? p.id : p.name).tag(p.id)
-                  }
-                }
-                .labelsHidden()
-                .frame(width: fieldColWidth, alignment: .leading)
-              }
-              GridRow {
-                Text("Trust Level")
-                  .font(.subheadline)
-                  .frame(width: labelColWidth, alignment: .trailing)
-                Picker("", selection: trustLevelBinding) {
-                  Text("trusted").tag("trusted")
-                  Text("untrusted").tag("untrusted")
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(maxWidth: .infinity, alignment: .leading)
-              }
-              GridRow {
-                Text("Sources")
-                  .font(.subheadline)
-                  .frame(width: labelColWidth, alignment: .trailing)
-                HStack(spacing: 16) {
-                  ForEach(ProjectSessionSource.allCases) { source in
-                    Toggle(source.displayName, isOn: binding(for: source))
-                      .toggleStyle(.checkbox)
-                  }
-                }
-                .frame(width: fieldColWidth, alignment: .leading)
-              }
-              GridRow(alignment: .top) {
-                Text("Overview")
-                  .font(.subheadline)
-                  .frame(width: labelColWidth, alignment: .trailing)
-                VStack(alignment: .leading, spacing: 6) {
-                  TextEditor(text: $overview)
-                    .font(.body)
-                    .frame(minHeight: 88, maxHeight: 120)
-                    .overlay(
-                      RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.secondary.opacity(0.2))
-                    )
-                }
-                .frame(width: fieldColWidth, alignment: .leading)
-              }
-            }
+      Group {
+        if #available(macOS 15.0, *) {
+          TabView {
+            Tab("General", systemImage: "gearshape") { generalTabView }
+            Tab("Profile", systemImage: "person.crop.square") { profileTabView }
           }
-          .padding(16)
-        }
-        Tab("Profile", systemImage: "person.crop.square") {
-          VStack(alignment: .leading, spacing: 12) {
-            Text("Project Profile (applies to new sessions)")
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-
-            // Sandbox + Approval (left-aligned)
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-              GridRow {
-                Text("Sandbox")
-                  .font(.subheadline)
-                  .frame(width: labelColWidth, alignment: .trailing)
-                Picker(
-                  "",
-                  selection: Binding(
-                    get: { profileSandbox ?? .workspaceWrite }, set: { profileSandbox = $0 })
-                ) {
-                  ForEach(SandboxMode.allCases) { s in Text(s.title).tag(s) }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(maxWidth: .infinity, alignment: .leading)
-              }
-              GridRow {
-                Text("Approval")
-                  .font(.subheadline)
-                  .frame(width: labelColWidth, alignment: .trailing)
-                Picker(
-                  "",
-                  selection: Binding(
-                    get: { profileApproval ?? .onRequest }, set: { profileApproval = $0 })
-                ) {
-                  ForEach(ApprovalPolicy.allCases) { a in Text(a.title).tag(a) }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(maxWidth: .infinity, alignment: .leading)
-              }
-              GridRow {
-                Text("Presets")
-                  .font(.subheadline)
-                  .frame(width: labelColWidth, alignment: .trailing)
-                HStack(spacing: 12) {
-                  Toggle(
-                    "Full Auto",
-                    isOn: Binding(get: { profileFullAuto ?? false }, set: { profileFullAuto = $0 }))
-                  Toggle(
-                    "Danger Bypass",
-                    isOn: Binding(
-                      get: { profileDangerBypass ?? false }, set: { profileDangerBypass = $0 }))
-                }
-                .frame(width: fieldColWidth, alignment: .leading)
-              }
-            }
-
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 10) {
-              GridRow {
-                Text("PATH Prepend")
-                  .font(.subheadline)
-                  .frame(width: labelColWidth, alignment: .trailing)
-                TextField("/opt/custom/bin:/project/bin", text: $profilePathPrependText)
-                  .textFieldStyle(.roundedBorder)
-                  .frame(width: fieldColWidth, alignment: .leading)
-              }
-              GridRow(alignment: .top) {
-                Text("Environment")
-                  .font(.subheadline)
-                  .frame(width: labelColWidth, alignment: .trailing)
-                VStack(alignment: .leading, spacing: 6) {
-                  TextEditor(text: $profileEnvText)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 100, maxHeight: 180)
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
-                  Text("One per line: KEY=VALUE. Will export as export KEY='VALUE'.").font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-                .frame(width: fieldColWidth, alignment: .leading)
-              }
-            }
-            Text(
-              "These settings apply to new sessions of this project and map to --model / -s / -a / --full-auto / --dangerously-bypass-approvals-and-sandbox. The CLI may also load the named profile (auto-mapped to project ID)."
-            ).font(.caption).foregroundStyle(.secondary)
+        } else {
+          TabView {
+            generalTabView
+              .tabItem { Label("General", systemImage: "gearshape") }
+            profileTabView
+              .tabItem { Label("Profile", systemImage: "person.crop.square") }
           }
-          .padding(16)
         }
       }
       .padding(.bottom, 4)

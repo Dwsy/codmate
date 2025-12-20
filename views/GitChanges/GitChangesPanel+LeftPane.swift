@@ -67,7 +67,7 @@ extension GitChangesPanel {
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $vm.commitMessage)
                             .font(.system(.body))
-                            .textEditorStyle(.plain)
+                            .codmatePlainTextEditorStyleIfAvailable()
                             .frame(minHeight: 20)
                             .frame(height: min(200, max(20, commitInlineHeight)))
                             .padding(.leading, 6)
@@ -78,7 +78,7 @@ extension GitChangesPanel {
                                 RoundedRectangle(cornerRadius: 6)
                                     .stroke(Color.secondary.opacity(0.25))
                             )
-                        .onChange(of: vm.commitMessage) { _, _ in
+                        .onChange(of: vm.commitMessage, initial: true) { _ in
                             // account for trailing reserve space
                             let w = max(10, gr.size.width - 12 - wandReservedTrailing)
                             commitInlineHeight = measureCommitHeight(vm.commitMessage, width: w)

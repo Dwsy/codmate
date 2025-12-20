@@ -16,11 +16,17 @@ struct SessionDetailView: View {
     @State private var loadingTimeline = false
     @State private var isConversationExpanded = false
     @State private var expandedTurnIDs: Set<String> = []
+    @State private var autoExpandVisible = false
     @State private var searchText: String = ""
     @State private var expandAllOnSearch = false
     @State private var sortAscending: Bool = false
+    @State private var inlineFiltersExpanded = false
+    @State private var sessionVisibleKinds: Set<MessageVisibilityKind> = MessageVisibilityKind.timelineDefault
+    @State private var hasSessionVisibleKindsOverride = false
     @State private var monitor: DirectoryMonitor? = nil
     @State private var debounceReloadTask: Task<Void, Never>? = nil
+    @State private var filterTask: Task<Void, Never>? = nil
+    @State private var loadTask: Task<[ConversationTurn], Never>? = nil
     @State private var environmentExpanded = false
     @State private var environmentLoading = false
     @State private var environmentInfo: EnvironmentContextInfo?
@@ -48,6 +54,9 @@ struct SessionDetailView: View {
                 }
 
                 conversationHeader
+                if inlineFiltersExpanded {
+                    inlineFiltersPanel
+                }
                 conversationScrollView
             }
             .padding(16)
@@ -58,10 +67,11 @@ struct SessionDetailView: View {
             )
         }
         .task(id: summary.id) { await initialLoadAndMonitor() }
-        .onChange(of: searchText) { _, _ in applyFilterAndSort() }
-        .onChange(of: sortAscending) { _, _ in applyFilterAndSort() }
-        .onChange(of: viewModel.preferences.timelineVisibleKinds) { _, _ in
-            // Re-apply current search + sort with new visibility
+        .onChange(of: searchText, initial: true) { _ in applyFilterAndSort() }
+        .onChange(of: sortAscending, initial: true) { _ in applyFilterAndSort() }
+        .onChange(of: viewModel.preferences.timelineVisibleKinds, initial: true) { newValue in
+            guard !hasSessionVisibleKindsOverride else { return }
+            sessionVisibleKinds = newValue
             applyFilterAndSort()
         }
         .onReceive(NotificationCenter.default.publisher(for: .codMateConversationFilter)) { note in
@@ -264,6 +274,23 @@ struct SessionDetailView: View {
             // Search (inline magnifier and clear button, custom style for compatibility)
             conversationSearchField
 
+            Button {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    inlineFiltersExpanded.toggle()
+                }
+            } label: {
+                Label(
+                    "Filters",
+                    systemImage: hasSessionVisibleKindsOverride
+                        ? "line.3.horizontal.decrease.circle.fill"
+                        : "line.3.horizontal.decrease.circle"
+                )
+                .font(.callout)
+            }
+            .buttonStyle(.borderless)
+            .help("Filter message types for this session")
+            .hoverHand()
+
             // Sort order toggle
             Button {
                 sortAscending.toggle()
@@ -278,23 +305,19 @@ struct SessionDetailView: View {
             .help(sortAscending ? "Sort oldest → newest" : "Sort newest → oldest")
             .hoverHand()
 
-            let allExpanded = !turns.isEmpty && expandedTurnIDs.count == turns.count
             Button {
-                if allExpanded {
-                    expandedTurnIDs.removeAll()
-                } else {
-                    expandedTurnIDs = Set(turns.map(\.id))
-                }
+                autoExpandVisible.toggle()
+                expandedTurnIDs.removeAll()
             } label: {
                 Label(
-                    allExpanded ? "Collapse All" : "Expand All",
-                    systemImage: allExpanded ? "chevron.up" : "chevron.down"
+                    autoExpandVisible ? "Collapse Visible" : "Expand Visible",
+                    systemImage: autoExpandVisible ? "rectangle.compress.vertical" : "rectangle.expand.vertical"
                 )
                 .font(.callout)
             }
             .buttonStyle(.borderless)
             .disabled(turns.isEmpty)
-            .help(allExpanded ? "Collapse all turns" : "Expand all turns")
+            .help(autoExpandVisible ? "Collapse visible turns" : "Expand only visible turns")
             .hoverHand()
 
             // Refresh current conversation file (match borderless style for consistency)
@@ -328,16 +351,17 @@ struct SessionDetailView: View {
     }
 
     private var conversationScrollView: some View {
-        ScrollView {
-            Group {
-                switch loadingStage {
-                case .initial, .loading:
+        Group {
+            switch loadingStage {
+            case .initial, .loading:
+                ScrollView {
                     ProgressView("Loading session content…")
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 32)
+                }
 
-                case .preview:
-                    // Show lightweight preview cards while loading full data
+            case .preview:
+                ScrollView {
                     if previewTurns.isEmpty {
                         ProgressView("Loading preview…")
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -350,22 +374,35 @@ struct SessionDetailView: View {
                         }
                         .opacity(0.85)  // Visual hint that this is preview data
                     }
+                }
 
-                case .full:
-                    if turns.isEmpty {
-                        ContentUnavailableView("No messages to display", systemImage: "text.bubble")
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    } else {
-                        ConversationTimelineView(
-                            turns: turns,
-                            expandedTurnIDs: $expandedTurnIDs,
-                            ascending: sortAscending,
-                            branding: summary.source.branding
-                        )
+            case .full:
+                if turns.isEmpty {
+                    Group {
+                        if #available(macOS 14.0, *) {
+                            ContentUnavailableView("No messages to display", systemImage: "text.bubble")
+                        } else {
+                            UnavailableStateView(
+                                "No messages to display",
+                                systemImage: "text.bubble",
+                                imageFont: .title3,
+                                titleFont: .headline
+                            )
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                } else {
+                    ConversationTimelineView(
+                        turns: turns,
+                        expandedTurnIDs: $expandedTurnIDs,
+                        ascending: sortAscending,
+                        branding: summary.source.branding,
+                        allowManualToggle: !autoExpandVisible,
+                        autoExpandVisible: autoExpandVisible
+                    )
+                    .id(autoExpandVisible)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
@@ -407,16 +444,148 @@ extension SessionDetailView {
         .frame(minWidth: 220)
     }
 
+    private var inlineFiltersPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Message Type", systemImage: "line.3.horizontal.decrease.circle")
+                    .font(.headline)
+                Spacer()
+                if hasSessionVisibleKindsOverride {
+                    Button("Reset") { resetInlineFilters() }
+                        .buttonStyle(.borderless)
+                        .help("Reset to global defaults and clear session overrides")
+                }
+            }
+
+            ForEach(visibilityGroups, id: \.title) { group in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(group.title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    LazyVGrid(columns: filterColumns, alignment: .leading, spacing: 8) {
+                        ForEach(group.items, id: \.kind) { item in
+                            FilterToggleRow(
+                                title: item.title,
+                                isOn: visibilityBinding(for: item.kind)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                )
+        )
+        .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    private struct VisibilityGroup {
+        let title: String
+        let items: [VisibilityItem]
+    }
+
+    private struct VisibilityItem: Hashable {
+        let kind: MessageVisibilityKind
+        let title: String
+    }
+
+    private struct FilterToggleRow: View {
+        let title: String
+        @Binding var isOn: Bool
+
+        var body: some View {
+            HStack(spacing: 8) {
+                Toggle("", isOn: $isOn)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                Text(title)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+            }
+        }
+    }
+
+    private var filterColumns: [GridItem] {
+        [
+            GridItem(.flexible(minimum: 120), spacing: 12, alignment: .leading),
+            GridItem(.flexible(minimum: 120), spacing: 12, alignment: .leading),
+            GridItem(.flexible(minimum: 120), spacing: 12, alignment: .leading),
+            GridItem(.flexible(minimum: 120), spacing: 12, alignment: .leading)
+        ]
+    }
+
+    private var visibilityGroups: [VisibilityGroup] {
+        [
+            VisibilityGroup(title: "Core", items: [
+                VisibilityItem(kind: .user, title: "User"),
+                VisibilityItem(kind: .assistant, title: "Assistant"),
+                VisibilityItem(kind: .tool, title: "Tool")
+            ]),
+            VisibilityGroup(title: "Reasoning & Tokens", items: [
+                VisibilityItem(kind: .reasoning, title: "Reasoning"),
+                VisibilityItem(kind: .tokenUsage, title: "Token Usage")
+            ]),
+            VisibilityGroup(title: "Environment", items: [
+                VisibilityItem(kind: .environmentContext, title: "Environment Context"),
+                VisibilityItem(kind: .turnContext, title: "Turn Context")
+            ]),
+            VisibilityGroup(title: "Other Info", items: [
+                VisibilityItem(kind: .sessionMeta, title: "Session Meta"),
+                VisibilityItem(kind: .taskInstructions, title: "Task Instructions"),
+                VisibilityItem(kind: .compaction, title: "Compaction"),
+                VisibilityItem(kind: .turnAborted, title: "Turn Aborted"),
+                VisibilityItem(kind: .ghostSnapshot, title: "Ghost Snapshot"),
+                VisibilityItem(kind: .infoOther, title: "Other Info")
+            ])
+        ]
+    }
+
+    private func visibilityBinding(for kind: MessageVisibilityKind) -> Binding<Bool> {
+        Binding(
+            get: { sessionVisibleKinds.contains(kind) },
+            set: { isOn in
+                if isOn {
+                    sessionVisibleKinds.insert(kind)
+                } else {
+                    sessionVisibleKinds.remove(kind)
+                }
+                hasSessionVisibleKindsOverride = true
+                Task { await viewModel.updateTimelineVisibleKindsOverride(for: summary.id, kinds: sessionVisibleKinds) }
+                applyFilterAndSort()
+            }
+        )
+    }
+
+    private func resetInlineFilters() {
+        hasSessionVisibleKindsOverride = false
+        sessionVisibleKinds = viewModel.preferences.timelineVisibleKinds
+        Task { await viewModel.clearTimelineVisibleKindsOverride(for: summary.id) }
+        applyFilterAndSort()
+    }
+
     // MARK: - Loading helpers
     private func initialLoadAndMonitor() async {
+        let override = viewModel.timelineVisibleKindsOverride(for: summary.id)
+        sessionVisibleKinds = override ?? viewModel.preferences.timelineVisibleKinds
+        hasSessionVisibleKindsOverride = override != nil
+        autoExpandVisible = false
+        expandedTurnIDs.removeAll()
+
         // Stage 1: Try to load previews from cache (fast path)
-        // TEMPORARILY DISABLED FOR PERFORMANCE TESTING
-        // if let previews = await viewModel.loadTimelinePreviews(for: summary) {
-        //     await MainActor.run {
-        //         previewTurns = previews
-        //         loadingStage = .preview
-        //     }
-        // }
+        if let previews = await viewModel.loadTimelinePreviews(for: summary) {
+            await MainActor.run {
+                previewTurns = previews
+                loadingStage = .preview
+            }
+        }
 
         // Stage 2: Load full timeline in background
         await reloadConversation(resetUI: true)
@@ -441,14 +610,37 @@ extension SessionDetailView {
         loadingStage = .loading
         defer { loadingTimeline = false }
 
+        loadTask?.cancel()
+
+        if let cached = await viewModel.cachedTimeline(for: summary) {
+            allTurns = cached
+            loadingStage = .full
+            if resetUI {
+                expandedTurnIDs = []
+                environmentExpanded = false
+                environmentInfo = nil
+                environmentLoading = false
+            }
+            applyFilterAndSort()
+            return
+        }
+
         let shouldLoadDirectlyFromFile = summary.source.baseKind == .codex && !summary.source.isRemote
         let loaded: [ConversationTurn]
         if shouldLoadDirectlyFromFile {
-            loaded = (try? loader.load(url: summary.fileURL)) ?? []
+            let fileURL = summary.fileURL
+            let task: Task<[ConversationTurn], Never> = Task.detached(priority: .userInitiated) {
+                if Task.isCancelled { return [] }
+                let loader = SessionTimelineLoader()
+                return (try? loader.load(url: fileURL)) ?? []
+            }
+            loadTask = task
+            loaded = await task.value
         } else {
             loaded = await viewModel.timeline(for: summary)
         }
 
+        loadTask = nil
         allTurns = loaded
         loadingStage = .full
 
@@ -461,150 +653,79 @@ extension SessionDetailView {
 
         applyFilterAndSort()
 
-        // Stage 3: Update preview cache in background (async, non-blocking)
-        // TEMPORARILY DISABLED FOR PERFORMANCE TESTING
-        // if !loaded.isEmpty {
-        //     Task {
-        //         await viewModel.updateTimelinePreviews(for: summary, turns: loaded)
-        //     }
-        // }
+        if !loaded.isEmpty {
+            Task {
+                await viewModel.storeTimeline(loaded, for: summary)
+                await viewModel.updateTimelinePreviews(for: summary, turns: loaded)
+            }
+        }
     }
 
     @MainActor
     private func applyFilterAndSort() {
+        filterTask?.cancel()
         let term = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let filtered: [ConversationTurn]
-        if term.isEmpty {
-            filtered = allTurns
-        } else {
-            filtered = allTurns.filter { turn in
-                func contains(_ s: String?) -> Bool { (s ?? "").lowercased().contains(term) }
-                if contains(turn.userMessage?.text) { return true }
-                for e in turn.outputs {
-                    if contains(e.title) || contains(e.text) { return true }
-                    if let md = e.metadata,
-                        md.values.contains(where: { $0.lowercased().contains(term) })
-                    {
-                        return true
-                    }
+        let all = allTurns
+        let kinds = sessionVisibleKinds
+        let sortAscending = sortAscending
+        let expandOnSearch = expandAllOnSearch
+
+        filterTask = Task.detached(priority: .userInitiated) {
+            var filtered = all
+            if !term.isEmpty {
+                filtered = filtered.filter { turn in
+                    containsTerm(turn, term: term)
                 }
-                return false
             }
-        }
-        let sorted = filtered.sorted { a, b in
-            sortAscending ? (a.timestamp < b.timestamp) : (a.timestamp > b.timestamp)
-        }
-        // Apply visibility filter for timeline display
-        let kinds = viewModel.preferences.timelineVisibleKinds
-
-        // Find the first Environment Context to exclude (already shown in dedicated section)
-        let firstEnvContextID = findFirstEnvironmentContextID(in: sorted)
-
-        turns = sorted.compactMap {
-            filterTurn($0, visible: kinds, excludingFirstEnvContext: firstEnvContextID)
-        }
-        if expandAllOnSearch {
-            expandedTurnIDs = Set(turns.map(\.id))
-            expandAllOnSearch = false
+            filtered = filtered.filtering(visibleKinds: kinds)
+            filtered.sort { a, b in
+                sortAscending ? (a.timestamp < b.timestamp) : (a.timestamp > b.timestamp)
+            }
+            let result = filtered
+            await MainActor.run {
+                turns = result
+                if expandOnSearch {
+                    autoExpandVisible = true
+                    expandedTurnIDs.removeAll()
+                    expandAllOnSearch = false
+                }
+            }
         }
     }
 
     private func exportMarkdown() {
-        let md = buildMarkdown()
         let panel = NSSavePanel()
         panel.title = "Export Markdown"
         panel.allowedContentTypes = [.plainText]
         let base = sanitizedExportFileName(summary.effectiveTitle, fallback: summary.displayName)
         panel.nameFieldStringValue = base + ".md"
         if panel.runModal() == .OK, let url = panel.url {
+            let md = MarkdownExportBuilder.build(
+                session: summary,
+                turns: allTurns,
+                visibleKinds: viewModel.preferences.markdownVisibleKinds,
+                exportURL: url
+            )
             try? md.data(using: .utf8)?.write(to: url)
         }
     }
 
-    private func buildMarkdown() -> String {
-        var lines: [String] = []
-        lines.append("# \(summary.displayName)")
-        lines.append("")
-        lines.append("- Started: \(summary.startedAt)")
-        if let end = summary.lastUpdatedAt { lines.append("- Last Updated: \(end)") }
-        if let model = summary.displayModel ?? summary.model { lines.append("- Model: \(model)") }
-        if let approval = summary.approvalPolicy { lines.append("- Approval Policy: \(approval)") }
-        lines.append("")
-        // Use full timeline, filtered by markdown preferences (independent of UI search)
-        let kinds = viewModel.preferences.markdownVisibleKinds
-        // Also exclude first Environment Context from export (already shown in header)
-        let firstEnvContextID = findFirstEnvironmentContextID(in: allTurns)
-        let exportTurns = allTurns.compactMap {
-            filterTurn($0, visible: kinds, excludingFirstEnvContext: firstEnvContextID)
-        }
-        for turn in exportTurns {
-            if let user = turn.userMessage {  // already filtered
-                lines.append("**User** · \(user.timestamp)")
-                if let text = user.text, !text.isEmpty { lines.append(text) }
-            }
-            let assistantLabel = summary.source.branding.displayName
-            for event in turn.outputs {
-                let prefix: String
-                switch event.actor {
-                case .assistant: prefix = "**\(assistantLabel)**"
-                case .tool: prefix = "**Tool**"
-                case .info: prefix = "**Info**"
-                case .user: prefix = "**User**"
-                }
-                lines.append("")
-                lines.append("\(prefix) · \(event.timestamp)")
-                if let title = event.title { lines.append("> \(title)") }
-                if let text = event.text, !text.isEmpty { lines.append(text) }
-                if let meta = event.metadata, !meta.isEmpty {
-                    for key in meta.keys.sorted() { lines.append("- \(key): \(meta[key] ?? "")") }
-                }
-                if event.repeatCount > 1 { lines.append("- repeated: ×\(event.repeatCount)") }
-            }
-            lines.append("")
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    // MARK: - Visibility filtering helpers
-
-    /// Finds the ID of the first Environment Context event in the timeline
-    /// (to exclude it since it's already shown in the dedicated section above)
-    private func findFirstEnvironmentContextID(in turns: [ConversationTurn]) -> String? {
-        for turn in turns {
-            // Check outputs for Environment Context or Context Updated (from turnContext)
-            for output in turn.outputs {
-                if output.title == TimelineEvent.environmentContextTitle || output.title == "Context Updated" {
-                    return output.id
-                }
-            }
-        }
-        return nil
-    }
-
-    private func filterTurn(
-        _ turn: ConversationTurn,
-        visible: Set<MessageVisibilityKind>,
-        excludingFirstEnvContext firstEnvContextID: String? = nil
-    ) -> ConversationTurn? {
-        let userAllowed = turn.userMessage.flatMap { visible.contains(event: $0) } ?? false
-        let keptOutputs = turn.outputs.filter { output in
-            // Always exclude the first Environment Context (shown in dedicated section)
-            if let firstID = firstEnvContextID, output.id == firstID {
-                return false
-            }
-            return visible.contains(event: output)
-        }
-        if !userAllowed && keptOutputs.isEmpty { return nil }
-        return ConversationTurn(
-            id: turn.id,
-            timestamp: turn.timestamp,
-            userMessage: userAllowed ? turn.userMessage : nil,
-            outputs: keptOutputs
-        )
-    }
 }
 
 // MARK: - Helpers
+private func containsTerm(_ turn: ConversationTurn, term: String) -> Bool {
+    func contains(_ s: String?) -> Bool { (s ?? "").lowercased().contains(term) }
+    if contains(turn.userMessage?.text) { return true }
+    for e in turn.outputs {
+        if contains(e.title) || contains(e.text) { return true }
+        if let md = e.metadata,
+           md.values.contains(where: { $0.lowercased().contains(term) }) {
+            return true
+        }
+    }
+    return false
+}
+
 private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: Int = 120) -> String
 {
     var text = s.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -624,9 +745,25 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
     return text
 }
 
-#Preview {
-    @Previewable @State var visibility: NavigationSplitViewVisibility = .all
+#if DEBUG
+private struct SessionDetailPreviewContainer: View {
+    @State private var visibility: NavigationSplitViewVisibility = .all
+    let summary: SessionSummary
+    let isProcessing: Bool
 
+    var body: some View {
+        SessionDetailView(
+            summary: summary,
+            isProcessing: isProcessing,
+            onResume: { print("Resume session") },
+            onReveal: { print("Reveal in Finder") },
+            onDelete: { print("Delete session") },
+            columnVisibility: $visibility
+        )
+    }
+}
+
+#Preview {
     // Mock SessionSummary data
     let mockSummary = SessionSummary(
         id: "session-123",
@@ -655,16 +792,10 @@ private func sanitizedExportFileName(_ s: String, fallback: String, maxLength: I
         remotePath: nil
     )
 
-    SessionDetailView(
-        summary: mockSummary,
-        isProcessing: false,
-        onResume: { print("Resume session") },
-        onReveal: { print("Reveal in Finder") },
-        onDelete: { print("Delete session") },
-        columnVisibility: $visibility
-    )
-    .frame(width: 600, height: 800)
+    SessionDetailPreviewContainer(summary: mockSummary, isProcessing: false)
+        .frame(width: 600, height: 800)
 }
+#endif
 
 // MARK: - Preview Card Component
 
@@ -742,9 +873,8 @@ private struct ConversationTurnPreviewCard: View {
     }
 }
 
+#if DEBUG
 #Preview("Processing State") {
-    @Previewable @State var visibility: NavigationSplitViewVisibility = .all
-
     let mockSummary = SessionSummary(
         id: "session-456",
         fileURL: URL(fileURLWithPath: "/Users/developer/.codex/sessions/session-456.json"),
@@ -771,13 +901,7 @@ private struct ConversationTurnPreviewCard: View {
         remotePath: nil
     )
 
-    SessionDetailView(
-        summary: mockSummary,
-        isProcessing: true,
-        onResume: { print("Resume session") },
-        onReveal: { print("Reveal in Finder") },
-        onDelete: { print("Delete session") },
-        columnVisibility: $visibility
-    )
-    .frame(width: 600, height: 800)
+    SessionDetailPreviewContainer(summary: mockSummary, isProcessing: true)
+        .frame(width: 600, height: 800)
 }
+#endif

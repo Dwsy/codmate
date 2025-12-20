@@ -32,20 +32,20 @@ extension ContentView {
       }
     }
     .frame(minWidth: 640)
-    .onChange(of: selectedDetailTab) { _, newVal in
+    .onChange(of: selectedDetailTab) { newVal in
       // Coerce legacy .review to .timeline in Tasks mode (session-level Git Review removed)
       if newVal == .review { selectedDetailTab = .timeline; return }
       if let focused = focusedSummary {
         sessionDetailTabs[focused.id] = newVal
       }
     }
-    .onChange(of: viewModel.projectWorkspaceMode) { _, newMode in
+    .onChange(of: viewModel.projectWorkspaceMode) { newMode in
       // When switching into project Review, ensure repository authorization
       if newMode == .review, let p = currentSelectedProject(), let dir = p.directory, !dir.isEmpty {
         ensureRepoAccessForProjectReview(directory: dir)
       }
     }
-    .onChange(of: focusedSummary?.id) { _, newId in
+    .onChange(of: focusedSummary?.id) { newId in
       if let newId = newId {
         selectedDetailTab = sessionDetailTabs[newId] ?? .timeline
       } else {
@@ -54,7 +54,7 @@ extension ContentView {
       if selectedDetailTab == .review { selectedDetailTab = .timeline }
       normalizeDetailTabForTerminalAvailability()
     }
-    .onChange(of: runningSessionIDs) { _, _ in
+    .onChange(of: runningSessionIDs) { _ in
       normalizeDetailTabForTerminalAvailability()
       synchronizeSelectedTerminalKey()
     }

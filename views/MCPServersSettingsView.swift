@@ -2,7 +2,6 @@ import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
 
-@available(macOS 15.0, *)
 struct MCPServersSettingsPane: View {
     @StateObject private var vm = MCPServersViewModel()
     @State private var showImportConfirmation = false
@@ -27,13 +26,13 @@ struct MCPServersSettingsPane: View {
             Spacer(minLength: 0)
         }
         .onAppear { Task { await vm.loadServers() } }
-        .onChange(of: showNewSheet) { old, newVal in
-            if old == true && newVal == false {
+        .onChange(of: showNewSheet) { newVal in
+            if newVal == false {
                 Task { await vm.loadServers() }
             }
         }
-        .onChange(of: showEditorSheet) { old, newVal in
-            if old == true && newVal == false {
+        .onChange(of: showEditorSheet) { newVal in
+            if newVal == false {
                 Task { await vm.loadServers() }
             }
         }
@@ -341,7 +340,6 @@ struct MCPServersSettingsPane: View {
 }
 
 // MARK: - New MCP Server Sheet (Import + Form placeholder)
-@available(macOS 15.0, *)
 private struct NewMCPServerSheet: View {
     @ObservedObject var vm: MCPServersViewModel
     var onClose: () -> Void
@@ -526,7 +524,6 @@ private struct NewMCPServerSheet: View {
 }
 
 // MARK: - Unified Editor Sheet (JSON + Form)
-@available(macOS 15.0, *)
 private struct MCPServerEditorSheet: View {
     @ObservedObject var vm: MCPServersViewModel
     var isEditing: Bool
@@ -544,9 +541,24 @@ private struct MCPServerEditorSheet: View {
             if !isEditing {
                 SettingsTabContent { importArea }
             }
-            TabView(selection: $selectedTab) {
-                Tab("Form", systemImage: "slider.horizontal.3", value: 0) { SettingsTabContent { formTab } }
-                Tab("JSON", systemImage: "doc.text", value: 1) { SettingsTabContent { jsonConfigTab } }
+            if #available(macOS 15.0, *) {
+                TabView(selection: $selectedTab) {
+                    Tab("Form", systemImage: "slider.horizontal.3", value: 0) {
+                        SettingsTabContent { formTab }
+                    }
+                    Tab("JSON", systemImage: "doc.text", value: 1) {
+                        SettingsTabContent { jsonConfigTab }
+                    }
+                }
+            } else {
+                TabView(selection: $selectedTab) {
+                    SettingsTabContent { formTab }
+                        .tabItem { Label("Form", systemImage: "slider.horizontal.3") }
+                        .tag(0)
+                    SettingsTabContent { jsonConfigTab }
+                        .tabItem { Label("JSON", systemImage: "doc.text") }
+                        .tag(1)
+                }
             }
             if let msg = vm.testMessage, !msg.isEmpty {
                 Text(msg)
@@ -626,7 +638,7 @@ private struct MCPServerEditorSheet: View {
             .onDrop(of: [UTType.json, UTType.plainText, UTType.fileURL, UTType.text], isTargeted: .constant(false)) { providers in
                 handleDropProviders(providers)
             }
-            .onChange(of: isDropTargeted) { _, now in
+            .onChange(of: isDropTargeted) { now in
                 if now {
                     withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                         breathing = true
@@ -635,19 +647,19 @@ private struct MCPServerEditorSheet: View {
                     withAnimation(.easeOut(duration: 0.2)) { breathing = false }
                 }
             }
-            .onChange(of: vm.isParsing) { _, parsing in
+            .onChange(of: vm.isParsing) { parsing in
                 // Stop breathing once parsing finishes (drop completed)
                 if parsing == false {
                     isDropTargeted = false
                     withAnimation(.easeOut(duration: 0.2)) { breathing = false }
                 }
             }
-            .onChange(of: vm.drafts.count) { _, _ in
+            .onChange(of: vm.drafts.count) { _ in
                 // Any detected entries imply drop completed; stop highlight
                 isDropTargeted = false
                 withAnimation(.easeOut(duration: 0.2)) { breathing = false }
             }
-            .onChange(of: vm.importError) { _, _ in
+            .onChange(of: vm.importError) { _ in
                 // Error also ends the hover state; stop highlight
                 isDropTargeted = false
                 withAnimation(.easeOut(duration: 0.2)) { breathing = false }
@@ -787,7 +799,6 @@ private struct MCPServerEditorSheet: View {
 }
 
 // MARK: - NSViewRepresentable Drop Catcher
-@available(macOS 15.0, *)
 private struct DropCatcher: NSViewRepresentable {
     @Binding var isTargeted: Bool
     var onString: (String) -> Void

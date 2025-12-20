@@ -22,7 +22,7 @@ extension GitChangesPanel {
           Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
           TextField(searchPlaceholder, text: $headerSearchQuery)
             .textFieldStyle(.plain)
-            .onChange(of: headerSearchQuery) { _, newVal in
+            .onChange(of: headerSearchQuery) { newVal in
               onHeaderSearchChanged(newVal)
             }
         }

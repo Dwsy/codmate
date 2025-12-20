@@ -97,7 +97,7 @@ struct ContentView: View {
   // Build highlighted text where matches of `query` are tinted; non-matches use the provided base color
   func highlightedText(_ text: String, query: String, base: Color = .primary) -> Text {
     guard !query.isEmpty else {
-      let baseText = Text(text).foregroundStyle(base)
+      let baseText = Text(text).foregroundColor(base)
       return baseText
     }
 
@@ -111,12 +111,12 @@ struct ContentView: View {
     {
       if r.lowerBound > searchStart {
         let prefix = String(text[searchStart..<r.lowerBound])
-        let prefixText = Text(prefix).foregroundStyle(base)
+        let prefixText = Text(prefix).foregroundColor(base)
         result = result + prefixText
       }
 
       let match = String(text[r])
-      let matchText = Text(match).foregroundStyle(.tint)
+      let matchText = Text(match).foregroundColor(.accentColor)
       result = result + matchText
 
       searchStart = r.upperBound
@@ -124,7 +124,7 @@ struct ContentView: View {
 
     if searchStart < end {
       let tail = String(text[searchStart..<end])
-      let tailText = Text(tail).foregroundStyle(base)
+      let tailText = Text(tail).foregroundColor(base)
       result = result + tailText
     }
 
@@ -1143,10 +1143,21 @@ struct ContentView: View {
   // Removed: executable chooser handler
 
   var placeholder: some View {
-    ContentUnavailableView(
-      "Select a session", systemImage: "rectangle.and.text.magnifyingglass",
-      description: Text("Pick a session from the middle list to view details.")
-    )
+    Group {
+      if #available(macOS 14.0, *) {
+        ContentUnavailableView(
+          "Select a session", systemImage: "rectangle.and.text.magnifyingglass",
+          description: Text("Pick a session from the middle list to view details.")
+        )
+      } else {
+        UnavailableStateView(
+          "Select a session",
+          systemImage: "rectangle.and.text.magnifyingglass",
+          description: "Pick a session from the middle list to view details.",
+          titleColor: .primary
+        )
+      }
+    }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 }

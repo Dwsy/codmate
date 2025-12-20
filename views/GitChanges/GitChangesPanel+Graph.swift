@@ -24,7 +24,7 @@ extension GitChangesPanel {
     .onAppear {
       graphVM.attach(to: vm.repoRoot)
     }
-    .onChange(of: vm.repoRoot) { _, newVal in
+    .onChange(of: vm.repoRoot) { newVal in
       graphVM.attach(to: newVal)
     }
   }
@@ -71,8 +71,8 @@ extension GitChangesPanel {
         }
         .padding(.top, 16)
         .padding(.horizontal, 16)
-        .onChange(of: vm.showAllBranches) { _, _ in vm.loadCommits() }
-        .onChange(of: vm.branchSearchQuery) { _, _ in vm.applyBranchFilter() }
+        .onChange(of: vm.showAllBranches) { _ in vm.loadCommits() }
+        .onChange(of: vm.branchSearchQuery) { _ in vm.applyBranchFilter() }
 
         if let error = vm.errorMessage, !error.isEmpty {
           HStack(spacing: 6) {
@@ -91,82 +91,7 @@ extension GitChangesPanel {
           .padding(.bottom, 4)
         }
 
-        Table(vm.rowData, selection: $selection) {
-          // Graph column
-          TableColumn("") { row in
-            let isSelected = (selection == row.id)
-            if let info = row.laneInfo {
-              GraphLaneView(
-                info: info,
-                maxLanes: vm.maxLaneCount,
-                laneSpacing: laneSpacing,
-                verticalWidth: 2,
-                hideTopForCurrentLane: row.isFirst,
-                hideBottomForCurrentLane: row.isLast,
-                headIsHollow: row.isWorkingTree,
-                headSize: 12,
-                isSelected: isSelected
-              )
-              .frame(width: graphColumnWidth, height: rowHeight)
-            } else {
-              GraphGlyph(isSelected: isSelected)
-                .frame(width: graphColumnWidth, height: rowHeight)
-            }
-          }
-          .width(min: graphColumnWidth, ideal: graphColumnWidth, max: graphColumnWidth)
-
-          // Description
-          TableColumn("Description") { row in
-            HStack(spacing: 6) {
-              Text(row.commit.subject)
-                .fontWeight(row.isWorkingTree ? .semibold : .regular)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-              if !row.commit.decorations.isEmpty {
-                ForEach(row.commit.decorations.prefix(3), id: \.self) { d in
-                  Text(d)
-                    .font(.system(size: 10, weight: .medium))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.secondary.opacity(0.15)))
-                }
-              }
-            }
-            .onAppear {
-              if row.isLast {
-                vm.loadMore()
-              }
-            }
-          }
-
-          if !compactColumns {
-            TableColumn("Date") { row in
-              Text(row.commit.date)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .width(dateWidth)
-
-            TableColumn("Author") { row in
-              Text(row.commit.author)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .width(authorWidth)
-
-            TableColumn("SHA") { row in
-              Text(row.commit.shortId)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .width(shaWidth)
-          }
-        }
+        tableView
         .environment(\.defaultMinListRowHeight, rowHeight)
         .tableStyle(.inset(alternatesRowBackgrounds: true))
         .removeTableSpacing(rowHeight: rowHeight)
@@ -186,10 +111,10 @@ extension GitChangesPanel {
       .onAppear {
         syncSelectionFromViewModel()
       }
-      .onChange(of: vm.rowData) { _, _ in
+      .onChange(of: vm.rowData) { _ in
         syncSelectionFromViewModel()
       }
-      .onChange(of: selection) { _, newValue in
+      .onChange(of: selection) { newValue in
         if suppressNextActivation {
           // Skip the activation corresponding to a programmatic
           // selection restore (e.g. when the view is recreated
@@ -205,6 +130,108 @@ extension GitChangesPanel {
           onActivateCommit(nil)
         } else {
           onActivateCommit(row.commit)
+        }
+      }
+    }
+
+    @ViewBuilder
+    private var tableView: some View {
+      if compactColumns {
+        Table(vm.rowData, selection: $selection) {
+          // Graph column
+          TableColumn("") { row in
+            graphColumnContent(for: row)
+          }
+          .width(min: graphColumnWidth, ideal: graphColumnWidth, max: graphColumnWidth)
+
+          // Description
+          TableColumn("Description") { row in
+            descriptionColumnContent(for: row)
+          }
+        }
+      } else {
+        Table(vm.rowData, selection: $selection) {
+          // Graph column
+          TableColumn("") { row in
+            graphColumnContent(for: row)
+          }
+          .width(min: graphColumnWidth, ideal: graphColumnWidth, max: graphColumnWidth)
+
+          // Description
+          TableColumn("Description") { row in
+            descriptionColumnContent(for: row)
+          }
+
+          TableColumn("Date") { row in
+            Text(row.commit.date)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+          .width(dateWidth)
+
+          TableColumn("Author") { row in
+            Text(row.commit.author)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+          .width(authorWidth)
+
+          TableColumn("SHA") { row in
+            Text(row.commit.shortId)
+              .font(.system(.caption, design: .monospaced))
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+          .width(shaWidth)
+        }
+      }
+    }
+
+    @ViewBuilder
+    private func graphColumnContent(for row: GitGraphViewModel.CommitRowData) -> some View {
+      let isSelected = (selection == row.id)
+      if let info = row.laneInfo {
+        GraphLaneView(
+          info: info,
+          maxLanes: vm.maxLaneCount,
+          laneSpacing: laneSpacing,
+          verticalWidth: 2,
+          hideTopForCurrentLane: row.isFirst,
+          hideBottomForCurrentLane: row.isLast,
+          headIsHollow: row.isWorkingTree,
+          headSize: 12,
+          isSelected: isSelected
+        )
+        .frame(width: graphColumnWidth, height: rowHeight)
+      } else {
+        GraphGlyph(isSelected: isSelected)
+          .frame(width: graphColumnWidth, height: rowHeight)
+      }
+    }
+
+    private func descriptionColumnContent(for row: GitGraphViewModel.CommitRowData) -> some View {
+      HStack(spacing: 6) {
+        Text(row.commit.subject)
+          .fontWeight(row.isWorkingTree ? .semibold : .regular)
+          .lineLimit(1)
+          .frame(maxWidth: .infinity, alignment: .leading)
+
+        if !row.commit.decorations.isEmpty {
+          ForEach(row.commit.decorations.prefix(3), id: \.self) { d in
+            Text(d)
+              .font(.system(size: 10, weight: .medium))
+              .padding(.horizontal, 6)
+              .padding(.vertical, 2)
+              .background(Capsule().fill(Color.secondary.opacity(0.15)))
+          }
+        }
+      }
+      .onAppear {
+        if row.isLast {
+          vm.loadMore()
         }
       }
     }
@@ -315,7 +342,7 @@ extension GitChangesPanel {
         Text("Show Remote Branches")
           .lineLimit(1)
       }
-      .onChange(of: vm.showRemoteBranches) { _, _ in
+      .onChange(of: vm.showRemoteBranches) { _ in
         vm.loadBranches()
         vm.loadCommits()
       }
@@ -399,7 +426,7 @@ extension GitChangesPanel {
       .onAppear {
         viewModel.loadDetail(for: commit)
       }
-      .onChange(of: commit.id) { _, _ in
+      .onChange(of: commit.id) { _ in
         viewModel.loadDetail(for: commit)
       }
     }

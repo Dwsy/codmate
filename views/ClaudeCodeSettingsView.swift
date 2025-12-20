@@ -24,11 +24,26 @@ struct ClaudeCodeSettingsView: View {
                 .buttonStyle(.plain)
             }
 
-            TabView {
-                Tab("Provider", systemImage: "server.rack") { SettingsTabContent { providerPane } }
-                Tab("Runtime", systemImage: "gearshape.2") { SettingsTabContent { runtimePane } }
-                Tab("Notifications", systemImage: "bell") { SettingsTabContent { notificationsPane } }
-                Tab("Raw Config", systemImage: "doc.text") { SettingsTabContent { rawPane } }
+            Group {
+                if #available(macOS 15.0, *) {
+                    TabView {
+                        Tab("Provider", systemImage: "server.rack") { SettingsTabContent { providerPane } }
+                        Tab("Runtime", systemImage: "gearshape.2") { SettingsTabContent { runtimePane } }
+                        Tab("Notifications", systemImage: "bell") { SettingsTabContent { notificationsPane } }
+                        Tab("Raw Config", systemImage: "doc.text") { SettingsTabContent { rawPane } }
+                    }
+                } else {
+                    TabView {
+                        SettingsTabContent { providerPane }
+                            .tabItem { Label("Provider", systemImage: "server.rack") }
+                        SettingsTabContent { runtimePane }
+                            .tabItem { Label("Runtime", systemImage: "gearshape.2") }
+                        SettingsTabContent { notificationsPane }
+                            .tabItem { Label("Notifications", systemImage: "bell") }
+                        SettingsTabContent { rawPane }
+                            .tabItem { Label("Raw Config", systemImage: "doc.text") }
+                    }
+                }
             }
             .padding(.bottom, 16)
         }
@@ -52,7 +67,7 @@ struct ClaudeCodeSettingsView: View {
                     }
                     .labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                    .onChange(of: vm.activeProviderId) { _, _ in vm.scheduleApplyActiveProviderDebounced() }
+                    .onChange(of: vm.activeProviderId) { _ in vm.scheduleApplyActiveProviderDebounced() }
                 }
                 // Default Model row (only for third‑party providers)
                 if vm.activeProviderId != nil {
@@ -75,7 +90,7 @@ struct ClaudeCodeSettingsView: View {
                             }
                             .labelsHidden()
                             .frame(maxWidth: .infinity, alignment: .trailing)
-                            .onChange(of: vm.aliasDefault) { _, newVal in vm.scheduleApplyDefaultAliasDebounced(newVal) }
+                            .onChange(of: vm.aliasDefault) { newVal in vm.scheduleApplyDefaultAliasDebounced(newVal) }
                         }
                     }
                     gridDivider
@@ -93,7 +108,7 @@ struct ClaudeCodeSettingsView: View {
                         }
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .trailing)
-                        .onChange(of: vm.aliasHaiku) { _, _ in vm.scheduleSaveDebounced() }
+                        .onChange(of: vm.aliasHaiku) { _ in vm.scheduleSaveDebounced() }
                     }
                     GridRow {
                         VStack(alignment: .leading, spacing: 0) {
@@ -108,7 +123,7 @@ struct ClaudeCodeSettingsView: View {
                         }
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .trailing)
-                        .onChange(of: vm.aliasSonnet) { _, _ in vm.scheduleSaveDebounced() }
+                        .onChange(of: vm.aliasSonnet) { _ in vm.scheduleSaveDebounced() }
                     }
                     GridRow {
                         VStack(alignment: .leading, spacing: 0) {
@@ -123,7 +138,7 @@ struct ClaudeCodeSettingsView: View {
                         }
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .trailing)
-                        .onChange(of: vm.aliasOpus) { _, _ in vm.scheduleSaveDebounced() }
+                        .onChange(of: vm.aliasOpus) { _ in vm.scheduleSaveDebounced() }
                     }
                 }
                 if vm.activeProviderId == nil {
@@ -140,7 +155,7 @@ struct ClaudeCodeSettingsView: View {
                             Text("Claude Subscription").tag(ClaudeCodeVM.LoginMethod.subscription)
                         }
                         .pickerStyle(.segmented)
-                        .onChange(of: vm.loginMethod) { _, newVal in
+                        .onChange(of: vm.loginMethod) { newVal in
                             Task { await vm.setLoginMethod(newVal) }
                         }
                         .disabled(vm.activeProviderId != nil) // third-party must use API Key
@@ -182,7 +197,7 @@ struct ClaudeCodeSettingsView: View {
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                    .onChange(of: vm.notificationsEnabled) { _, _ in
+                    .onChange(of: vm.notificationsEnabled) { _ in
                         vm.scheduleApplyNotificationSettingsDebounced()
                     }
             }

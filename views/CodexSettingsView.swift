@@ -29,13 +29,32 @@ struct CodexSettingsView: View {
             }
 
             // Tabs (Remote Hosts is a top-level page, not a Codex sub-tab)
-            TabView {
-                Tab("Provider", systemImage: "server.rack") { providerPane }
-                Tab("Runtime", systemImage: "gearshape.2") { runtimePane }
-                Tab("Features", systemImage: "wand.and.stars") { featuresPane }
-                Tab("Notifications", systemImage: "bell") { notificationsPane }
-                Tab("Privacy", systemImage: "lock.shield") { privacyPane }
-                Tab("Raw Config", systemImage: "doc.text") { rawConfigPane }
+            Group {
+                if #available(macOS 15.0, *) {
+                    TabView {
+                        Tab("Provider", systemImage: "server.rack") { providerPane }
+                        Tab("Runtime", systemImage: "gearshape.2") { runtimePane }
+                        Tab("Features", systemImage: "wand.and.stars") { featuresPane }
+                        Tab("Notifications", systemImage: "bell") { notificationsPane }
+                        Tab("Privacy", systemImage: "lock.shield") { privacyPane }
+                        Tab("Raw Config", systemImage: "doc.text") { rawConfigPane }
+                    }
+                } else {
+                    TabView {
+                        providerPane
+                            .tabItem { Label("Provider", systemImage: "server.rack") }
+                        runtimePane
+                            .tabItem { Label("Runtime", systemImage: "gearshape.2") }
+                        featuresPane
+                            .tabItem { Label("Features", systemImage: "wand.and.stars") }
+                        notificationsPane
+                            .tabItem { Label("Notifications", systemImage: "bell") }
+                        privacyPane
+                            .tabItem { Label("Privacy", systemImage: "lock.shield") }
+                        rawConfigPane
+                            .tabItem { Label("Raw Config", systemImage: "doc.text") }
+                    }
+                }
             }
             .controlSize(.regular)
             .padding(.bottom, 16)
@@ -61,7 +80,7 @@ struct CodexSettingsView: View {
                     }
                     .labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .trailing)
-                    .onChange(of: codexVM.registryActiveProviderId) { _, _ in
+                    .onChange(of: codexVM.registryActiveProviderId) { _ in
                         codexVM.scheduleApplyRegistryProviderSelectionDebounced()
                     }
                 }
@@ -80,7 +99,7 @@ struct CodexSettingsView: View {
                         }
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .trailing)
-                        .onChange(of: codexVM.model) { _, _ in codexVM.scheduleApplyModelDebounced() }
+                        .onChange(of: codexVM.model) { _ in codexVM.scheduleApplyModelDebounced() }
                     } else {
                         let modelIds = codexVM.modelsForActiveRegistryProvider()
                         if modelIds.isEmpty {
@@ -96,7 +115,7 @@ struct CodexSettingsView: View {
                             }
                             .labelsHidden()
                             .frame(maxWidth: .infinity, alignment: .trailing)
-                            .onChange(of: codexVM.model) { _, _ in codexVM.scheduleApplyModelDebounced() }
+                            .onChange(of: codexVM.model) { _ in codexVM.scheduleApplyModelDebounced() }
                         }
                     }
                 }
@@ -120,7 +139,7 @@ struct CodexSettingsView: View {
                                 ForEach(CodexVM.ReasoningEffort.allCases) { Text($0.rawValue).tag($0) }
                             }
                             .labelsHidden()
-                            .onChange(of: codexVM.reasoningEffort) { _, _ in codexVM.scheduleApplyReasoningDebounced() }
+                            .onChange(of: codexVM.reasoningEffort) { _ in codexVM.scheduleApplyReasoningDebounced() }
                             .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         gridDivider
@@ -134,7 +153,7 @@ struct CodexSettingsView: View {
                                 ForEach(CodexVM.ReasoningSummary.allCases) { Text($0.rawValue).tag($0) }
                             }
                             .labelsHidden()
-                            .onChange(of: codexVM.reasoningSummary) { _, _ in codexVM.scheduleApplyReasoningDebounced() }
+                            .onChange(of: codexVM.reasoningSummary) { _ in codexVM.scheduleApplyReasoningDebounced() }
                             .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         gridDivider
@@ -148,7 +167,7 @@ struct CodexSettingsView: View {
                                 ForEach(CodexVM.ModelVerbosity.allCases) { Text($0.rawValue).tag($0) }
                             }
                             .labelsHidden()
-                            .onChange(of: codexVM.modelVerbosity) { _, _ in codexVM.scheduleApplyReasoningDebounced() }
+                            .onChange(of: codexVM.modelVerbosity) { _ in codexVM.scheduleApplyReasoningDebounced() }
                             .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         gridDivider
@@ -162,7 +181,7 @@ struct CodexSettingsView: View {
                                 ForEach(SandboxMode.allCases) { Text($0.title).tag($0) }
                             }
                             .labelsHidden()
-                            .onChange(of: codexVM.sandboxMode) { _, newValue in
+                            .onChange(of: codexVM.sandboxMode) { newValue in
                                 codexVM.scheduleApplySandboxDebounced()
                                 preferences.defaultResumeSandboxMode = newValue
                             }
@@ -179,7 +198,7 @@ struct CodexSettingsView: View {
                                 ForEach(ApprovalPolicy.allCases) { Text($0.title).tag($0) }
                             }
                             .labelsHidden()
-                            .onChange(of: codexVM.approvalPolicy) { _, newValue in
+                            .onChange(of: codexVM.approvalPolicy) { newValue in
                                 codexVM.scheduleApplyApprovalDebounced()
                                 preferences.defaultResumeApprovalPolicy = newValue
                             }
@@ -300,7 +319,7 @@ struct CodexSettingsView: View {
                                     .labelsHidden()
                                     .toggleStyle(.switch)
                                     .controlSize(.small)
-                            .onChange(of: codexVM.tuiNotifications) { _, _ in codexVM.scheduleApplyTuiNotificationsDebounced() }
+                            .onChange(of: codexVM.tuiNotifications) { _ in codexVM.scheduleApplyTuiNotificationsDebounced() }
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         gridDivider
@@ -316,7 +335,7 @@ struct CodexSettingsView: View {
                                     .labelsHidden()
                                     .toggleStyle(.switch)
                                     .controlSize(.small)
-                                .onChange(of: codexVM.systemNotifications) { _, _ in codexVM.scheduleApplySystemNotificationsDebounced() }
+                                .onChange(of: codexVM.systemNotifications) { _ in codexVM.scheduleApplySystemNotificationsDebounced() }
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         if let path = codexVM.notifyBridgePath {
@@ -436,7 +455,7 @@ struct CodexSettingsView: View {
                         }
                         Toggle("", isOn: $codexVM.hideAgentReasoning)
                             .labelsHidden()
-                            .onChange(of: codexVM.hideAgentReasoning) { _, _ in codexVM.scheduleApplyHideReasoningDebounced() }
+                            .onChange(of: codexVM.hideAgentReasoning) { _ in codexVM.scheduleApplyHideReasoningDebounced() }
                             .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                     GridRow {
@@ -449,7 +468,7 @@ struct CodexSettingsView: View {
                         }
                         Toggle("", isOn: $codexVM.showRawAgentReasoning)
                             .labelsHidden()
-                            .onChange(of: codexVM.showRawAgentReasoning) { _, _ in codexVM.scheduleApplyShowRawReasoningDebounced() }
+                            .onChange(of: codexVM.showRawAgentReasoning) { _ in codexVM.scheduleApplyShowRawReasoningDebounced() }
                             .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }

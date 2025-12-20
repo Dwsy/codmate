@@ -189,7 +189,7 @@ struct SessionListRowView: View {
           Image(systemName: "timer")
             .foregroundStyle(Color.orange)
             .font(.system(size: 16, weight: .semibold))
-            .symbolEffect(.pulse, isActive: true)
+            .modifier(UpdatePulseModifier(active: true))
             .help("Updating…")
         } else if inTaskContainer {
           if isRunning {
@@ -246,7 +246,7 @@ struct SessionListRowView: View {
         }
       }
     }
-    .onChange(of: isRunning) { _, newValue in
+    .onChange(of: isRunning) { newValue in
       if newValue {
         if reduceMotion {
           breathing = false
@@ -263,7 +263,7 @@ struct SessionListRowView: View {
         }
       }
     }
-    .onChange(of: awaitingFollowup) { _, needed in
+    .onChange(of: awaitingFollowup) { needed in
       guard !reduceMotion else { return }
       if needed {
         withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
@@ -272,6 +272,18 @@ struct SessionListRowView: View {
       } else {
         withAnimation(.easeOut(duration: 0.2)) { breathing = false }
       }
+    }
+  }
+}
+
+private struct UpdatePulseModifier: ViewModifier {
+  let active: Bool
+
+  func body(content: Content) -> some View {
+    if #available(macOS 14.0, *) {
+      content.symbolEffect(.pulse, isActive: active)
+    } else {
+      content
     }
   }
 }
@@ -348,7 +360,7 @@ private struct SpinningBeachballView: View {
     }
     .rotationEffect(.degrees(angle))
     .onAppear { startIfNeeded() }
-    .onChange(of: reduceMotion) { _, _ in startIfNeeded() }
+    .onChange(of: reduceMotion) { _ in startIfNeeded() }
     .drawingGroup()
   }
 

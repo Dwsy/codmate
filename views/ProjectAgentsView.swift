@@ -73,7 +73,7 @@ struct ProjectAgentsView: View {
         .onAppear {
             loadAgentsFile()
         }
-        .onChange(of: projectDirectory) { _, _ in
+        .onChange(of: projectDirectory) { _ in
             loadAgentsFile()
         }
     }

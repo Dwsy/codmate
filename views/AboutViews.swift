@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 
-@available(macOS 15.0, *)
 struct OpenSourceLicensesView: View {
     let repoURL: URL
     @State private var content: String = ""

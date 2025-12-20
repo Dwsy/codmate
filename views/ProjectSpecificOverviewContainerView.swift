@@ -33,7 +33,7 @@ struct ProjectSpecificOverviewContainerView: View {
             onEditProject: onEditProject
         )
         // Update the project in the ViewModel if it changes from outside
-        .onChange(of: project) { _, newProject in
+        .onChange(of: project) { newProject in
             projectOverviewViewModel.updateProject(newProject)
         }
     }

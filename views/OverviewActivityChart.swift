@@ -33,12 +33,7 @@ struct OverviewActivityChart: View {
             headerView
 
             if data.points.isEmpty {
-                ContentUnavailableView {
-                    Label("No Activity", systemImage: "chart.bar")
-                } description: {
-                    Text("No sessions found in this time range.")
-                }
-                .frame(height: 160)
+                emptyStateView
             } else {
                 chartContainer
             }
@@ -169,7 +164,7 @@ struct OverviewActivityChart: View {
             let requiredWidth = CGFloat(totalSlots) * stepWidth
 
             // Scrollable Chart Area
-            ScrollView(.horizontal, showsIndicators: true) {
+            scrollContainer {
                 ZStack {
                     HStack(spacing: 0) {
                         if requiredWidth < chartAreaWidth {
@@ -228,9 +223,43 @@ struct OverviewActivityChart: View {
                     .frame(minWidth: chartAreaWidth, alignment: .trailing)
                 }
             }
-            .defaultScrollAnchor(.trailing)
         }
         .frame(height: 160)
+    }
+
+    @ViewBuilder
+    private var emptyStateView: some View {
+        if #available(macOS 14.0, *) {
+            ContentUnavailableView {
+                Label("No Activity", systemImage: "chart.bar")
+            } description: {
+                Text("No sessions found in this time range.")
+            }
+            .frame(height: 160)
+        } else {
+            UnavailableStateView(
+                "No Activity",
+                systemImage: "chart.bar",
+                description: "No sessions found in this time range.",
+                titleFont: .callout
+            )
+            .frame(height: 160)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private func scrollContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        if #available(macOS 14.0, *) {
+            ScrollView(.horizontal, showsIndicators: true) {
+                content()
+            }
+            .defaultScrollAnchor(.trailing)
+        } else {
+            ScrollView(.horizontal, showsIndicators: true) {
+                content()
+            }
+        }
     }
 
     private func geoSize(from width: CGFloat) -> CGSize {

@@ -9,11 +9,26 @@ struct GeminiSettingsView: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
-      TabView {
-        Tab("General", systemImage: "gearshape") { generalTab }
-        Tab("Runtime", systemImage: "gauge") { runtimeTab }
-        Tab("Model", systemImage: "cpu") { modelTab }
-        Tab("Raw Config", systemImage: "doc.text") { rawTab }
+      Group {
+        if #available(macOS 15.0, *) {
+          TabView {
+            Tab("General", systemImage: "gearshape") { generalTab }
+            Tab("Runtime", systemImage: "gauge") { runtimeTab }
+            Tab("Model", systemImage: "cpu") { modelTab }
+            Tab("Raw Config", systemImage: "doc.text") { rawTab }
+          }
+        } else {
+          TabView {
+            generalTab
+              .tabItem { Label("General", systemImage: "gearshape") }
+            runtimeTab
+              .tabItem { Label("Runtime", systemImage: "gauge") }
+            modelTab
+              .tabItem { Label("Model", systemImage: "cpu") }
+            rawTab
+              .tabItem { Label("Raw Config", systemImage: "doc.text") }
+          }
+        }
       }
       .controlSize(.regular)
     }
@@ -50,7 +65,7 @@ struct GeminiSettingsView: View {
             .toggleStyle(.switch)
             .controlSize(.small)
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .onChange(of: vm.previewFeatures) { _, _ in vm.applyPreviewFeaturesChange() }
+            .onChange(of: vm.previewFeatures) { _ in vm.applyPreviewFeaturesChange() }
         }
         dividerRow
         GridRow {
@@ -60,7 +75,7 @@ struct GeminiSettingsView: View {
             .toggleStyle(.switch)
             .controlSize(.small)
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .onChange(of: vm.enablePromptCompletion) { _, _ in vm.applyPromptCompletionChange() }
+            .onChange(of: vm.enablePromptCompletion) { _ in vm.applyPromptCompletionChange() }
         }
         dividerRow
         GridRow {
@@ -70,7 +85,7 @@ struct GeminiSettingsView: View {
             .toggleStyle(.switch)
             .controlSize(.small)
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .onChange(of: vm.vimMode) { _, _ in vm.applyVimModeChange() }
+            .onChange(of: vm.vimMode) { _ in vm.applyVimModeChange() }
         }
         dividerRow
         GridRow {
@@ -80,7 +95,7 @@ struct GeminiSettingsView: View {
             .toggleStyle(.switch)
             .controlSize(.small)
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .onChange(of: vm.disableAutoUpdate) { _, _ in vm.applyDisableAutoUpdateChange() }
+            .onChange(of: vm.disableAutoUpdate) { _ in vm.applyDisableAutoUpdateChange() }
         }
         dividerRow
         GridRow {
@@ -90,7 +105,7 @@ struct GeminiSettingsView: View {
             .toggleStyle(.switch)
             .controlSize(.small)
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .onChange(of: vm.sessionRetentionEnabled) { _, _ in vm.applySessionRetentionChange() }
+            .onChange(of: vm.sessionRetentionEnabled) { _ in vm.applySessionRetentionChange() }
         }
         if let error = vm.lastError {
           dividerRow
@@ -142,7 +157,7 @@ struct GeminiSettingsView: View {
           }
           .labelsHidden()
           .frame(maxWidth: .infinity, alignment: .trailing)
-          .onChange(of: vm.selectedModelId) { _, _ in vm.applyModelSelectionChange() }
+          .onChange(of: vm.selectedModelId) { _ in vm.applyModelSelectionChange() }
         }
         if let selection = vm.selectedModelId,
           let descriptor = vm.modelOptions.first(where: { $0.value == selection })?.subtitle
@@ -170,7 +185,7 @@ struct GeminiSettingsView: View {
             Text(vm.maxSessionTurns < 0 ? "Unlimited (-1)" : "\(vm.maxSessionTurns)")
           }
           .frame(maxWidth: .infinity, alignment: .trailing)
-          .onChange(of: vm.maxSessionTurns) { _, _ in vm.applyMaxSessionTurnsChange() }
+          .onChange(of: vm.maxSessionTurns) { _ in vm.applyMaxSessionTurnsChange() }
         }
         dividerRow
         GridRow {
@@ -178,7 +193,7 @@ struct GeminiSettingsView: View {
           VStack(alignment: .trailing, spacing: 6) {
             Slider(value: $vm.compressionThreshold, in: 0...1, step: 0.05)
               .frame(maxWidth: 240)
-              .onChange(of: vm.compressionThreshold) { _, _ in vm.applyCompressionThresholdChange() }
+              .onChange(of: vm.compressionThreshold) { _ in vm.applyCompressionThresholdChange() }
             Text("\(vm.compressionThreshold, format: .number.precision(.fractionLength(2)))")
               .font(.caption)
               .foregroundStyle(.secondary)
@@ -193,7 +208,7 @@ struct GeminiSettingsView: View {
             .toggleStyle(.switch)
             .controlSize(.small)
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .onChange(of: vm.skipNextSpeakerCheck) { _, _ in vm.applySkipNextSpeakerChange() }
+            .onChange(of: vm.skipNextSpeakerCheck) { _ in vm.applySkipNextSpeakerChange() }
         }
         if let error = vm.lastError {
           dividerRow

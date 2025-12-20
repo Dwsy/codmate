@@ -154,19 +154,40 @@ struct SessionListColumnView: View {
 
       // Different message for Other project bucket
       if isOtherProject {
-        ContentUnavailableView(
-          "No Unassigned Sessions", systemImage: "tray",
-          description: Text(
-            "Sessions can only be created within a project. Select a project from the sidebar to start a new session."
-          )
-        )
+        Group {
+          if #available(macOS 14.0, *) {
+            unavailableView(
+              title: "No Unassigned Sessions",
+              systemImage: "tray",
+              description:
+                "Sessions can only be created within a project. Select a project from the sidebar to start a new session."
+            )
+          } else {
+            fallbackUnavailableView(
+              title: "No Unassigned Sessions",
+              systemImage: "tray",
+              description:
+                "Sessions can only be created within a project. Select a project from the sidebar to start a new session."
+            )
+          }
+        }
         .frame(maxWidth: .infinity)
       } else {
-        ContentUnavailableView(
-          "No Sessions", systemImage: "tray",
-          description: Text(
-            "Adjust directories or launch Codex CLI to generate new session logs.")
-        )
+        Group {
+          if #available(macOS 14.0, *) {
+            unavailableView(
+              title: "No Sessions",
+              systemImage: "tray",
+              description: "Adjust directories or launch Codex CLI to generate new session logs."
+            )
+          } else {
+            fallbackUnavailableView(
+              title: "No Sessions",
+              systemImage: "tray",
+              description: "Adjust directories or launch Codex CLI to generate new session logs."
+            )
+          }
+        }
         .frame(maxWidth: .infinity)
       }
 
@@ -203,6 +224,22 @@ struct SessionListColumnView: View {
       Spacer()
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+
+  @available(macOS 14.0, *)
+  private func unavailableView(title: String, systemImage: String, description: String) -> some View {
+    ContentUnavailableView(title, systemImage: systemImage, description: Text(description))
+  }
+
+  private func fallbackUnavailableView(title: String, systemImage: String, description: String)
+    -> some View
+  {
+    UnavailableStateView(
+      title,
+      systemImage: systemImage,
+      description: description,
+      titleColor: .primary
+    )
   }
 
   @ViewBuilder

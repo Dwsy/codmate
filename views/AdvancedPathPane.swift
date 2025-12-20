@@ -1,7 +1,6 @@
 import SwiftUI
 import AppKit
 
-@available(macOS 15.0, *)
 struct AdvancedPathPane: View {
     @ObservedObject var preferences: SessionPreferencesStore
     @EnvironmentObject private var listViewModel: SessionListViewModel
