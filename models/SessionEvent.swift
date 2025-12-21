@@ -91,6 +91,7 @@ struct EventMessagePayload: Decodable {
     let reason: String?
     let info: JSONValue?
     let rateLimits: JSONValue?
+    let images: [String]?
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -100,6 +101,27 @@ struct EventMessagePayload: Decodable {
         case reason
         case info
         case rateLimits = "rate_limits"
+        case images
+    }
+
+    init(
+        type: String,
+        message: String?,
+        kind: String?,
+        text: String?,
+        reason: String?,
+        info: JSONValue?,
+        rateLimits: JSONValue?,
+        images: [String]? = nil
+    ) {
+        self.type = type
+        self.message = message
+        self.kind = kind
+        self.text = text
+        self.reason = reason
+        self.info = info
+        self.rateLimits = rateLimits
+        self.images = images
     }
 }
 

@@ -159,7 +159,6 @@ extension MessageVisibilityKind {
     static func kindFromToken(_ value: String?) -> MessageVisibilityKind? {
         let normalized = normalize(value)
         guard !normalized.isEmpty else { return nil }
-        let flat = normalized.replacingOccurrences(of: " ", with: "")
 
         func matchesExact(_ tokens: [String]) -> Bool {
             tokens.contains(normalized)
@@ -233,11 +232,31 @@ struct TimelineAttachment: Hashable, Sendable {
         case image
     }
 
+    let id: String
     let kind: Kind
     let label: String?
+    let dataURL: String?
+    let url: URL?
 
-    init(kind: Kind, label: String? = nil) {
+    init(
+        kind: Kind,
+        label: String? = nil,
+        dataURL: String? = nil,
+        url: URL? = nil,
+        id: String = UUID().uuidString
+    ) {
+        self.id = id
         self.kind = kind
         self.label = label
+        self.dataURL = dataURL
+        self.url = url
+    }
+
+    static func == (lhs: TimelineAttachment, rhs: TimelineAttachment) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
     }
 }
