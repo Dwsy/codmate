@@ -65,7 +65,7 @@ final class ProjectExtensionsViewModel: ObservableObject {
         let servers = await mcpStore.list()
         let mcpConfigMap = config?.mcpServers.reduce(into: [String: ProjectMCPConfig]()) { $0[$1.id] = $1 } ?? [:]
         mcpSelections = servers.map { server in
-            let targets = server.targets ?? MCPServerTargets(codex: true, claude: true, gemini: false)
+            let targets = server.targets ?? MCPServerTargets()
             let cfg = mcpConfigMap[server.name]
             return ProjectMCPSelection(
                 server: server,

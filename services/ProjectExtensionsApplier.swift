@@ -26,6 +26,7 @@ actor ProjectExtensionsApplier {
     let selected = selections.filter { $0.isSelected }
     let codexServers = selected.filter { $0.targets.codex }.map { $0.server }
     let claudeServers = selected.filter { $0.targets.claude }.map { $0.server }
+    let geminiServers = selected.filter { $0.targets.gemini }.map { $0.server }
 
     let codexDir = projectDirectory.appendingPathComponent(".codex", isDirectory: true)
     let configURL = codexDir.appendingPathComponent("config.toml", isDirectory: false)
@@ -47,6 +48,13 @@ actor ProjectExtensionsApplier {
       if fm.fileExists(atPath: file.path) {
         try? fm.removeItem(at: file)
       }
+    }
+
+    let geminiDir = projectDirectory.appendingPathComponent(".gemini", isDirectory: true)
+    let geminiSettings = geminiDir.appendingPathComponent("settings.json", isDirectory: false)
+    if !geminiServers.isEmpty || fm.fileExists(atPath: geminiSettings.path) {
+      let service = GeminiSettingsService(paths: .init(directory: geminiDir, file: geminiSettings))
+      try? await service.applyMCPServers(geminiServers)
     }
   }
 

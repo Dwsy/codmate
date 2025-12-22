@@ -1074,9 +1074,11 @@ struct ProjectEditorSheet: View {
                     provider: .gemini,
                     isOn: Binding(
                       get: { entry.targets.gemini },
-                      set: { _ in }
+                      set: { value in
+                        extensionsVM.updateMCPTarget(id: entry.id, target: .gemini, value: value)
+                      }
                     ),
-                    disabled: true
+                    disabled: !entry.isSelected
                   )
                 }
               }
