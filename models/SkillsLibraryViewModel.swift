@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct SkillSummary: Identifiable, Hashable {
     let id: String
     var name: String
+    var description: String
     var summary: String
     var tags: [String]
     var source: String
@@ -14,32 +15,23 @@ struct SkillSummary: Identifiable, Hashable {
     var displayName: String { name.isEmpty ? id : name }
 }
 
-enum SkillInstallMode: String, CaseIterable {
-    case folder
-    case zip
-    case url
-
-    var title: String {
-        switch self {
-        case .folder: return "Folder"
-        case .zip: return "Zip"
-        case .url: return "URL"
-        }
-    }
-}
-
 @MainActor
 final class SkillsLibraryViewModel: ObservableObject {
+    private let store = SkillsStore()
+    private let syncer = SkillsSyncService()
+
     @Published var skills: [SkillSummary] = []
     @Published var selectedSkillId: String?
     @Published var searchText: String = ""
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
+    @Published var installStatusMessage: String?
 
     @Published var showInstallSheet: Bool = false
     @Published var installMode: SkillInstallMode = .folder
     @Published var pendingInstallURL: URL?
     @Published var pendingInstallText: String = ""
+    @Published var installConflict: SkillInstallConflict?
 
     var filteredSkills: [SkillSummary] {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -60,9 +52,21 @@ final class SkillsLibraryViewModel: ObservableObject {
     func load() async {
         isLoading = true
         defer { isLoading = false }
-        // UI-first: real loading will be wired to SkillsStore in the data phase.
-        skills = []
-        if selectedSkillId == nil {
+        let records = await store.list()
+        skills = records.map { record in
+            SkillSummary(
+                id: record.id,
+                name: record.name,
+                description: record.description,
+                summary: record.summary,
+                tags: record.tags,
+                source: record.source,
+                path: record.path,
+                isSelected: record.isEnabled,
+                targets: record.targets
+            )
+        }
+        if selectedSkillId == nil || !skills.contains(where: { $0.id == selectedSkillId }) {
             selectedSkillId = skills.first?.id
         }
     }
@@ -71,16 +75,38 @@ final class SkillsLibraryViewModel: ObservableObject {
         installMode = mode
         pendingInstallURL = url
         pendingInstallText = text ?? ""
+        installStatusMessage = nil
+        installConflict = nil
         showInstallSheet = true
     }
 
     func cancelInstall() {
         showInstallSheet = false
+        pendingInstallURL = nil
+        pendingInstallText = ""
+        installStatusMessage = nil
+    }
+
+    func testInstall() {
+        installStatusMessage = "Validating…"
+        Task {
+            let request = installRequest()
+            let ok = await store.validate(request: request)
+            await MainActor.run {
+                installStatusMessage = ok ? "Looks good. Ready to install." : "Unable to validate this source."
+            }
+        }
     }
 
     func finishInstall() {
-        // Placeholder: wiring to installation pipeline comes later.
-        showInstallSheet = false
+        installStatusMessage = "Installing…"
+        Task {
+            let request = installRequest()
+            let outcome = await store.install(request: request, resolution: nil)
+            await MainActor.run {
+                handleInstallOutcome(outcome)
+            }
+        }
     }
 
     func updateSkillTarget(id: String, target: MCPServerTarget, value: Bool) {
@@ -88,11 +114,13 @@ final class SkillsLibraryViewModel: ObservableObject {
         var updated = skills[idx]
         updated.targets.setEnabled(value, for: target)
         skills[idx] = updated
+        Task { await persistAndSync() }
     }
 
     func updateSkillSelection(id: String, value: Bool) {
         guard let idx = skills.firstIndex(where: { $0.id == id }) else { return }
         skills[idx].isSelected = value
+        Task { await persistAndSync() }
     }
 
     func handleDrop(_ providers: [NSItemProvider]) -> Bool {
@@ -135,5 +163,122 @@ final class SkillsLibraryViewModel: ObservableObject {
             return true
         }
         return false
+    }
+
+    func resolveInstallConflict(_ resolution: SkillConflictResolution) {
+        installStatusMessage = "Installing…"
+        Task {
+            let request = installRequest()
+            let outcome = await store.install(request: request, resolution: resolution)
+            await MainActor.run {
+                handleInstallOutcome(outcome)
+            }
+        }
+    }
+
+    func reinstall(id: String) {
+        Task {
+            guard let record = await store.record(id: id) else { return }
+            if let request = reinstallRequest(from: record) {
+                let outcome = await store.install(request: request, resolution: .overwrite)
+                await MainActor.run {
+                    handleInstallOutcome(outcome)
+                }
+            } else if let _ = await store.refreshMetadata(id: id) {
+                await MainActor.run { installStatusMessage = "Updated." }
+                await load()
+                await persistAndSync()
+            } else {
+                await MainActor.run { errorMessage = "Unable to reinstall skill." }
+            }
+        }
+    }
+
+    func uninstall(id: String) {
+        Task {
+            await store.uninstall(id: id)
+            await load()
+            await persistAndSync()
+        }
+    }
+
+    private func installRequest() -> SkillInstallRequest {
+        SkillInstallRequest(mode: installMode, url: pendingInstallURL, text: pendingInstallText)
+    }
+
+    private func reinstallRequest(from record: SkillRecord) -> SkillInstallRequest? {
+        if let url = URL(string: record.source),
+           ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+            return SkillInstallRequest(mode: .url, url: nil, text: record.source)
+        }
+        let sourcePath = record.source.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sourcePath.isEmpty {
+            let srcURL = URL(fileURLWithPath: sourcePath)
+            if FileManager.default.fileExists(atPath: srcURL.path) {
+                if srcURL.pathExtension.lowercased() == "zip" {
+                    return SkillInstallRequest(mode: .zip, url: srcURL, text: nil)
+                }
+                let isDir = (try? srcURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                if isDir {
+                    return SkillInstallRequest(mode: .folder, url: srcURL, text: nil)
+                }
+            }
+        }
+        return nil
+    }
+
+    private func handleInstallOutcome(_ outcome: SkillInstallOutcome) {
+        switch outcome {
+        case .installed:
+            installStatusMessage = "Installed."
+            showInstallSheet = false
+            pendingInstallURL = nil
+            pendingInstallText = ""
+            Task { await reloadAfterInstall() }
+        case .conflict(let conflict):
+            installStatusMessage = "Skill already exists."
+            installConflict = conflict
+        case .skipped:
+            installStatusMessage = "Install skipped."
+        }
+    }
+
+    private func reloadAfterInstall() async {
+        await load()
+        await persistAndSync()
+    }
+
+    private func persistAndSync() async {
+        var records = await store.list()
+        for idx in records.indices {
+            if let summary = skills.first(where: { $0.id == records[idx].id }) {
+                records[idx].name = summary.name
+                records[idx].description = summary.description
+                records[idx].summary = summary.summary
+                records[idx].tags = summary.tags
+                records[idx].source = summary.source
+                if let path = summary.path { records[idx].path = path }
+                records[idx].isEnabled = summary.isSelected
+                records[idx].targets = summary.targets
+            }
+        }
+        await store.saveAll(records)
+        let home = SessionPreferencesStore.getRealUserHomeURL()
+        AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
+            directory: home.appendingPathComponent(".codex", isDirectory: true),
+            purpose: .generalAccess,
+            message: "Authorize ~/.codex to sync Codex skills"
+        )
+        AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
+            directory: home.appendingPathComponent(".claude", isDirectory: true),
+            purpose: .generalAccess,
+            message: "Authorize ~/.claude to sync Claude skills"
+        )
+        let warnings = await syncer.syncGlobal(skills: records)
+        if let warning = warnings.first {
+            errorMessage = warning.message
+        } else {
+            errorMessage = nil
+        }
     }
 }

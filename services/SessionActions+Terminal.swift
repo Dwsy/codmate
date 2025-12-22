@@ -6,7 +6,8 @@ extension SessionActions {
         session: SessionSummary,
         executableURL: URL,
         options: ResumeOptions,
-        workingDirectory: String? = nil
+        workingDirectory: String? = nil,
+        codexHome: String? = nil
     ) -> Bool
     {
         #if APPSTORE
@@ -15,7 +16,8 @@ extension SessionActions {
             session: session,
             executableURL: executableURL,
             options: options,
-            workingDirectory: workingDirectory
+            workingDirectory: workingDirectory,
+            codexHome: codexHome
         )
         let cwd = self.workingDirectory(for: session, override: workingDirectory)
         _ = openAppleTerminal(at: cwd)
@@ -26,7 +28,8 @@ extension SessionActions {
                 session: session,
                 executableURL: executableURL,
                 options: options,
-                workingDirectory: workingDirectory
+                workingDirectory: workingDirectory,
+                codexHome: codexHome
             )
             .replacingOccurrences(of: "\n", with: "; ")
             return """
@@ -47,18 +50,28 @@ extension SessionActions {
     }
 
     @discardableResult
-    func openNewSession(session: SessionSummary, executableURL: URL, options: ResumeOptions) -> Bool
+    func openNewSession(
+        session: SessionSummary,
+        executableURL: URL,
+        options: ResumeOptions,
+        codexHome: String? = nil
+    ) -> Bool
     {
         #if APPSTORE
         // App Store build: copy command and open Terminal without Apple Events
-        copyNewSessionCommands(session: session, executableURL: executableURL, options: options)
+        copyNewSessionCommands(
+            session: session,
+            executableURL: executableURL,
+            options: options,
+            codexHome: codexHome
+        )
         let cwd = FileManager.default.fileExists(atPath: session.cwd) ? session.cwd : session.fileURL.deletingLastPathComponent().path
         _ = openAppleTerminal(at: cwd)
         return true
         #else
         let scriptText = {
             let lines = buildNewSessionCommandLines(
-                session: session, executableURL: executableURL, options: options
+                session: session, executableURL: executableURL, options: options, codexHome: codexHome
             )
             .replacingOccurrences(of: "\n", with: "; ")
             return """
@@ -177,7 +190,8 @@ extension SessionActions {
         session: SessionSummary,
         options: ResumeOptions,
         executableURL: URL,
-        workingDirectory: String? = nil
+        workingDirectory: String? = nil,
+        codexHome: String? = nil
     ) -> Bool {
         let cwd = self.workingDirectory(for: session, override: workingDirectory)
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -196,7 +210,11 @@ extension SessionActions {
                 executableURL: executableURL
             )
             return buildResumeCLIInvocation(
-                session: session, executablePath: execPath, options: options)
+                session: session,
+                executablePath: execPath,
+                options: options,
+                codexHome: codexHome
+            )
         }()
 
         let yaml = """

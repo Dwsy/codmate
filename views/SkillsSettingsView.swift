@@ -1,9 +1,13 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if canImport(AppKit)
+import AppKit
+#endif
 
 struct SkillsSettingsView: View {
   @StateObject private var vm = SkillsLibraryViewModel()
   @State private var searchFocused = false
+  @State private var pendingAction: PendingSkillAction?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -16,6 +20,33 @@ struct SkillsSettingsView: View {
     .sheet(isPresented: $vm.showInstallSheet) {
       SkillsInstallSheet(vm: vm)
         .frame(minWidth: 520, minHeight: 340)
+    }
+    .sheet(item: $vm.installConflict) { conflict in
+      SkillConflictResolutionSheet(conflict: conflict, onResolve: { resolution in
+        vm.resolveInstallConflict(resolution)
+        vm.installConflict = nil
+      }, onCancel: {
+        vm.installConflict = nil
+      })
+      .frame(minWidth: 420, minHeight: 240)
+    }
+    .alert(item: $pendingAction) { action in
+      switch action.kind {
+      case .reinstall:
+        return Alert(
+          title: Text("Reinstall Skill?"),
+          message: Text("Reinstall \(action.skill.displayName) from its original source?"),
+          primaryButton: .default(Text("Reinstall"), action: { vm.reinstall(id: action.skill.id) }),
+          secondaryButton: .cancel()
+        )
+      case .uninstall:
+        return Alert(
+          title: Text("Uninstall Skill?"),
+          message: Text("Remove \(action.skill.displayName) from this machine?"),
+          primaryButton: .destructive(Text("Uninstall"), action: { vm.uninstall(id: action.skill.id) }),
+          secondaryButton: .cancel()
+        )
+      }
     }
     .task { await vm.load() }
   }
@@ -126,10 +157,20 @@ struct SkillsSettingsView: View {
               }
             }
             .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .onTapGesture { vm.selectedSkillId = skill.id }
             .tag(skill.id as String?)
+            .contextMenu {
+#if canImport(AppKit)
+              Button("Reveal in Finder") { revealInFinder(skill) }
+#endif
+              Button("Reinstall") { confirmReinstall(skill) }
+              Button("Uninstall", role: .destructive) { confirmUninstall(skill) }
+            }
           }
         }
         .listStyle(.inset)
+        .scrollContentBackground(.hidden)
       }
     }
     .background(
@@ -142,57 +183,13 @@ struct SkillsSettingsView: View {
   private var detailPanel: some View {
     VStack(alignment: .leading, spacing: 12) {
       if let skill = vm.selectedSkill {
-        VStack(alignment: .leading, spacing: 6) {
-          Text(skill.displayName)
-            .font(.title3.weight(.semibold))
-          Text(skill.summary)
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-        }
-        Divider()
-        VStack(alignment: .leading, spacing: 8) {
-          Text("Targets")
-            .font(.headline)
-          HStack(spacing: 8) {
-            Label("Codex", systemImage: "sparkles")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            Label("Claude", systemImage: "chevron.left.slash.chevron.right")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-          if let path = skill.path {
-            Text(path)
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        }
-        Divider()
-        VStack(alignment: .leading, spacing: 8) {
-          Text("SKILL.md")
-            .font(.headline)
-          ScrollView {
-            Text("Preview will appear here once loaded.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .padding(.vertical, 4)
-          }
-          .frame(maxHeight: 220)
-          .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-              .fill(Color(nsColor: .textBackgroundColor))
-              .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.15)))
-          )
-        }
-        Spacer(minLength: 0)
-        HStack(spacing: 8) {
-          Button("Reveal in Finder") {}
-          Button("Reinstall") {}
-          Button("Uninstall", role: .destructive) {}
-          Spacer()
-        }
-        .disabled(true)
+        SkillPackageExplorerView(
+          skill: skill,
+          onReveal: { revealInFinder(skill) },
+          onReinstall: { confirmReinstall(skill) },
+          onUninstall: { confirmUninstall(skill) }
+        )
+        .id(skill.id)
       } else {
         VStack(spacing: 12) {
           Image(systemName: "doc.text")
@@ -213,6 +210,33 @@ struct SkillsSettingsView: View {
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.15)))
     )
   }
+
+  private func revealInFinder(_ skill: SkillSummary) {
+    guard let path = skill.path, !path.isEmpty else { return }
+    let url = URL(fileURLWithPath: path, isDirectory: true)
+#if canImport(AppKit)
+    NSWorkspace.shared.activateFileViewerSelecting([url])
+#endif
+  }
+
+  private func confirmReinstall(_ skill: SkillSummary) {
+    pendingAction = PendingSkillAction(skill: skill, kind: .reinstall)
+  }
+
+  private func confirmUninstall(_ skill: SkillSummary) {
+    pendingAction = PendingSkillAction(skill: skill, kind: .uninstall)
+  }
+}
+
+private struct PendingSkillAction: Identifiable {
+  enum Kind {
+    case reinstall
+    case uninstall
+  }
+
+  let id = UUID()
+  let skill: SkillSummary
+  let kind: Kind
 }
 
 private struct SkillsInstallSheet: View {
@@ -268,14 +292,20 @@ private struct SkillsInstallSheet: View {
       Spacer(minLength: 0)
 
       VStack(alignment: .leading, spacing: 6) {
-        Text(" ")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        if let status = vm.installStatusMessage, !status.isEmpty {
+          Text(status)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } else {
+          Text(" ")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
       }
-      .frame(height: 32)
+      .frame(height: 64)
 
       HStack {
-        Button("Test") {}
+        Button("Test") { vm.testInstall() }
           .buttonStyle(.bordered)
         Spacer()
         Button("Cancel") { vm.cancelInstall() }
@@ -431,5 +461,64 @@ private struct SkillsInstallSheet: View {
       .frame(width: rowWidth, alignment: .center)
       Spacer(minLength: 0)
     }
+  }
+}
+
+private struct SkillConflictResolutionSheet: View {
+  let conflict: SkillInstallConflict
+  var onResolve: (SkillConflictResolution) -> Void
+  var onCancel: () -> Void
+
+  @State private var selection: Int = 0
+  @State private var renameText: String
+
+  init(conflict: SkillInstallConflict, onResolve: @escaping (SkillConflictResolution) -> Void, onCancel: @escaping () -> Void) {
+    self.conflict = conflict
+    self.onResolve = onResolve
+    self.onCancel = onCancel
+    _renameText = State(initialValue: conflict.suggestedId)
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text("Skill Already Exists")
+        .font(.title3)
+        .fontWeight(.semibold)
+      Text("A skill named \"\(conflict.proposedId)\" already exists at this location.")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+
+      Picker("", selection: $selection) {
+        Text("Overwrite").tag(0)
+        Text("Skip").tag(1)
+        Text("Rename").tag(2)
+      }
+      .labelsHidden()
+      .pickerStyle(.segmented)
+
+      if selection == 2 {
+        TextField("New name", text: $renameText)
+          .textFieldStyle(.roundedBorder)
+      }
+
+      Spacer()
+
+      HStack {
+        Button("Cancel") { onCancel() }
+        Spacer()
+        Button("Continue") {
+          switch selection {
+          case 0: onResolve(.overwrite)
+          case 1: onResolve(.skip)
+          default:
+            let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let finalName = trimmed.isEmpty ? conflict.suggestedId : trimmed
+            onResolve(.rename(finalName))
+          }
+        }
+        .buttonStyle(.borderedProminent)
+      }
+    }
+    .padding(16)
   }
 }

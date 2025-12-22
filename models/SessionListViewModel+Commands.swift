@@ -6,11 +6,13 @@ extension SessionListViewModel {
     func resume(session: SessionSummary) async -> Result<ProcessResult, Error> {
         do {
             let cwd = resolvedWorkingDirectory(for: session)
+            let codexHome = codexHomeOverride(for: session)
             let result = try await actions.resume(
                 session: session,
                 executableURL: preferredExecutableURL(for: session.source),
                 options: preferences.resumeOptions,
-                workingDirectory: cwd)
+                workingDirectory: cwd,
+                codexHomeOverride: codexHome)
             return .success(result)
         } catch {
             return .failure(error)
@@ -43,12 +45,14 @@ extension SessionListViewModel {
 
     func copyResumeCommands(session: SessionSummary) {
         let cwd = resolvedWorkingDirectory(for: session)
+        let codexHome = codexHomeOverride(for: session)
         actions.copyResumeCommands(
             session: session,
             executableURL: preferredExecutableURL(for: session.source),
             options: preferences.resumeOptions,
             simplifiedForExternal: true,
-            workingDirectory: cwd
+            workingDirectory: cwd,
+            codexHome: codexHome
         )
     }
 
@@ -66,12 +70,30 @@ extension SessionListViewModel {
         return projects.first(where: { $0.id == pid })
     }
 
+    private func codexHomeOverride(for project: Project?) -> String? {
+        guard let project,
+              let dir = project.directory?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !dir.isEmpty
+        else { return nil }
+        guard ProjectExtensionsStore.requiresCodexHome(projectId: project.id) else { return nil }
+        let codexDir = URL(fileURLWithPath: dir, isDirectory: true)
+            .appendingPathComponent(".codex", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: codexDir.path) else { return nil }
+        return codexDir.path
+    }
+
+    private func codexHomeOverride(for session: SessionSummary) -> String? {
+        guard session.source.baseKind == .codex else { return nil }
+        return codexHomeOverride(for: projectForSession(session))
+    }
+
     @discardableResult
     func copyResumeCommandsRespectingProject(
         session: SessionSummary,
         destinationApp: ExternalTerminalProfile? = nil
     ) -> Bool {
         let cwd = resolvedWorkingDirectory(for: session)
+        let codexHome = codexHomeOverride(for: session)
         var warpHint: String? = nil
         if destinationApp?.usesWarpCommands == true {
             guard let hint = warpResumeTitle(for: session) else { return false }
@@ -86,7 +108,8 @@ extension SessionListViewModel {
                 simplifiedForExternal: true,
                 destinationApp: destinationApp,
                 titleHint: warpHint,
-                workingDirectory: cwd
+                workingDirectory: cwd,
+                codexHome: codexHome
             )
             return true
         }
@@ -99,7 +122,8 @@ extension SessionListViewModel {
                 executableURL: preferredExecutableURL(for: .codexLocal),
                 options: preferences.resumeOptions,
                 destinationApp: destinationApp,
-                titleHint: warpHint)
+                titleHint: warpHint,
+                codexHome: codexHome)
         } else {
             actions.copyResumeCommands(
                 session: session,
@@ -108,7 +132,8 @@ extension SessionListViewModel {
                 simplifiedForExternal: true,
                 destinationApp: destinationApp,
                 titleHint: warpHint,
-                workingDirectory: cwd)
+                workingDirectory: cwd,
+                codexHome: codexHome)
         }
         return true
     }
@@ -124,30 +149,36 @@ extension SessionListViewModel {
 
     func openInTerminal(session: SessionSummary) -> Bool {
         let cwd = resolvedWorkingDirectory(for: session)
+        let codexHome = codexHomeOverride(for: session)
         return actions.openInTerminal(
             session: session,
             executableURL: preferredExecutableURL(for: session.source),
             options: preferences.resumeOptions,
-            workingDirectory: cwd)
+            workingDirectory: cwd,
+            codexHome: codexHome)
     }
 
     func buildResumeCommands(session: SessionSummary) -> String {
         let cwd = resolvedWorkingDirectory(for: session)
+        let codexHome = codexHomeOverride(for: session)
         return actions.buildResumeCommandLines(
             session: session,
             executableURL: preferredExecutableURL(for: session.source),
             options: preferences.resumeOptions,
-            workingDirectory: cwd
+            workingDirectory: cwd,
+            codexHome: codexHome
         )
     }
 
     func buildExternalResumeCommands(session: SessionSummary) -> String {
         let cwd = resolvedWorkingDirectory(for: session)
+        let codexHome = codexHomeOverride(for: session)
         return actions.buildExternalResumeCommands(
             session: session,
             executableURL: preferredExecutableURL(for: session.source),
             options: preferences.resumeOptions,
-            workingDirectory: cwd
+            workingDirectory: cwd,
+            codexHome: codexHome
         )
     }
 
@@ -156,7 +187,8 @@ extension SessionListViewModel {
         return actions.buildResumeCLIInvocation(
             session: session,
             executablePath: execName,
-            options: preferences.resumeOptions
+            options: preferences.resumeOptions,
+            codexHome: codexHomeOverride(for: session)
         )
     }
 
@@ -183,20 +215,27 @@ extension SessionListViewModel {
             p.profile != nil || (p.profileId?.isEmpty == false)
         {
             return actions.buildResumeUsingProjectProfileCLIInvocation(
-                session: session, project: p, executablePath: preferredExecutablePath(for: .codex),
-                options: preferences.resumeOptions)
+                session: session,
+                project: p,
+                executablePath: preferredExecutablePath(for: .codex),
+                options: preferences.resumeOptions,
+                codexHome: codexHomeOverride(for: p)
+            )
         }
         return actions.buildResumeCLIInvocation(
             session: session,
             executablePath: preferredExecutablePath(for: session.source.baseKind),
-            options: preferences.resumeOptions)
+            options: preferences.resumeOptions,
+            codexHome: codexHomeOverride(for: session)
+        )
     }
 
     func copyNewSessionCommands(session: SessionSummary) {
         actions.copyNewSessionCommands(
             session: session,
             executableURL: preferredExecutableURL(for: session.source),
-            options: preferences.resumeOptions
+            options: preferences.resumeOptions,
+            codexHome: codexHomeOverride(for: session)
         )
     }
 
@@ -204,7 +243,8 @@ extension SessionListViewModel {
         actions.buildNewSessionCLIInvocation(
             session: session,
             options: preferences.resumeOptions,
-            executablePath: preferredExecutablePath(for: session.source.baseKind)
+            executablePath: preferredExecutablePath(for: session.source.baseKind),
+            codexHome: codexHomeOverride(for: session)
         )
     }
 
@@ -212,7 +252,8 @@ extension SessionListViewModel {
         actions.openNewSession(
             session: session,
             executableURL: preferredExecutableURL(for: session.source),
-            options: preferences.resumeOptions
+            options: preferences.resumeOptions,
+            codexHome: codexHomeOverride(for: session)
         )
     }
 
@@ -220,7 +261,8 @@ extension SessionListViewModel {
         actions.buildNewProjectCLIInvocation(
             project: project,
             options: preferences.resumeOptions,
-            executablePath: preferredExecutablePath(for: .codex)
+            executablePath: preferredExecutablePath(for: .codex),
+            codexHome: codexHomeOverride(for: project)
         )
     }
 
@@ -237,7 +279,8 @@ extension SessionListViewModel {
             executableURL: preferredExecutableURL(for: .codexLocal),
             options: preferences.resumeOptions,
             destinationApp: destinationApp,
-            titleHint: warpHint
+            titleHint: warpHint,
+            codexHome: codexHomeOverride(for: project)
         )
         return true
     }
@@ -282,7 +325,11 @@ extension SessionListViewModel {
 
         if !profile.isNone {
             let cmd = profile.supportsCommandResolved
-                ? actions.buildNewProjectCLIInvocation(project: project, options: preferences.resumeOptions)
+                ? actions.buildNewProjectCLIInvocation(
+                    project: project,
+                    options: preferences.resumeOptions,
+                    codexHome: codexHomeOverride(for: project)
+                )
                 : nil
 
             if profile.isTerminal {
@@ -330,13 +377,17 @@ extension SessionListViewModel {
                 project: p,
                 options: preferences.resumeOptions,
                 initialPrompt: initialPrompt,
-                executablePath: preferredExecutablePath(for: session.source.baseKind))
+                executablePath: preferredExecutablePath(for: session.source.baseKind),
+                codexHome: codexHomeOverride(for: p)
+            )
         }
         return actions.buildNewSessionCLIInvocation(
             session: session,
             options: preferences.resumeOptions,
             initialPrompt: initialPrompt,
-            executablePath: preferredExecutablePath(for: session.source.baseKind))
+            executablePath: preferredExecutablePath(for: session.source.baseKind),
+            codexHome: codexHomeOverride(for: session)
+        )
     }
 
     @discardableResult
@@ -362,14 +413,18 @@ extension SessionListViewModel {
                 session: session, project: project, executableURL: preferredExecutableURL(for: session.source),
                 options: preferences.resumeOptions,
                 destinationApp: destinationApp,
-                titleHint: warpHint)
+                titleHint: warpHint,
+                codexHome: codexHomeOverride(for: project)
+            )
         } else {
             actions.copyNewSessionCommands(
                 session: session,
                 executableURL: preferredExecutableURL(for: session.source),
                 options: preferences.resumeOptions,
                 destinationApp: destinationApp,
-                titleHint: warpHint)
+                titleHint: warpHint,
+                codexHome: codexHomeOverride(for: session)
+            )
         }
         return true
     }
@@ -416,13 +471,17 @@ extension SessionListViewModel {
                 options: preferences.resumeOptions,
                 destinationApp: destinationApp,
                 initialPrompt: initialPrompt,
-                titleHint: warpHint)
+                titleHint: warpHint,
+                codexHome: codexHomeOverride(for: project)
+            )
         } else {
             let cmd = actions.buildNewSessionCLIInvocation(
                 session: session,
                 options: preferences.resumeOptions,
                 initialPrompt: initialPrompt,
-                executablePath: preferredExecutablePath(for: session.source.baseKind))
+                executablePath: preferredExecutablePath(for: session.source.baseKind),
+                codexHome: codexHomeOverride(for: session)
+            )
             let pb = NSPasteboard.general
             pb.clearContents()
             if destinationApp?.usesWarpCommands == true, let title = warpHint {
@@ -515,12 +574,16 @@ extension SessionListViewModel {
         {
             _ = actions.openNewSessionUsingProjectProfile(
                 session: session, project: p, executableURL: preferredExecutableURL(for: session.source),
-                options: preferences.resumeOptions)
+                options: preferences.resumeOptions,
+                codexHome: codexHomeOverride(for: p)
+            )
         } else {
             _ = actions.openNewSession(
                 session: session,
                 executableURL: preferredExecutableURL(for: session.source),
-                options: preferences.resumeOptions)
+                options: preferences.resumeOptions,
+                codexHome: codexHomeOverride(for: session)
+            )
         }
     }
 
@@ -532,12 +595,17 @@ extension SessionListViewModel {
         {
             _ = actions.openNewSessionUsingProjectProfile(
                 session: session, project: p, executableURL: preferredExecutableURL(for: session.source),
-                options: preferences.resumeOptions, initialPrompt: initialPrompt)
+                options: preferences.resumeOptions,
+                initialPrompt: initialPrompt,
+                codexHome: codexHomeOverride(for: p)
+            )
         } else {
             _ = actions.openNewSession(
                 session: session,
                 executableURL: preferredExecutableURL(for: session.source),
-                options: preferences.resumeOptions)
+                options: preferences.resumeOptions,
+                codexHome: codexHomeOverride(for: session)
+            )
         }
     }
 
@@ -571,7 +639,8 @@ extension SessionListViewModel {
         actions.copyRealResumeInvocation(
             session: session,
             executableURL: preferredExecutableURL(for: session.source),
-            options: preferences.resumeOptions
+            options: preferences.resumeOptions,
+            codexHome: codexHomeOverride(for: session)
         )
     }
 
@@ -581,7 +650,8 @@ extension SessionListViewModel {
             session: session,
             options: preferences.resumeOptions,
             executableURL: preferredExecutableURL(for: session.source),
-            workingDirectory: cwd
+            workingDirectory: cwd,
+            codexHome: codexHomeOverride(for: session)
         )
     }
 

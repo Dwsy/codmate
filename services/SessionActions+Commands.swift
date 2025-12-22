@@ -8,7 +8,8 @@ extension SessionActions {
         session: SessionSummary,
         executableURL: URL,
         options: ResumeOptions,
-        workingDirectory: String? = nil
+        workingDirectory: String? = nil,
+        codexHomeOverride: String? = nil
     ) async throws
         -> ProcessResult
     {
@@ -140,6 +141,11 @@ extension SessionActions {
                         for (key, value) in additionalEnv {
                             env[key] = value
                         }
+                    }
+                    if session.source.baseKind == .codex,
+                       let codexHomeOverride,
+                       !codexHomeOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        env["CODEX_HOME"] = codexHomeOverride
                     }
                     process.environment = env
 
@@ -292,14 +298,19 @@ extension SessionActions {
     }
 
     func buildResumeCLIInvocation(
-        session: SessionSummary, executablePath: String, options: ResumeOptions
+        session: SessionSummary, executablePath: String, options: ResumeOptions, codexHome: String? = nil
     ) -> String {
         let exe = shellQuoteIfNeeded(executablePath)
         switch session.source.baseKind {
         case .codex:
             let f = flags(from: options).map { shellQuoteIfNeeded($0) }
-            if f.isEmpty { return "\(exe) resume \(conversationId(for: session))" }
-            return ([exe] + f + ["resume", shellQuoteIfNeeded(conversationId(for: session))]).joined(separator: " ")
+            let cmd: String
+            if f.isEmpty {
+                cmd = "\(exe) resume \(conversationId(for: session))"
+            } else {
+                cmd = ([exe] + f + ["resume", shellQuoteIfNeeded(conversationId(for: session))]).joined(separator: " ")
+            }
+            return applyCodexHomePrefix(cmd, codexHome: codexHome, source: session.source.baseKind)
         case .claude:
             let args = claudeResumeArguments(session: session, options: options).map {
                 shellQuoteIfNeeded($0)
@@ -371,7 +382,8 @@ extension SessionActions {
         session: SessionSummary,
         options: ResumeOptions,
         initialPrompt: String? = nil,
-        executablePath: String? = nil
+        executablePath: String? = nil,
+        codexHome: String? = nil
     ) -> String {
         // Check if this is a remote session and return SSH command if so
         if session.isRemote, let host = session.remoteHost {
@@ -393,7 +405,8 @@ extension SessionActions {
             session: session,
             options: options,
             initialPrompt: initialPrompt,
-            executablePath: executablePath
+            executablePath: executablePath,
+            codexHome: codexHome
         )
     }
 
@@ -401,7 +414,8 @@ extension SessionActions {
         session: SessionSummary,
         options: ResumeOptions,
         initialPrompt: String? = nil,
-        executablePath: String? = nil
+        executablePath: String? = nil,
+        codexHome: String? = nil
     ) -> String {
         // Local session handling (without checking remote status)
         switch session.source.baseKind {
@@ -420,7 +434,8 @@ extension SessionActions {
             if let prompt = initialPrompt, !prompt.isEmpty {
                 parts.append(shellSingleQuoted(prompt))
             }
-            return parts.joined(separator: " ")
+            let cmd = parts.joined(separator: " ")
+            return applyCodexHomePrefix(cmd, codexHome: codexHome, source: session.source.baseKind)
         case .claude:
             var parts: [String] = [shellQuoteIfNeeded(executablePath ?? "claude")]
 
@@ -530,7 +545,8 @@ extension SessionActions {
         session: SessionSummary,
         executableURL: URL,
         options: ResumeOptions,
-        workingDirectory: String? = nil
+        workingDirectory: String? = nil,
+        codexHome: String? = nil
     ) -> String {
         #if APPSTORE
         let cwd = self.workingDirectory(for: session, override: workingDirectory)
@@ -570,14 +586,14 @@ extension SessionActions {
             executableURL: executableURL
         )
         let invocation = buildResumeCLIInvocation(
-            session: session, executablePath: execPath, options: options)
+            session: session, executablePath: execPath, options: options, codexHome: codexHome)
         let resume = "PATH=\(injectedPATH) \(invocation)"
         return cd + "\n" + exports + "\n" + resume + "\n"
         #endif
     }
 
     func buildNewSessionCommandLines(
-        session: SessionSummary, executableURL: URL, options: ResumeOptions
+        session: SessionSummary, executableURL: URL, options: ResumeOptions, codexHome: String? = nil
     ) -> String {
         #if APPSTORE
         let cwd =
@@ -618,7 +634,7 @@ extension SessionActions {
             executableURL: executableURL
         )
         let invocation = buildNewSessionCLIInvocation(
-            session: session, options: options, executablePath: execPath)
+            session: session, options: options, executablePath: execPath, codexHome: codexHome)
         var lines = [cd]
         if let exports { lines.append(exports) }
         lines.append(invocation)
@@ -627,7 +643,7 @@ extension SessionActions {
     }
 
     func buildExternalNewSessionCommands(
-        session: SessionSummary, executableURL: URL, options: ResumeOptions
+        session: SessionSummary, executableURL: URL, options: ResumeOptions, codexHome: String? = nil
     ) -> String {
         if session.isRemote, let host = session.remoteHost {
             let sshContext = resolvedSSHContext(for: host)
@@ -651,7 +667,7 @@ extension SessionActions {
             executableURL: executableURL
         )
         let newCommand = buildNewSessionCLIInvocation(
-            session: session, options: options, executablePath: execPath)
+            session: session, options: options, executablePath: execPath, codexHome: codexHome)
         var lines = [cd]
         if session.source.baseKind == .gemini {
             lines.append(contentsOf: embeddedExportLines(for: session.source))
@@ -668,7 +684,8 @@ extension SessionActions {
         session: SessionSummary,
         executableURL: URL,
         options: ResumeOptions,
-        workingDirectory: String? = nil
+        workingDirectory: String? = nil,
+        codexHome: String? = nil
     ) -> String {
         if session.isRemote, let host = session.remoteHost {
             let sshContext = resolvedSSHContext(for: host)
@@ -689,7 +706,7 @@ extension SessionActions {
             executableURL: executableURL
         )
         let resume = buildResumeCLIInvocation(
-            session: session, executablePath: execPath, options: options)
+            session: session, executablePath: execPath, options: options, codexHome: codexHome)
         var lines = [cd]
         if session.source.baseKind == .gemini {
             lines.append(contentsOf: embeddedExportLines(for: session.source))
@@ -737,7 +754,11 @@ extension SessionActions {
     }
 
     func buildWarpResumeCommands(
-        session: SessionSummary, executableURL: URL, options: ResumeOptions, titleHint: String? = nil
+        session: SessionSummary,
+        executableURL: URL,
+        options: ResumeOptions,
+        titleHint: String? = nil,
+        codexHome: String? = nil
     ) -> String {
         if session.isRemote, let host = session.remoteHost {
             let sshContext = resolvedSSHContext(for: host)
@@ -750,7 +771,12 @@ extension SessionActions {
             for: session.source.baseKind,
             executableURL: executableURL
         )
-        let resume = buildResumeCLIInvocation(session: session, executablePath: execPath, options: options)
+        let resume = buildResumeCLIInvocation(
+            session: session,
+            executablePath: execPath,
+            options: options,
+            codexHome: codexHome
+        )
         var lines: [String] = []
         if let title = warpTitleCommentLine(titleHint ?? session.effectiveTitle) { lines.append(title) }
         if session.source.baseKind == .gemini {
@@ -764,7 +790,11 @@ extension SessionActions {
     }
 
     func buildWarpNewSessionCommands(
-        session: SessionSummary, executableURL: URL, options: ResumeOptions, titleHint: String? = nil
+        session: SessionSummary,
+        executableURL: URL,
+        options: ResumeOptions,
+        titleHint: String? = nil,
+        codexHome: String? = nil
     ) -> String {
         if session.isRemote, let host = session.remoteHost {
             let sshContext = resolvedSSHContext(for: host)
@@ -793,7 +823,7 @@ extension SessionActions {
             task: nil
         )
         let newCommand = buildNewSessionCLIInvocation(
-            session: session, options: options, executablePath: execPath)
+            session: session, options: options, executablePath: execPath, codexHome: codexHome)
         var lines: [String] = []
         if let title = warpTitleCommentLine(base) { lines.append(title) }
         if session.source.baseKind == .gemini {
@@ -811,12 +841,18 @@ extension SessionActions {
         simplifiedForExternal: Bool = true,
         destinationApp: ExternalTerminalProfile? = nil,
         titleHint: String? = nil,
-        workingDirectory: String? = nil
+        workingDirectory: String? = nil,
+        codexHome: String? = nil
     ) {
         let commands: String
         if simplifiedForExternal, destinationApp?.usesWarpCommands == true {
             commands = buildWarpResumeCommands(
-                session: session, executableURL: executableURL, options: options, titleHint: titleHint)
+                session: session,
+                executableURL: executableURL,
+                options: options,
+                titleHint: titleHint,
+                codexHome: codexHome
+            )
         } else {
             commands =
                 simplifiedForExternal
@@ -824,12 +860,16 @@ extension SessionActions {
                     session: session,
                     executableURL: executableURL,
                     options: options,
-                    workingDirectory: workingDirectory)
+                    workingDirectory: workingDirectory,
+                    codexHome: codexHome
+                )
                 : buildResumeCommandLines(
                     session: session,
                     executableURL: executableURL,
                     options: options,
-                    workingDirectory: workingDirectory)
+                    workingDirectory: workingDirectory,
+                    codexHome: codexHome
+                )
         }
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -840,19 +880,25 @@ extension SessionActions {
         session: SessionSummary, executableURL: URL, options: ResumeOptions,
         simplifiedForExternal: Bool = true,
         destinationApp: ExternalTerminalProfile? = nil,
-        titleHint: String? = nil
+        titleHint: String? = nil,
+        codexHome: String? = nil
     ) {
         let commands: String
         if simplifiedForExternal, destinationApp?.usesWarpCommands == true {
             commands = buildWarpNewSessionCommands(
-                session: session, executableURL: executableURL, options: options, titleHint: titleHint)
+                session: session,
+                executableURL: executableURL,
+                options: options,
+                titleHint: titleHint,
+                codexHome: codexHome
+            )
         } else {
             commands =
                 simplifiedForExternal
                 ? buildExternalNewSessionCommands(
-                    session: session, executableURL: executableURL, options: options)
+                    session: session, executableURL: executableURL, options: options, codexHome: codexHome)
                 : buildNewSessionCommandLines(
-                    session: session, executableURL: executableURL, options: options)
+                    session: session, executableURL: executableURL, options: options, codexHome: codexHome)
         }
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -919,7 +965,8 @@ extension SessionActions {
     func buildNewProjectCLIInvocation(
         project: Project,
         options: ResumeOptions,
-        executablePath: String? = nil
+        executablePath: String? = nil,
+        codexHome: String? = nil
     ) -> String {
         let exe = shellQuoteIfNeeded(executablePath ?? "codex")
         let args = buildNewProjectArguments(project: project, options: options).map {
@@ -930,12 +977,16 @@ extension SessionActions {
             return arg
         }
         // Invoke `codex` directly without a "new" subcommand
-        return ([exe] + args).joined(separator: " ")
+        let cmd = ([exe] + args).joined(separator: " ")
+        return applyCodexHomePrefix(cmd, codexHome: codexHome, source: .codex)
     }
 
-    func buildNewProjectCommandLines(project: Project, executableURL: URL, options: ResumeOptions)
-        -> String
-    {
+    func buildNewProjectCommandLines(
+        project: Project,
+        executableURL: URL,
+        options: ResumeOptions,
+        codexHome: String? = nil
+    ) -> String {
         let cdLine: String? = {
             if let dir = project.directory,
                 !dir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -970,7 +1021,7 @@ extension SessionActions {
         let exports = exportLines.joined(separator: "; ")
         let execPath = resolvedExecutablePath(for: .codex, executableURL: executableURL)
         let invocation = buildNewProjectCLIInvocation(
-            project: project, options: options, executablePath: execPath)
+            project: project, options: options, executablePath: execPath, codexHome: codexHome)
         let command = "PATH=\(injectedPATH) \(invocation)"
         if let cd = cdLine {
             return cd + "\n" + exports + "\n" + command + "\n"
@@ -980,7 +1031,10 @@ extension SessionActions {
     }
 
     func buildExternalNewProjectCommands(
-        project: Project, executableURL: URL, options: ResumeOptions
+        project: Project,
+        executableURL: URL,
+        options: ResumeOptions,
+        codexHome: String? = nil
     ) -> String {
         let cdLine: String? = {
             if let dir = project.directory,
@@ -992,7 +1046,7 @@ extension SessionActions {
         }()
         let execPath = resolvedExecutablePath(for: .codex, executableURL: executableURL)
         let cmd = buildNewProjectCLIInvocation(
-            project: project, options: options, executablePath: execPath)
+            project: project, options: options, executablePath: execPath, codexHome: codexHome)
         if let cd = cdLine {
             // Standard external New Session: emit `cd` + bare CLI invocation only.
             return cd + "\n" + cmd + "\n"
@@ -1005,7 +1059,8 @@ extension SessionActions {
         project: Project, executableURL: URL, options: ResumeOptions,
         simplifiedForExternal: Bool = true,
         destinationApp: ExternalTerminalProfile? = nil,
-        titleHint: String? = nil
+        titleHint: String? = nil,
+        codexHome: String? = nil
     ) {
         let commands: String
         if simplifiedForExternal, destinationApp?.usesWarpCommands == true {
@@ -1016,16 +1071,16 @@ extension SessionActions {
             let title = warpTitleCommentLine(base)
             let execPath = resolvedExecutablePath(for: .codex, executableURL: executableURL)
             let cmd = buildNewProjectCLIInvocation(
-                project: project, options: options, executablePath: execPath)
+                project: project, options: options, executablePath: execPath, codexHome: codexHome)
             let lines = [title, cmd].compactMap { $0 }
             commands = lines.joined(separator: "\n") + "\n"
         } else {
             commands =
                 simplifiedForExternal
                 ? buildExternalNewProjectCommands(
-                    project: project, executableURL: executableURL, options: options)
+                    project: project, executableURL: executableURL, options: options, codexHome: codexHome)
                 : buildNewProjectCommandLines(
-                    project: project, executableURL: executableURL, options: options)
+                    project: project, executableURL: executableURL, options: options, codexHome: codexHome)
         }
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -1033,10 +1088,15 @@ extension SessionActions {
     }
 
     @discardableResult
-    func openNewProject(project: Project, executableURL: URL, options: ResumeOptions) -> Bool {
+    func openNewProject(
+        project: Project,
+        executableURL: URL,
+        options: ResumeOptions,
+        codexHome: String? = nil
+    ) -> Bool {
         let scriptText = {
             let lines = buildNewProjectCommandLines(
-                project: project, executableURL: executableURL, options: options
+                project: project, executableURL: executableURL, options: options, codexHome: codexHome
             )
             .replacingOccurrences(of: "\n", with: "; ")
             return """
@@ -1116,7 +1176,8 @@ extension SessionActions {
         project: Project,
         options: ResumeOptions,
         initialPrompt: String? = nil,
-        executablePath: String? = nil
+        executablePath: String? = nil,
+        codexHome: String? = nil
     ) -> String {
         // Launch using project profile; choose executable based on session source.
         let exe = shellQuoteIfNeeded(executablePath ?? executableName(for: session.source.baseKind))
@@ -1153,16 +1214,23 @@ extension SessionActions {
         if let prompt = initialPrompt, !prompt.isEmpty {
             parts.append(shellSingleQuoted(prompt))
         }
-        return parts.joined(separator: " ")
+        let cmd = parts.joined(separator: " ")
+        return applyCodexHomePrefix(cmd, codexHome: codexHome, source: session.source.baseKind)
     }
 
     func buildNewSessionUsingProjectProfileCommandLines(
         session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions,
-        initialPrompt: String? = nil
+        initialPrompt: String? = nil,
+        codexHome: String? = nil
     ) -> String {
         if session.isRemote, let host = session.remoteHost {
             let invocation = buildNewSessionUsingProjectProfileCLIInvocation(
-                session: session, project: project, options: options, initialPrompt: initialPrompt)
+                session: session,
+                project: project,
+                options: options,
+                initialPrompt: initialPrompt,
+                codexHome: codexHome
+            )
             var exportLines: [String] = [
                 "export LANG=zh_CN.UTF-8",
                 "export LC_ALL=zh_CN.UTF-8",
@@ -1201,7 +1269,8 @@ extension SessionActions {
             project: project,
             options: options,
             initialPrompt: initialPrompt,
-            executablePath: execPath
+            executablePath: execPath,
+            codexHome: codexHome
         )
         // Local project-profile New: only emit `cd` + bare CLI invocation.
         return cd + "\n" + invocation + "\n"
@@ -1209,7 +1278,8 @@ extension SessionActions {
 
     func buildExternalNewSessionUsingProjectProfileCommands(
         session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions,
-        initialPrompt: String? = nil
+        initialPrompt: String? = nil,
+        codexHome: String? = nil
     ) -> String {
         if session.isRemote, let host = session.remoteHost {
             let sshContext = resolvedSSHContext(for: host)
@@ -1227,7 +1297,12 @@ extension SessionActions {
                 }
             }
             let invocation = buildNewSessionUsingProjectProfileCLIInvocation(
-                session: session, project: project, options: options, initialPrompt: initialPrompt)
+                session: session,
+                project: project,
+                options: options,
+                initialPrompt: initialPrompt,
+                codexHome: codexHome
+            )
             let remote = buildRemoteShellCommand(
                 session: session,
                 exports: exportLines,
@@ -1251,7 +1326,8 @@ extension SessionActions {
             executablePath: resolvedExecutablePath(
                 for: session.source.baseKind,
                 executableURL: executableURL
-            )
+            ),
+            codexHome: codexHome
         )
         return cd + "\n" + cmd + "\n"
     }
@@ -1261,14 +1337,20 @@ extension SessionActions {
         simplifiedForExternal: Bool = true,
         destinationApp: ExternalTerminalProfile? = nil,
         initialPrompt: String? = nil,
-        titleHint: String? = nil
+        titleHint: String? = nil,
+        codexHome: String? = nil
     ) {
         let commands: String
         if simplifiedForExternal, destinationApp?.usesWarpCommands == true {
             let invocation: String
             if session.isRemote {
                 invocation = buildNewSessionUsingProjectProfileCLIInvocation(
-                    session: session, project: project, options: options, initialPrompt: initialPrompt)
+                    session: session,
+                    project: project,
+                    options: options,
+                    initialPrompt: initialPrompt,
+                    codexHome: codexHome
+                )
             } else {
                 let execPath = resolvedExecutablePath(
                     for: session.source.baseKind,
@@ -1279,7 +1361,8 @@ extension SessionActions {
                     project: project,
                     options: options,
                     initialPrompt: initialPrompt,
-                    executablePath: execPath
+                    executablePath: execPath,
+                    codexHome: codexHome
                 )
             }
             let extraHost = session.isRemote ? session.remoteHost : nil
@@ -1319,10 +1402,10 @@ extension SessionActions {
                 simplifiedForExternal
                 ? buildExternalNewSessionUsingProjectProfileCommands(
                     session: session, project: project, executableURL: executableURL, options: options,
-                    initialPrompt: initialPrompt)
+                    initialPrompt: initialPrompt, codexHome: codexHome)
                 : buildNewSessionUsingProjectProfileCommandLines(
                     session: session, project: project, executableURL: executableURL, options: options,
-                    initialPrompt: initialPrompt)
+                    initialPrompt: initialPrompt, codexHome: codexHome)
         }
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -1374,7 +1457,7 @@ extension SessionActions {
     }
 
     func buildResumeUsingProjectProfileCLIInvocation(
-        session: SessionSummary, project: Project, options: ResumeOptions
+        session: SessionSummary, project: Project, options: ResumeOptions, codexHome: String? = nil
     ) -> String {
         // Choose executable based on session source; select profile (no flags for Claude).
         let exe = executableName(for: session.source.baseKind)
@@ -1402,11 +1485,16 @@ extension SessionActions {
         parts.append(contentsOf: globalFlags + args)
         parts.append("resume")
         parts.append(conversationId(for: session))
-        return parts.joined(separator: " ")
+        let cmd = parts.joined(separator: " ")
+        return applyCodexHomePrefix(cmd, codexHome: codexHome, source: session.source.baseKind)
     }
 
     func buildResumeUsingProjectProfileCLIInvocation(
-        session: SessionSummary, project: Project, executablePath: String, options: ResumeOptions
+        session: SessionSummary,
+        project: Project,
+        executablePath: String,
+        options: ResumeOptions,
+        codexHome: String? = nil
     ) -> String {
         let exe = shellQuoteIfNeeded(executablePath)
         var parts: [String] = [exe]
@@ -1433,11 +1521,16 @@ extension SessionActions {
         parts.append(contentsOf: globalFlags + args)
         parts.append("resume")
         parts.append(conversationId(for: session))
-        return parts.joined(separator: " ")
+        let cmd = parts.joined(separator: " ")
+        return applyCodexHomePrefix(cmd, codexHome: codexHome, source: session.source.baseKind)
     }
 
     func buildResumeUsingProjectProfileCommandLines(
-        session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions
+        session: SessionSummary,
+        project: Project,
+        executableURL: URL,
+        options: ResumeOptions,
+        codexHome: String? = nil
     ) -> String {
         var exportLines: [String] = [
             "export LANG=zh_CN.UTF-8",
@@ -1454,7 +1547,7 @@ extension SessionActions {
         }
         if session.isRemote, let host = session.remoteHost {
             let invocation = buildResumeUsingProjectProfileCLIInvocation(
-                session: session, project: project, options: options)
+                session: session, project: project, options: options, codexHome: codexHome)
             let sshContext = resolvedSSHContext(for: host)
             let remote = buildRemoteShellCommand(
                 session: session,
@@ -1480,13 +1573,18 @@ extension SessionActions {
             session: session,
             project: project,
             executablePath: execPath,
-            options: options
+            options: options,
+            codexHome: codexHome
         )
         return cd + "\n" + exports + "\n" + command + "\n"
     }
 
     func buildExternalResumeUsingProjectProfileCommands(
-        session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions
+        session: SessionSummary,
+        project: Project,
+        executableURL: URL,
+        options: ResumeOptions,
+        codexHome: String? = nil
     ) -> String {
         if session.isRemote, let host = session.remoteHost {
             let sshContext = resolvedSSHContext(for: host)
@@ -1504,7 +1602,7 @@ extension SessionActions {
                 }
             }
             let invocation = buildResumeUsingProjectProfileCLIInvocation(
-                session: session, project: project, options: options)
+                session: session, project: project, options: options, codexHome: codexHome)
             let remote = buildRemoteShellCommand(
                 session: session,
                 exports: exportLines,
@@ -1525,7 +1623,12 @@ extension SessionActions {
             executableURL: executableURL
         )
         let cmd = buildResumeUsingProjectProfileCLIInvocation(
-            session: session, project: project, executablePath: execPath, options: options)
+            session: session,
+            project: project,
+            executablePath: execPath,
+            options: options,
+            codexHome: codexHome
+        )
         return cd + "\n" + cmd + "\n"
     }
 
@@ -1533,14 +1636,15 @@ extension SessionActions {
         session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions,
         simplifiedForExternal: Bool = true,
         destinationApp: ExternalTerminalProfile? = nil,
-        titleHint: String? = nil
+        titleHint: String? = nil,
+        codexHome: String? = nil
     ) {
         let commands: String
         if simplifiedForExternal, destinationApp?.usesWarpCommands == true {
             let invocation: String
             if session.isRemote {
                 invocation = buildResumeUsingProjectProfileCLIInvocation(
-                    session: session, project: project, options: options)
+                    session: session, project: project, options: options, codexHome: codexHome)
             } else {
                 let execPath = resolvedExecutablePath(
                     for: session.source.baseKind,
@@ -1550,7 +1654,8 @@ extension SessionActions {
                     session: session,
                     project: project,
                     executablePath: execPath,
-                    options: options
+                    options: options,
+                    codexHome: codexHome
                 )
             }
             let title = warpTitleCommentLine(titleHint ?? session.effectiveTitle)
@@ -1583,9 +1688,19 @@ extension SessionActions {
             commands =
                 simplifiedForExternal
                 ? buildExternalResumeUsingProjectProfileCommands(
-                    session: session, project: project, executableURL: executableURL, options: options)
+                    session: session,
+                    project: project,
+                    executableURL: executableURL,
+                    options: options,
+                    codexHome: codexHome
+                )
                 : buildResumeUsingProjectProfileCommandLines(
-                    session: session, project: project, executableURL: executableURL, options: options)
+                    session: session,
+                    project: project,
+                    executableURL: executableURL,
+                    options: options,
+                    codexHome: codexHome
+                )
         }
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -1595,12 +1710,13 @@ extension SessionActions {
     @discardableResult
     func openNewSessionUsingProjectProfile(
         session: SessionSummary, project: Project, executableURL: URL, options: ResumeOptions,
-        initialPrompt: String? = nil
+        initialPrompt: String? = nil,
+        codexHome: String? = nil
     ) -> Bool {
         let scriptText = {
             let lines = buildNewSessionUsingProjectProfileCommandLines(
                 session: session, project: project, executableURL: executableURL, options: options,
-                initialPrompt: initialPrompt
+                initialPrompt: initialPrompt, codexHome: codexHome
             )
             .replacingOccurrences(of: "\n", with: "; ")
             return """
@@ -1624,8 +1740,27 @@ extension SessionActions {
         "'" + v.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
+    private func codexHomePrefix(_ codexHome: String?) -> String? {
+        guard let codexHome, !codexHome.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return "CODEX_HOME=\(shellEscapedPath(codexHome))"
+    }
+
+    private func applyCodexHomePrefix(
+        _ command: String,
+        codexHome: String?,
+        source: SessionSource.Kind
+    ) -> String {
+        guard source == .codex, let prefix = codexHomePrefix(codexHome) else { return command }
+        return "\(prefix) \(command)"
+    }
+
     func copyRealResumeInvocation(
-        session: SessionSummary, executableURL: URL, options: ResumeOptions
+        session: SessionSummary,
+        executableURL: URL,
+        options: ResumeOptions,
+        codexHome: String? = nil
     ) {
         let command: String
         if session.isRemote, let host = session.remoteHost {
@@ -1645,7 +1780,11 @@ extension SessionActions {
                 executableURL: executableURL
             )
             command = buildResumeCLIInvocation(
-            session: session, executablePath: execName, options: options)
+                session: session,
+                executablePath: execName,
+                options: options,
+                codexHome: codexHome
+            )
         }
         let pb = NSPasteboard.general
         pb.clearContents()

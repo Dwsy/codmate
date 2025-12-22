@@ -18,6 +18,7 @@ struct AttributedTextView: NSViewRepresentable {
     var showLineNumbers: Bool
     var fontSize: CGFloat = 12
     var searchQuery: String = ""
+    var lineFragmentPaddingOverride: CGFloat? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -44,7 +45,7 @@ struct AttributedTextView: NSViewRepresentable {
         tv.usesFindBar = true
         tv.drawsBackground = false
         // Use inner lineFragmentPadding as gutter to keep drawing inside container clip
-        let gutterWidth: CGFloat = showLineNumbers ? 44 : 6
+        let gutterWidth: CGFloat = lineFragmentPaddingOverride ?? (showLineNumbers ? 44 : 6)
         tv.textContainerInset = NSSize(width: 8, height: 8)
         tv.textContainer?.lineFragmentPadding = gutterWidth
         tv.linkTextAttributes = [:]
@@ -125,7 +126,7 @@ struct AttributedTextView: NSViewRepresentable {
             lm.showsLineNumbers = showLineNumbers
             lm.wrapEnabled = wrap
         }
-        let gutterWidth2: CGFloat = showLineNumbers ? 44 : 6
+        let gutterWidth2: CGFloat = lineFragmentPaddingOverride ?? (showLineNumbers ? 44 : 6)
         tv.textContainerInset = NSSize(width: 8, height: 8)
         tv.textContainer?.lineFragmentPadding = gutterWidth2
 

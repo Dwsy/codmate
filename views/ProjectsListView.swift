@@ -985,9 +985,6 @@ struct ProjectEditorSheet: View {
           .frame(width: fieldColWidth, alignment: .leading)
         }
       }
-      Text(
-        "These settings apply to new sessions of this project and map to --model / -s / -a / --full-auto / --dangerously-bypass-approvals-and-sandbox. The CLI may also load the named profile (auto-mapped to project ID)."
-      ).font(.caption).foregroundStyle(.secondary)
     }
     .padding(16)
   }
@@ -1086,13 +1083,9 @@ struct ProjectEditorSheet: View {
               .padding(.vertical, 6)
             }
           }
-          .padding(.leading, 4)
+          .padding(.horizontal, 8)
         }
       }
-
-      Text("Gemini project-level MCP is not supported yet.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
     }
     .padding(16)
   }
@@ -1184,12 +1177,9 @@ struct ProjectEditorSheet: View {
               .padding(.vertical, 6)
             }
           }
+          .padding(.horizontal, 8)
         }
       }
-
-      Text("Changes apply automatically.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
     }
     .padding(16)
   }
@@ -1246,7 +1236,7 @@ struct ProjectEditorSheet: View {
       object: nil,
       userInfo: [
         "category": SettingCategory.mcpServer.rawValue,
-        "extensionsTab": tab.rawValue
+        "extensionsTab": tab.rawValue,
       ]
     )
   }
@@ -1294,7 +1284,7 @@ struct ProjectEditorSheet: View {
     .codmatePresentationSizingIfAvailable()
     .onAppear(perform: load)
     .onChange(of: directory) { newDir in
-      Task { await extensionsVM.load(projectDirectory: newDir) }
+      Task { await extensionsVM.load(projectId: modeSelfId(), projectDirectory: newDir) }
     }
     .alert("Discard changes?", isPresented: $showCloseConfirm) {
       Button("Keep Editing", role: .cancel) {}
@@ -1356,7 +1346,7 @@ struct ProjectEditorSheet: View {
       }
     }
     original = currentSnapshot()
-    Task { await extensionsVM.load(projectDirectory: directory) }
+    Task { await extensionsVM.load(projectId: modeSelfId(), projectDirectory: directory) }
   }
 
   private func slugify(_ s: String) -> String {
@@ -1421,6 +1411,7 @@ struct ProjectEditorSheet: View {
       )
       Task {
         await viewModel.createOrUpdateProject(p)
+        await extensionsVM.persistSelections(projectId: id, directory: dirOpt)
         if let ids = autoAssignSessionIDs, !ids.isEmpty {
           await viewModel.assignSessions(to: id, ids: ids)
         }
@@ -1443,6 +1434,7 @@ struct ProjectEditorSheet: View {
       )
       Task {
         await viewModel.createOrUpdateProject(p)
+        await extensionsVM.persistSelections(projectId: old.id, directory: dirOpt)
         isPresented = false
       }
     }
