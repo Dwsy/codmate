@@ -81,7 +81,9 @@ actor SkillsSyncService {
       let dest = destination.appendingPathComponent(record.id, isDirectory: true)
       let src = URL(fileURLWithPath: record.path, isDirectory: true)
       do {
-        try ensureSkillLinked(from: src, to: dest, id: record.id)
+        // Codex CLI skips symlinks when loading skills, so we must use copy for codex target
+        let forceCopy = (target == .codex)
+        try ensureSkillLinked(from: src, to: dest, id: record.id, forceCopy: forceCopy)
       } catch {
         warnings.append(SkillSyncWarning(message: "\(record.id) could not sync to \(destination.path)"))
       }
@@ -102,26 +104,46 @@ actor SkillsSyncService {
     }
   }
 
-  private func ensureSkillLinked(from source: URL, to dest: URL, id: String) throws {
+  private func ensureSkillLinked(from source: URL, to dest: URL, id: String, forceCopy: Bool = false) throws {
     if fm.fileExists(atPath: dest.path) {
       if isSymbolicLink(dest) {
         let link = try? fm.destinationOfSymbolicLink(atPath: dest.path)
         if let link, URL(fileURLWithPath: link).standardizedFileURL == source.standardizedFileURL {
-          return
+          // If forceCopy is true but we have a symlink, remove it and copy
+          if forceCopy {
+            try fm.removeItem(at: dest)
+          } else {
+            return
+          }
+        } else {
+          try fm.removeItem(at: dest)
         }
-      }
-      if isCodMateManagedSkill(at: dest) {
+      } else if isCodMateManagedSkill(at: dest) {
+        // Check if it's already a copy pointing to the same source
+        let marker = dest.appendingPathComponent(".codmate.json", isDirectory: false)
+        if fm.fileExists(atPath: marker.path),
+           let data = try? Data(contentsOf: marker),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           (obj["id"] as? String) == id {
+          return  // Already synced
+        }
         try fm.removeItem(at: dest)
       } else {
         throw NSError(domain: "CodMate", code: -1, userInfo: [NSLocalizedDescriptionKey: "Skill conflict at \(dest.path)"])
       }
     }
 
-    do {
-      try fm.createSymbolicLink(at: dest, withDestinationURL: source)
-    } catch {
+    if forceCopy {
+      // Force copy instead of symlink (needed for Codex CLI which skips symlinks)
       try fm.copyItem(at: source, to: dest)
       try writeMarker(to: dest, id: id)
+    } else {
+      do {
+        try fm.createSymbolicLink(at: dest, withDestinationURL: source)
+      } catch {
+        try fm.copyItem(at: source, to: dest)
+        try writeMarker(to: dest, id: id)
+      }
     }
   }
 

@@ -145,6 +145,8 @@ extension SessionActions {
                     if session.source.baseKind == .codex,
                        let codexHomeOverride,
                        !codexHomeOverride.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        // Ensure sessions symlink exists before setting CODEX_HOME
+                        self.ensureSessionsSymlink(at: codexHomeOverride)
                         env["CODEX_HOME"] = codexHomeOverride
                     }
                     process.environment = env
@@ -169,6 +171,106 @@ extension SessionActions {
     }
 
     // MARK: - Resume helpers (copy/open Terminal)
+
+    /// Paths that should be symlinked from project-level CODEX_HOME to global ~/.codex
+    /// to avoid unnecessary data fragmentation while keeping project-level MCP/skills configs isolated.
+    ///
+    /// Rationale:
+    /// - We use project-level CODEX_HOME ONLY to enable project-specific MCP servers and skills
+    /// - Everything else (sessions, logs, auth, history) should remain global for consistency
+    /// - config.toml intentionally NOT included (must stay project-level for MCP configs)
+    /// - skills/ directory NOT included (parent dir must exist for skills/.system, but user skills stay project-level)
+    private static let globalSymlinkPaths: [String] = [
+        "sessions",          // Session rollout files - global for CodMate indexing
+        "log",               // Codex runtime logs - global for unified debugging
+        "auth.json",         // API credentials - global (shared across projects)
+        "history.jsonl",     // Command history - global (cross-project context)
+        "skills/.system",    // System skills cache - global (avoid duplication)
+        "shell_snapshots"    // Shell environment snapshots - temporary files, global storage
+    ]
+
+    /// Ensures that non-config files/directories in project-level CODEX_HOME are symlinked
+    /// to the global ~/.codex directory. This keeps data centralized while allowing
+    /// project-specific MCP servers and skills configurations.
+    ///
+    /// - Parameter codexHome: The project-level CODEX_HOME path (e.g., `/path/to/project/.codex`)
+    private func ensureSessionsSymlink(at codexHome: String) {
+        let globalCodexURL = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex", isDirectory: true)
+
+        for relativePath in Self.globalSymlinkPaths {
+            ensureSymlink(
+                projectCodexHome: codexHome,
+                globalCodexHome: globalCodexURL.path,
+                relativePath: relativePath
+            )
+        }
+    }
+
+    /// Creates a symlink from project CODEX_HOME to global ~/.codex for a given relative path.
+    ///
+    /// - Parameters:
+    ///   - projectCodexHome: Project-level CODEX_HOME directory path
+    ///   - globalCodexHome: Global ~/.codex directory path
+    ///   - relativePath: Relative path within CODEX_HOME (e.g., "sessions", "auth.json", "skills/.system")
+    private func ensureSymlink(
+        projectCodexHome: String,
+        globalCodexHome: String,
+        relativePath: String
+    ) {
+        let projectCodexURL = URL(fileURLWithPath: projectCodexHome, isDirectory: true)
+        let globalCodexURL = URL(fileURLWithPath: globalCodexHome, isDirectory: true)
+
+        // Build full paths
+        let projectItemURL = projectCodexURL.appendingPathComponent(relativePath)
+        let globalItemURL = globalCodexURL.appendingPathComponent(relativePath)
+
+        // Check if project path already exists
+        var isDirectory: ObjCBool = false
+        let exists = fileManager.fileExists(atPath: projectItemURL.path, isDirectory: &isDirectory)
+
+        if exists {
+            // If it's already a symlink, verify it points to the right location
+            if let destination = try? fileManager.destinationOfSymbolicLink(atPath: projectItemURL.path) {
+                // Resolve both paths to handle relative symlinks
+                let destinationResolved = (destination as NSString).expandingTildeInPath
+                let globalResolved = globalItemURL.path
+
+                if destinationResolved == globalResolved ||
+                   URL(fileURLWithPath: destinationResolved).standardizedFileURL.path ==
+                   URL(fileURLWithPath: globalResolved).standardizedFileURL.path {
+                    return // Already correctly configured
+                }
+
+                // Points to a different location - respect user's choice
+                NSLog("Warning: Project path \(relativePath) symlink points to \(destination), expected \(globalItemURL.path). Keeping existing configuration.")
+                return
+            }
+
+            // If it exists but is not a symlink (real directory or file), respect it
+            NSLog("Note: Project path \(relativePath) exists but is not a symlink. Keeping existing configuration.")
+            return
+        }
+
+        // Path doesn't exist, create the symlink
+        do {
+            // Ensure parent directory exists in project .codex
+            let parentURL = projectItemURL.deletingLastPathComponent()
+            try fileManager.createDirectory(at: parentURL, withIntermediateDirectories: true)
+
+            // Create the symlink (allow dangling symlinks for files that don't exist yet)
+            try fileManager.createSymbolicLink(
+                at: projectItemURL,
+                withDestinationURL: globalItemURL
+            )
+
+            NSLog("Created symlink: \(projectItemURL.path) -> \(globalItemURL.path)")
+        } catch {
+            // Non-fatal: if symlink creation fails, Codex will create a regular directory/file
+            NSLog("Warning: Failed to create symlink for \(relativePath): \(error)")
+        }
+    }
+
     private func shellEscapedPath(_ path: String) -> String {
         // Simple escape: wrap in single quotes and escape existing single quotes
         return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
@@ -1744,6 +1846,9 @@ extension SessionActions {
         guard let codexHome, !codexHome.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
+        // Ensure sessions symlink exists when generating command strings
+        // (e.g., for copy-to-clipboard or external terminal execution)
+        ensureSessionsSymlink(at: codexHome)
         return "CODEX_HOME=\(shellEscapedPath(codexHome))"
     }
 
