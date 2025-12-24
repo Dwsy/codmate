@@ -117,15 +117,16 @@ struct SessionListRowView: View {
               .padding(2)
               .opacity(reduceMotion ? 1.0 : (breathing ? 1.0 : 0.55))
           } else if !isUpdating, let asset = branding.badgeAssetName {
+            let hasWhiteIconBackground = !isRunning
+            let shouldInvertCodexDark =
+              summary.source.baseKind == .codex && colorScheme == .dark && !hasWhiteIconBackground
             Image(asset)
               .resizable()
               .renderingMode(.original)
               .aspectRatio(contentMode: .fit)
               .padding(4)
               .modifier(
-                DarkModeInvertModifier(
-                  active: summary.source.baseKind == .codex && colorScheme == .dark
-                )
+                DarkModeInvertModifier(active: shouldInvertCodexDark)
               )
           } else if !isUpdating {
             Image(systemName: branding.symbolName)
