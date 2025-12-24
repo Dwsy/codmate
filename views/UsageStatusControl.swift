@@ -9,6 +9,7 @@ struct UsageStatusControl: View {
   @State private var isHovering = false
   @State private var hoverPhase: Double = 0
   @State private var hoverLockoutActive = false
+  @State private var didAutoRefreshCodex = false
 
   private static let hoverAnimation = Animation.easeInOut(duration: 0.2)
 
@@ -94,6 +95,10 @@ struct UsageStatusControl: View {
           }
         }
       }
+      .onAppear { autoRefreshCodexIfNeeded() }
+      .onChange(of: snapshots[.codex]?.updatedAt ?? nil) { _ in
+        autoRefreshCodexIfNeeded()
+      }
       .onAnimationCompleted(for: hoverPhase) {
         guard hoverPhase == 0 else { return }
         hoverLockoutActive = false
@@ -145,6 +150,19 @@ struct UsageStatusControl: View {
         return nil
       }
     }
+  }
+
+  private func autoRefreshCodexIfNeeded() {
+    guard !didAutoRefreshCodex else { return }
+    let shouldRefresh: Bool = {
+      guard let snapshot = snapshots[.codex] else { return true }
+      if snapshot.origin == .thirdParty { return false }
+      if snapshot.availability == .ready { return false }
+      return snapshot.updatedAt == nil
+    }()
+    guard shouldRefresh else { return }
+    didAutoRefreshCodex = true
+    onRequestRefresh(.codex)
   }
 
   private func ringState(for provider: UsageProviderKind, relativeTo date: Date) -> UsageRingState {
