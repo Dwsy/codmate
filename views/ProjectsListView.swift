@@ -10,6 +10,7 @@ struct ProjectsListView: View {
   @State private var pendingDelete: Project? = nil
   @State private var showDeleteConfirm = false
   @State private var draftTaskForNew: CodMateTask? = nil
+  @State private var showAutoAssignSheet = false
 
   var body: some View {
     let countsDisplay = viewModel.projectCountsDisplay()
@@ -72,8 +73,8 @@ struct ProjectsListView: View {
         showNewProject = true
       }
       if viewModel.selectedProjectIDs.contains(SessionListViewModel.otherProjectId) {
-        Button("Auto assign to projects") {
-          Task { await autoAssignOthersForCurrentDay() }
+        Button("Auto assign to ...") {
+          showAutoAssignSheet = true
         }
       }
     }
@@ -138,6 +139,10 @@ struct ProjectsListView: View {
           draftTaskForNew = nil
         }
       )
+    }
+    .sheet(isPresented: $showAutoAssignSheet) {
+      AutoAssignSheet(isPresented: $showAutoAssignSheet)
+        .environmentObject(viewModel)
     }
     .confirmationDialog(
       "Delete project?",
@@ -242,62 +247,14 @@ struct ProjectsListView: View {
       onNewProjectClick: {
         newParentProject = nil
         showNewProject = true
+      },
+      onAutoAssign: {
+        showAutoAssignSheet = true
       }
     )
   }
 
-  private func autoAssignOthersForCurrentDay() async {
-    let descriptors = currentDayDescriptors()
-
-    let candidates = viewModel.allSessions.filter { session in
-      viewModel.projectIdForSession(session.id) == nil
-        && viewModel.matchesDayFilters(session, descriptors: descriptors)
-    }
-    guard !candidates.isEmpty else {
-      await SystemNotifier.shared.notify(title: "CodMate", body: "No unassigned sessions to match.")
-      return
-    }
-
-    var assignments: [String: [String]] = [:]
-    for session in candidates {
-      if let bestId = viewModel.bestMatchingProjectId(for: session) {
-        assignments[bestId, default: []].append(session.id)
-      }
-    }
-
-    guard !assignments.isEmpty else {
-      await SystemNotifier.shared.notify(title: "CodMate", body: "No matching project paths found.")
-      return
-    }
-
-    var total = 0
-    for (pid, ids) in assignments {
-      total += ids.count
-      await viewModel.assignSessions(to: pid, ids: ids)
-    }
-    await SystemNotifier.shared.notify(
-      title: "CodMate",
-      body: "Auto-assigned \(total) session(s) based on working directory.")
-  }
-
-  private func currentDayDescriptors() -> [SessionListViewModel.DaySelectionDescriptor] {
-    var descriptors = SessionListViewModel.makeDayDescriptors(
-      selectedDays: viewModel.selectedDays,
-      singleDay: viewModel.selectedDay
-    )
-    if descriptors.isEmpty {
-      let today = Date()
-      let key = viewModel.monthKey(for: today)
-      let day = Calendar.current.component(.day, from: today)
-      descriptors = [
-        SessionListViewModel.DaySelectionDescriptor(date: today, monthKey: key, day: day)
-      ]
-    }
-    return descriptors
-  }
-
-  private func makeOtherProjectRow(countsDisplay: [String: (visible: Int, total: Int)]) -> some View
-  {
+  private func makeOtherProjectRow(countsDisplay: [String: (visible: Int, total: Int)]) -> some View {
     let otherId = SessionListViewModel.otherProjectId
     let otherProject = Project(
       id: otherId, name: "Others", directory: nil, trustLevel: nil, overview: nil,
@@ -398,6 +355,7 @@ private struct ProjectTreeNodeView: View {
   let onAssignSessions: (String, [String]) -> Void
   let onChangeParent: (String, String?) -> Void
   let onNewProjectClick: () -> Void
+  let onAutoAssign: () -> Void
 
   var body: some View {
     Group {
@@ -421,7 +379,8 @@ private struct ProjectTreeNodeView: View {
               onOpenInEditor: onOpenInEditor,
               onAssignSessions: onAssignSessions,
               onChangeParent: onChangeParent,
-              onNewProjectClick: onNewProjectClick
+              onNewProjectClick: onNewProjectClick,
+              onAutoAssign: onAutoAssign
             )
           }
         } label: {
@@ -568,8 +527,8 @@ private struct ProjectTreeNodeView: View {
 
     if project.id == SessionListViewModel.otherProjectId {
       Divider()
-      Button("Auto assign to projects") {
-        Task { await autoAssignOthersForCurrentDay() }
+      Button("Auto assign to ...") {
+        onAutoAssign()
       }
     }
   }
@@ -650,61 +609,6 @@ private struct ProjectTreeNodeView: View {
           )))
     }
     return menuItems
-  }
-
-  private func autoAssignOthersForCurrentDay() async {
-    let vm = self.viewModel
-    let descriptors = currentDayDescriptors()
-
-    let candidates = vm.allSessions.filter { session in
-      vm.projectIdForSession(session.id) == nil
-        && vm.matchesDayFilters(session, descriptors: descriptors)
-    }
-    guard !candidates.isEmpty else {
-      await SystemNotifier.shared.notify(title: "CodMate", body: "No unassigned sessions to match.")
-      return
-    }
-
-    var assignments: [String: [String]] = [:]
-    for session in candidates {
-      if let bestId = vm.bestMatchingProjectId(for: session) {
-        assignments[bestId, default: []].append(session.id)
-      }
-    }
-
-    guard !assignments.isEmpty else {
-      await SystemNotifier.shared.notify(title: "CodMate", body: "No matching project paths found.")
-      return
-    }
-
-    var total = 0
-    for (pid, ids) in assignments {
-      total += ids.count
-      await vm.assignSessions(to: pid, ids: ids)
-    }
-    await MainActor.run {
-      vm.scheduleApplyFilters()
-    }
-    await SystemNotifier.shared.notify(
-      title: "CodMate",
-      body: "Auto-assigned \(total) session(s) based on working directory.")
-  }
-
-  private func currentDayDescriptors() -> [SessionListViewModel.DaySelectionDescriptor] {
-    let vm = self.viewModel
-    var descriptors = SessionListViewModel.makeDayDescriptors(
-      selectedDays: vm.selectedDays,
-      singleDay: vm.selectedDay
-    )
-    if descriptors.isEmpty {
-      let today = Date()
-      let key = vm.monthKey(for: today)
-      let day = Calendar.current.component(.day, from: today)
-      descriptors = [
-        SessionListViewModel.DaySelectionDescriptor(date: today, monthKey: key, day: day)
-      ]
-    }
-    return descriptors
   }
 
   private func launchNewSession(
