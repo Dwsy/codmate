@@ -9,6 +9,7 @@ APP_DIR="${APP_DIR:-$BUILD_DIR/CodMate.app}"
 BIN_DIR="$BUILD_DIR/bin"
 
 ARCH_MATRIX=( ${ARCH_MATRIX:-arm64 x86_64} )
+SWIFT_CONFIG="${SWIFT_CONFIG:-release}"
 
 BUNDLE_ID="${BUNDLE_ID:-ai.umate.codmate}"
 MIN_MACOS="${MIN_MACOS:-13.5}"
@@ -68,9 +69,9 @@ CODMATE_BINS=()
 NOTIFY_BINS=()
 
 for arch in "${ARCH_MATRIX[@]}"; do
-  echo "[build] swift build -c release --arch $arch"
-  swift build -c release --arch "$arch" "${SWIFT_FLAGS[@]}"
-  BIN_PATH="$(swift build -c release --arch "$arch" --show-bin-path)"
+  echo "[build] swift build -c $SWIFT_CONFIG --arch $arch"
+  swift build -c "$SWIFT_CONFIG" --arch "$arch" "${SWIFT_FLAGS[@]}"
+  BIN_PATH="$(swift build -c "$SWIFT_CONFIG" --arch "$arch" --show-bin-path)"
 
   CODMATE_BIN="$BIN_PATH/CodMate"
   NOTIFY_BIN="$BIN_PATH/notify"
@@ -81,8 +82,8 @@ for arch in "${ARCH_MATRIX[@]}"; do
   fi
   if [[ ! -f "$NOTIFY_BIN" ]]; then
     echo "[info] notify binary missing; building product explicitly"
-    swift build -c release --arch "$arch" "${SWIFT_FLAGS[@]}" --product notify
-    BIN_PATH="$(swift build -c release --arch "$arch" --show-bin-path)"
+    swift build -c "$SWIFT_CONFIG" --arch "$arch" "${SWIFT_FLAGS[@]}" --product notify
+    BIN_PATH="$(swift build -c "$SWIFT_CONFIG" --arch "$arch" --show-bin-path)"
     NOTIFY_BIN="$BIN_PATH/notify"
     if [[ ! -f "$NOTIFY_BIN" ]]; then
       echo "[error] notify binary missing at $NOTIFY_BIN" >&2
@@ -185,6 +186,24 @@ if [[ -f "$ROOT_DIR/PrivacyInfo.xcprivacy" ]]; then
 fi
 if [[ -f "$ROOT_DIR/THIRD-PARTY-NOTICES.md" ]]; then
   cp -f "$ROOT_DIR/THIRD-PARTY-NOTICES.md" "$RESOURCES_DIR/THIRD-PARTY-NOTICES.md"
+fi
+
+if [[ "${SIGN_ADHOC:-}" == "1" ]]; then
+  echo "[sign] Ad-hoc signing for local run (Notify Entitlements)"
+  ENTITLEMENTS="$ROOT_DIR/assets/CodMate-Notify.entitlements"
+  
+  # Sign inner binaries first
+  if [[ -f "$APP_DIR/Contents/Resources/bin/codmate-notify" ]]; then
+    codesign --force --sign - --entitlements "$ENTITLEMENTS" --timestamp=none \
+      "$APP_DIR/Contents/Resources/bin/codmate-notify"
+  fi
+  
+  codesign --force --sign - --entitlements "$ENTITLEMENTS" --timestamp=none \
+    "$APP_DIR/Contents/MacOS/CodMate"
+    
+  # Sign the bundle
+  codesign --force --sign - --entitlements "$ENTITLEMENTS" --timestamp=none \
+    "$APP_DIR"
 fi
 
 echo "[ok] App bundle ready at $APP_DIR"

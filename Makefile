@@ -1,6 +1,7 @@
 .PHONY: help build release test app dmg clean run notices
 
 APP_NAME := CodMate
+VER ?= 0.1.0
 BUILD_NUMBER_STRATEGY ?= date
 APP_DIR ?= build/CodMate.app
 OUTPUT_DIR ?= artifacts/release
@@ -33,8 +34,14 @@ app: ## Build CodMate.app (ARCH=arm64|x86_64|"arm64 x86_64")
 	ARCH_MATRIX="$(ARCH)" APP_DIR=$(APP_DIR) \
 	./scripts/create-app-bundle.sh
 
-run: app ## Build and launch CodMate.app
-	@open "$(APP_DIR)"
+run: ## Build and launch CodMate.app (native arch, inferred version)
+	@VER_RUN=$${VER:-$$(git describe --tags --abbrev=0 2>/dev/null || echo 0.0.0)}; \
+	ARCH_NATIVE=$$(uname -m); \
+	VER="$$VER_RUN" BUILD_NUMBER_STRATEGY=$(BUILD_NUMBER_STRATEGY) \
+	ARCH_MATRIX="$$ARCH_NATIVE" APP_DIR=$(APP_DIR) STRIP=0 SWIFT_CONFIG=debug \
+	SIGN_ADHOC=1 \
+	./scripts/create-app-bundle.sh; \
+	open "$(APP_DIR)"
 
 dmg: ## Build Developer ID DMG (ARCH=arm64|x86_64|"arm64 x86_64")
 	@if [ -z "$(VER)" ]; then echo "error: VER is required (e.g., VER=1.2.3)"; exit 1; fi
