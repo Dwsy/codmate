@@ -12,6 +12,7 @@ struct ClaudeUsageStatus: Equatable {
     let weeklyWindowMinutes: Double
     let weeklyResetAt: Date?
     let sessionExpiresAt: Date?
+    let planType: String?  // Subscription type (Pro, Max, Team, etc.)
 
     init(
         updatedAt: Date,
@@ -24,7 +25,8 @@ struct ClaudeUsageStatus: Equatable {
         weeklyUsedMinutes: Double?,
         weeklyWindowMinutes: Double = 10_080,
         weeklyResetAt: Date?,
-        sessionExpiresAt: Date? = nil
+        sessionExpiresAt: Date? = nil,
+        planType: String? = nil
     ) {
         self.updatedAt = updatedAt
         self.modelName = modelName
@@ -37,6 +39,7 @@ struct ClaudeUsageStatus: Equatable {
         self.weeklyWindowMinutes = weeklyWindowMinutes
         self.weeklyResetAt = weeklyResetAt
         self.sessionExpiresAt = sessionExpiresAt
+        self.planType = planType
     }
 
     private var contextProgress: Double? {
@@ -60,14 +63,7 @@ struct ClaudeUsageStatus: Equatable {
         return remaining / weeklyWindowMinutes
     }
 
-    private var sessionProgress: Double? {
-        guard let expiresAt = sessionExpiresAt else { return nil }
-        let sessionDuration: TimeInterval = 8 * 3600 // 8 hours in seconds
-        let remaining = max(0, expiresAt.timeIntervalSince(updatedAt))
-        return remaining / sessionDuration
-    }
-
-    func asProviderSnapshot() -> UsageProviderSnapshot {
+    func asProviderSnapshot(titleBadge: String? = nil) -> UsageProviderSnapshot {
         var metrics: [UsageMetricSnapshot] = []
 
         metrics.append(
@@ -106,21 +102,12 @@ struct ClaudeUsageStatus: Equatable {
             )
         )
 
-        metrics.append(
-            UsageMetricSnapshot(
-                kind: .sessionExpiry,
-                label: "Session (8h)",
-                usageText: sessionUsageText,
-                percentText: sessionPercentText,
-                progress: sessionProgress?.clamped01(),
-                resetDate: sessionExpiresAt,
-                fallbackWindowMinutes: 480 // 8 hours in minutes
-            )
-        )
+        // Session expiry removed - new Web API strategy auto-refreshes tokens
 
         return UsageProviderSnapshot(
             provider: .claude,
             title: UsageProviderKind.claude.displayName,
+            titleBadge: titleBadge,
             availability: .ready,
             metrics: metrics,
             updatedAt: updatedAt,
@@ -202,27 +189,6 @@ struct ClaudeUsageStatus: Equatable {
 
     private var weeklyPercentText: String? {
         guard let progress = weeklyProgress else { return nil }
-        return NumberFormatter.compactPercentFormatter.string(from: NSNumber(value: progress))
-            ?? String(format: "%.0f%%", progress * 100)
-    }
-
-    private var sessionUsageText: String? {
-        guard let expiresAt = sessionExpiresAt else { return nil }
-        let remaining = expiresAt.timeIntervalSince(updatedAt)
-        if remaining <= 0 {
-            return "Expired"
-        }
-        let hours = Int(remaining / 3600)
-        let minutes = Int((remaining.truncatingRemainder(dividingBy: 3600)) / 60)
-        if hours > 0 {
-            return "\(hours)h \(minutes)m remaining"
-        } else {
-            return "\(minutes)m remaining"
-        }
-    }
-
-    private var sessionPercentText: String? {
-        guard let progress = sessionProgress else { return nil }
         return NumberFormatter.compactPercentFormatter.string(from: NSNumber(value: progress))
             ?? String(format: "%.0f%%", progress * 100)
     }

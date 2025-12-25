@@ -95,6 +95,17 @@ struct ClaudeUsageAPIClient {
     }
 
     func fetchUsageStatus(now: Date = Date()) async throws -> ClaudeUsageStatus {
+        // Priority 1: Try Web API (browser cookies)
+        do {
+            let status = try await ClaudeWebAPIClient.fetchUsageViaWebAPI(now: now)
+            NSLog("[ClaudeUsage] Web API succeeded")
+            return status
+        } catch {
+            // Web API failed, fall back to OAuth API
+            NSLog("[ClaudeUsage] Web API failed: \(error.localizedDescription), falling back to OAuth API")
+        }
+
+        // Priority 2: OAuth API (existing implementation)
         let credential = try fetchCredentialEnvelope()
         var sessionExpiresAt: Date? = nil
         if let expiresAt = credential.claudeAiOauth.expiresAt {
@@ -120,6 +131,9 @@ struct ClaudeUsageAPIClient {
             return (percent / 100.0) * windowMinutes
         }
 
+        // Try to detect plan type from OAuth token (best effort)
+        let planType = await detectPlanTypeViaOAuth(token: token)
+
         let status = ClaudeUsageStatus(
             updatedAt: now,
             modelName: nil,
@@ -131,7 +145,8 @@ struct ClaudeUsageAPIClient {
             weeklyUsedMinutes: minutesUsed(from: response.sevenDay, windowMinutes: weeklyWindowMinutes),
             weeklyWindowMinutes: weeklyWindowMinutes,
             weeklyResetAt: response.sevenDay?.resetsAt,
-            sessionExpiresAt: sessionExpiresAt
+            sessionExpiresAt: sessionExpiresAt,
+            planType: planType
         )
 
         return status
@@ -319,6 +334,68 @@ struct ClaudeUsageAPIClient {
         guard let data = try? Data(contentsOf: fileURL) else { return nil }
         let decoder = JSONDecoder()
         return try? decoder.decode(CredentialEnvelope.self, from: data)
+    }
+
+    // MARK: - Plan Type Detection (Best Effort)
+
+    /// Attempts to detect plan type using OAuth token to access claude.ai Web API.
+    /// This is a best-effort approach - OAuth tokens may not work with claude.ai Web API.
+    /// Returns nil if detection fails (no error thrown, silent fallback).
+    private func detectPlanTypeViaOAuth(token: String) async -> String? {
+        let endpoint = "https://claude.ai/api/account"
+        guard let url = URL(string: endpoint) else { return nil }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 10
+
+        guard let (data, response) = try? await session.data(for: request),
+              let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200
+        else {
+            // OAuth token doesn't work with claude.ai Web API, or user not authenticated
+            // This is expected - OAuth tokens are for api.anthropic.com, not claude.ai
+            return nil
+        }
+
+        // Parse response using the same structure as ClaudeWebAPIClient
+        struct AccountResponse: Decodable {
+            let memberships: [Membership]?
+
+            struct Membership: Decodable {
+                let organization: Organization
+
+                struct Organization: Decodable {
+                    let uuid: String?
+                    let rateLimitTier: String?
+                    let billingType: String?
+
+                    enum CodingKeys: String, CodingKey {
+                        case uuid
+                        case rateLimitTier = "rate_limit_tier"
+                        case billingType = "billing_type"
+                    }
+                }
+            }
+        }
+
+        guard let response = try? JSONDecoder().decode(AccountResponse.self, from: data),
+              let membership = response.memberships?.first
+        else {
+            return nil
+        }
+
+        let tier = membership.organization.rateLimitTier?.lowercased() ?? ""
+        let billing = membership.organization.billingType?.lowercased() ?? ""
+
+        if tier.contains("max") { return "Max" }
+        if tier.contains("pro") { return "Pro" }
+        if tier.contains("team") { return "Team" }
+        if tier.contains("enterprise") { return "Enterprise" }
+        if billing.contains("stripe"), tier.contains("claude") { return "Pro" }
+
+        return nil
     }
 }
 

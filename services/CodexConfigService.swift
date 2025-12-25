@@ -1045,12 +1045,8 @@ actor CodexConfigService {
             return lines.joined(separator: "\n")
         } else {
             let block = [table, "# managed-by=codmate", "\(key) = \(valueText)", ""]
-            if let idx = lines.lastIndex(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("[") }) {
-                lines.insert(contentsOf: block, at: idx + 1)
-            } else {
-                if !lines.isEmpty { lines.append("") }
-                lines.append(contentsOf: block)
-            }
+            if !lines.isEmpty { lines.append("") }
+            lines.append(contentsOf: block)
             return lines.joined(separator: "\n")
         }
     }
