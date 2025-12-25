@@ -46,6 +46,41 @@ struct GeminiUsageAPIClient {
       let refreshToken: String?
       let expiresAt: TimeInterval?
       let tokenType: String?
+
+      enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
+        case refreshToken = "refresh_token"
+        case expiresAt = "expiresAt"  // Try camelCase first
+        case tokenType = "token_type"
+      }
+
+      // Memberwise initializer (needed because we have custom init(from:))
+      init(accessToken: String, refreshToken: String?, expiresAt: TimeInterval?, tokenType: String?) {
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.expiresAt = expiresAt
+        self.tokenType = tokenType
+      }
+
+      init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        accessToken = try container.decode(String.self, forKey: .accessToken)
+        refreshToken = try? container.decode(String.self, forKey: .refreshToken)
+        tokenType = try? container.decode(String.self, forKey: .tokenType)
+
+        // Handle both expiresAt (camelCase) and expiry_date (snake_case)
+        if let expiresAt = try? container.decode(TimeInterval.self, forKey: .expiresAt) {
+          self.expiresAt = expiresAt
+        } else if let expiryDate = try? decoder.container(keyedBy: LegacyCodingKeys.self).decode(TimeInterval.self, forKey: .expiryDate) {
+          self.expiresAt = expiryDate
+        } else {
+          self.expiresAt = nil
+        }
+      }
+
+      private enum LegacyCodingKeys: String, CodingKey {
+        case expiryDate = "expiry_date"
+      }
     }
 
     let serverName: String?
@@ -130,15 +165,38 @@ struct GeminiUsageAPIClient {
 
   private struct OAuthFile: Decodable {
     let access_token: String?
+    let refresh_token: String?
     let expiry_date: TimeInterval?
+    let id_token: String?
   }
 
   func fetchUsageStatus(now: Date = Date()) async throws -> GeminiUsageStatus {
-    let credential = try fetchCredential()
+    var credential = try fetchCredential()
+
+    // Check token expiration and auto-refresh if needed
     if let expires = credential.token.expiresAt {
       let expiry = Date(timeIntervalSince1970: expires / 1000)
       if expiry.addingTimeInterval(-300) < now {
-        throw ClientError.credentialExpired(expiry)
+        NSLog("[GeminiUsage] Token expired at \(expiry), attempting refresh")
+
+        // Try to refresh the token
+        guard let refreshToken = credential.token.refreshToken else {
+          NSLog("[GeminiUsage] No refresh token available")
+          throw ClientError.credentialExpired(expiry)
+        }
+
+        do {
+          let newToken = try await refreshAccessToken(refreshToken: refreshToken)
+          credential = CredentialEnvelope(
+            serverName: credential.serverName,
+            token: newToken,
+            updatedAt: credential.updatedAt
+          )
+          NSLog("[GeminiUsage] Token refreshed successfully")
+        } catch {
+          NSLog("[GeminiUsage] Token refresh failed: \(error.localizedDescription)")
+          throw ClientError.credentialExpired(expiry)
+        }
       }
     }
 
@@ -150,10 +208,15 @@ struct GeminiUsageAPIClient {
     }
     let buckets = try await retrieveQuota(token: token, projectId: projectId)
 
+    // Detect plan: try Drive storage quota first, fall back to model access
+    let planType = await detectPlanFromStorage(token: token)
+      ?? detectPlanFromModels(buckets)
+
     let status = GeminiUsageStatus(
       updatedAt: now,
       projectId: projectId,
-      buckets: buckets
+      buckets: buckets,
+      planType: planType
     )
     return status
   }
@@ -210,14 +273,14 @@ struct GeminiUsageAPIClient {
         if let envelope = try? JSONDecoder().decode(CredentialEnvelope.self, from: data) {
           return envelope
         }
-        // Try legacy google creds
+        // Try legacy google creds (oauth_creds.json)
         if let legacy = try? JSONDecoder().decode(OAuthFile.self, from: data),
           let token = legacy.access_token
         {
           let expires = legacy.expiry_date
           let tokenObj = CredentialEnvelope.Token(
             accessToken: token,
-            refreshToken: nil,
+            refreshToken: legacy.refresh_token,
             expiresAt: expires,
             tokenType: "Bearer"
           )
@@ -482,5 +545,278 @@ struct GeminiUsageAPIClient {
     let version = Bundle.main.shortVersionString
     let platform = ProcessInfo.processInfo.operatingSystemVersionString
     return "CodMate/\(version) (\(platform))"
+  }
+
+  // MARK: - Token Refresh
+
+  private struct OAuthClientCredentials {
+    let clientId: String
+    let clientSecret: String
+  }
+
+  private func refreshAccessToken(refreshToken: String) async throws -> CredentialEnvelope.Token {
+    guard let url = URL(string: "https://oauth2.googleapis.com/token") else {
+      throw ClientError.decodingFailed
+    }
+
+    guard let oauthCreds = extractOAuthCredentials() else {
+      NSLog("[GeminiUsage] Could not extract OAuth credentials from Gemini CLI")
+      throw ClientError.decodingFailed
+    }
+
+    return try await refreshWithCredentials(
+      clientId: oauthCreds.clientId,
+      clientSecret: oauthCreds.clientSecret,
+      refreshToken: refreshToken,
+      url: url
+    )
+  }
+
+  private func refreshWithCredentials(
+    clientId: String,
+    clientSecret: String,
+    refreshToken: String,
+    url: URL
+  ) async throws -> CredentialEnvelope.Token {
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+    request.timeoutInterval = 15
+
+    let body = [
+      "client_id=\(clientId)",
+      "client_secret=\(clientSecret)",
+      "refresh_token=\(refreshToken)",
+      "grant_type=refresh_token",
+    ].joined(separator: "&")
+    request.httpBody = body.data(using: .utf8)
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+
+    guard let httpResponse = response as? HTTPURLResponse else {
+      throw ClientError.decodingFailed
+    }
+
+    guard httpResponse.statusCode == 200 else {
+      NSLog("[GeminiUsage] Token refresh failed with status \(httpResponse.statusCode)")
+      throw ClientError.requestFailed(httpResponse.statusCode)
+    }
+
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let newAccessToken = json["access_token"] as? String
+    else {
+      throw ClientError.decodingFailed
+    }
+
+    // Update local credentials file
+    try updateStoredCredentials(json)
+
+    NSLog("[GeminiUsage] Token refreshed successfully")
+
+    // Construct new Token object
+    let expiresIn = json["expires_in"] as? TimeInterval ?? 3600
+    let newExpiresAt = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000  // Convert to milliseconds
+
+    return CredentialEnvelope.Token(
+      accessToken: newAccessToken,
+      refreshToken: refreshToken,  // refresh_token stays the same
+      expiresAt: newExpiresAt,
+      tokenType: json["token_type"] as? String
+    )
+  }
+
+
+  private func updateStoredCredentials(_ refreshResponse: [String: Any]) throws {
+    let credsPaths = [
+      "~/.gemini/mcp-oauth-tokens-v2.json",
+      "~/.gemini/mcp-oauth-tokens.json",
+      "~/.gemini/oauth_creds.json",
+    ]
+
+    for path in credsPaths {
+      let expandedPath = (path as NSString).expandingTildeInPath
+      let credsURL = URL(fileURLWithPath: expandedPath)
+
+      guard FileManager.default.fileExists(atPath: expandedPath),
+        let existingData = try? Data(contentsOf: credsURL),
+        var json = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any]
+      else {
+        continue
+      }
+
+      // Update access_token and expiry time
+      if let newAccessToken = refreshResponse["access_token"] as? String {
+        json["access_token"] = newAccessToken
+
+        if let expiresIn = refreshResponse["expires_in"] as? TimeInterval {
+          let newExpiresAt = Date().timeIntervalSince1970 * 1000 + expiresIn * 1000
+          // Update both field names for compatibility
+          json["expiresAt"] = newExpiresAt
+          json["expiry_date"] = newExpiresAt
+        }
+
+        // Also update id_token if present in response
+        if let idToken = refreshResponse["id_token"] {
+          json["id_token"] = idToken
+        }
+
+        // Write back to file
+        let updatedData = try JSONSerialization.data(withJSONObject: json, options: .prettyPrinted)
+        try updatedData.write(to: credsURL, options: .atomic)
+        NSLog("[GeminiUsage] Updated credentials file: \(path)")
+        return
+      }
+    }
+
+    NSLog("[GeminiUsage] Warning: Could not update any credentials file")
+  }
+
+  // MARK: - OAuth Credentials Extraction
+
+  /// Extract OAuth credentials from installed Gemini CLI
+  /// Follows CodexBar's approach: find gemini binary, resolve symlinks, locate oauth2.js
+  private func extractOAuthCredentials() -> OAuthClientCredentials? {
+    let fm = FileManager.default
+
+    // Step 1: Find gemini binary using CodMate's CLIEnvironment
+    let path = CLIEnvironment.resolvedPATHForCLI()
+    guard let geminiPath = CLIEnvironment.resolveExecutablePath("gemini", path: path) else {
+      NSLog("[GeminiUsage] Could not find gemini binary in PATH")
+      return nil
+    }
+
+    // Step 2: Resolve symlinks to find actual installation directory
+    var realPath = geminiPath
+    if let resolved = try? fm.destinationOfSymbolicLink(atPath: geminiPath) {
+      if resolved.hasPrefix("/") {
+        realPath = resolved
+      } else {
+        realPath = (geminiPath as NSString).deletingLastPathComponent + "/" + resolved
+      }
+    }
+
+    // Step 3: Navigate to gemini-cli package root
+    // realPath might be: /opt/homebrew/lib/node_modules/@google/gemini-cli/dist/index.js
+    // We need to get to: /opt/homebrew/lib/node_modules/@google/gemini-cli
+    var baseDir = realPath
+
+    // If realPath ends with .js, go up to package root (remove /dist/index.js or similar)
+    if realPath.hasSuffix(".js") {
+      // Remove filename
+      baseDir = (realPath as NSString).deletingLastPathComponent
+      // If we're in dist/, go up one more level to package root
+      if baseDir.hasSuffix("/dist") {
+        baseDir = (baseDir as NSString).deletingLastPathComponent
+      }
+    } else {
+      // realPath is the binary, navigate from bin to package root
+      let binDir = (realPath as NSString).deletingLastPathComponent
+      baseDir = (binDir as NSString).deletingLastPathComponent
+    }
+
+    let oauthFile = "dist/src/code_assist/oauth2.js"
+    let possiblePaths = [
+      // Direct path from package root (most common for Homebrew)
+      "\(baseDir)/node_modules/@google/gemini-cli-core/\(oauthFile)",
+
+      // Alternative nested structures
+      "\(baseDir)/libexec/lib/node_modules/@google/gemini-cli-core/\(oauthFile)",
+      "\(baseDir)/lib/node_modules/@google/gemini-cli-core/\(oauthFile)",
+
+      // Bun/npm sibling structure
+      "\(baseDir)/../gemini-cli-core/\(oauthFile)",
+    ]
+
+    for path in possiblePaths {
+      if let content = try? String(contentsOfFile: path, encoding: .utf8) {
+        NSLog("[GeminiUsage] Found oauth2.js at: \(path)")
+        if let creds = parseOAuthCredentials(from: content) {
+          NSLog("[GeminiUsage] Successfully extracted OAuth credentials from Gemini CLI")
+          return creds
+        }
+      }
+    }
+
+    NSLog("[GeminiUsage] Could not find oauth2.js in any expected location")
+    return nil
+  }
+
+  /// Parse OAuth credentials from oauth2.js content
+  /// Matches pattern: const OAUTH_CLIENT_ID = '...';
+  private func parseOAuthCredentials(from content: String) -> OAuthClientCredentials? {
+    // Match: const OAUTH_CLIENT_ID = '...';
+    let clientIdPattern = #"OAUTH_CLIENT_ID\s*=\s*['"]([\w\-\.]+)['"]"#
+    let secretPattern = #"OAUTH_CLIENT_SECRET\s*=\s*['"]([\w\-]+)['"]"#
+
+    guard let clientIdRegex = try? NSRegularExpression(pattern: clientIdPattern),
+          let secretRegex = try? NSRegularExpression(pattern: secretPattern)
+    else {
+      return nil
+    }
+
+    let range = NSRange(content.startIndex..., in: content)
+
+    guard let clientIdMatch = clientIdRegex.firstMatch(in: content, range: range),
+          let clientIdRange = Range(clientIdMatch.range(at: 1), in: content),
+          let secretMatch = secretRegex.firstMatch(in: content, range: range),
+          let secretRange = Range(secretMatch.range(at: 1), in: content)
+    else {
+      return nil
+    }
+
+    let clientId = String(content[clientIdRange])
+    let clientSecret = String(content[secretRange])
+
+    return OAuthClientCredentials(clientId: clientId, clientSecret: clientSecret)
+  }
+
+  // MARK: - Plan Detection
+
+  /// Detect plan from Google Drive storage quota (most reliable method).
+  /// 2 TB = AI Pro, 30 TB = AI Ultra
+  private func detectPlanFromStorage(token: String) async -> String? {
+    let endpoint = "https://www.googleapis.com/drive/v3/about?fields=storageQuota"
+    guard let url = URL(string: endpoint) else { return nil }
+
+    var request = URLRequest(url: url)
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.timeoutInterval = 15
+
+    guard let (data, response) = try? await URLSession.shared.data(for: request),
+          let httpResponse = response as? HTTPURLResponse,
+          httpResponse.statusCode == 200
+    else {
+      return nil
+    }
+
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let storageQuota = json["storageQuota"] as? [String: Any],
+          let limitStr = storageQuota["limit"] as? String,
+          let limit = Int64(limitStr)
+    else {
+      return nil
+    }
+
+    // Storage limits for plan detection
+    let storageLimit2TB: Int64 = 2_199_023_255_552
+    let storageLimit30TB: Int64 = 32_985_348_833_280
+
+    // Detect plan based on storage limit
+    if limit >= storageLimit30TB {
+      return "AI Ultra"
+    } else if limit >= storageLimit2TB {
+      return "AI Pro"
+    }
+
+    return nil
+  }
+
+  /// Detect plan tier based on model access. Users with Pro models have AI Pro or higher.
+  private func detectPlanFromModels(_ buckets: [GeminiUsageStatus.Bucket]) -> String? {
+    // If user has access to any "pro" models, they're on a paid tier (AI Pro, AI Ultra, etc.)
+    let hasProModels = buckets.contains { bucket in
+      bucket.modelId?.lowercased().contains("pro") == true
+    }
+    return hasProModels ? "AI Pro" : nil
   }
 }
