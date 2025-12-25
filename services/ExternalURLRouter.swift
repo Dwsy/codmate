@@ -68,6 +68,7 @@ enum ExternalURLRouter {
 private enum NotificationSource: String {
     case claude
     case codex
+    case gemini
 }
 
 private struct NotificationDescriptor {
@@ -87,6 +88,8 @@ private struct NotificationDescriptor {
             return makeClaudeDescriptor(eventName: eventName, providedTitle: providedTitle, providedBody: providedBody, providedThreadId: providedThreadId)
         case .codex:
             return makeCodexDescriptor(eventName: eventName, providedTitle: providedTitle, providedBody: providedBody, providedThreadId: providedThreadId)
+        case .gemini:
+            return makeGeminiDescriptor(eventName: eventName, providedTitle: providedTitle, providedBody: providedBody, providedThreadId: providedThreadId)
         }
     }
 
@@ -111,6 +114,20 @@ private struct NotificationDescriptor {
         providedThreadId: String?
     ) -> NotificationDescriptor? {
         guard let event = CodexEvent(rawValue: eventName) else { return nil }
+        let defaults = event.defaults
+        let title = providedTitle?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? defaults.title
+        let body = providedBody?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? defaults.body
+        let thread = providedThreadId?.nonEmpty ?? defaults.threadId
+        return NotificationDescriptor(title: title, body: body, threadId: thread)
+    }
+
+    private static func makeGeminiDescriptor(
+        eventName: String,
+        providedTitle: String?,
+        providedBody: String?,
+        providedThreadId: String?
+    ) -> NotificationDescriptor? {
+        guard let event = GeminiEvent(rawValue: eventName) else { return nil }
         let defaults = event.defaults
         let title = providedTitle?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? defaults.title
         let body = providedBody?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? defaults.body
@@ -145,6 +162,20 @@ private struct NotificationDescriptor {
                 return ("Codex", "Codex turn complete.", "codex-thread")
             case .test:
                 return ("CodMate", "Codex notifications self-test", "codex-test")
+            }
+        }
+    }
+
+    private enum GeminiEvent: String {
+        case permission
+        case test
+
+        var defaults: (title: String, body: String, threadId: String) {
+            switch self {
+            case .permission:
+                return ("Gemini", "Gemini requires approval. Return to the Gemini window to respond.", "gemini-permission")
+            case .test:
+                return ("CodMate", "Gemini notifications self-test", "gemini-test")
             }
         }
     }

@@ -15,6 +15,7 @@ struct GeminiSettingsView: View {
             Tab("General", systemImage: "gearshape") { generalTab }
             Tab("Runtime", systemImage: "gauge") { runtimeTab }
             Tab("Model", systemImage: "cpu") { modelTab }
+            Tab("Notifications", systemImage: "bell") { notificationsTab }
             Tab("Raw Config", systemImage: "doc.text") { rawTab }
           }
         } else {
@@ -25,6 +26,8 @@ struct GeminiSettingsView: View {
               .tabItem { Label("Runtime", systemImage: "gauge") }
             modelTab
               .tabItem { Label("Model", systemImage: "cpu") }
+            notificationsTab
+              .tabItem { Label("Notifications", systemImage: "bell") }
             rawTab
               .tabItem { Label("Raw Config", systemImage: "doc.text") }
           }
@@ -219,6 +222,42 @@ struct GeminiSettingsView: View {
               .foregroundStyle(.red)
               .frame(maxWidth: .infinity, alignment: .trailing)
           }
+        }
+      }
+    }
+  }
+
+  private var notificationsTab: some View {
+    SettingsTabContent {
+      Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+        GridRow {
+          settingLabel(
+            title: "System Notifications",
+            details: "Forward Gemini permission prompts to macOS via codmate://notify."
+          )
+          Toggle("", isOn: $vm.notificationsEnabled)
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .onChange(of: vm.notificationsEnabled) { _ in vm.scheduleApplyNotificationSettingsDebounced() }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        dividerRow
+        GridRow {
+          settingLabel(title: "Self-test", details: "Send a sample event through the notify bridge.")
+          HStack(spacing: 8) {
+            if vm.notificationBridgeHealthy {
+              Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+            } else {
+              Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            }
+            Button("Run Self-test") { Task { await vm.runNotificationSelfTest() } }
+              .controlSize(.small)
+            if let result = vm.notificationSelfTestResult {
+              Text(result).font(.caption).foregroundStyle(.secondary)
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .trailing)
         }
       }
     }

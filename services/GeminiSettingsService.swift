@@ -24,7 +24,22 @@ actor GeminiSettingsService {
     var skipNextSpeakerCheck: Bool?
   }
 
+  struct NotificationHooksStatus: Sendable {
+    var hookInstalled: Bool
+    var hooksEnabled: Bool
+  }
+
   private typealias JSONObject = [String: Any]
+  private let codMateHookURLPrefix = "codmate://notify?source=gemini&event="
+
+  private enum HookEvent: String {
+    case permission
+  }
+
+  private struct HookPayload {
+    var title: String
+    var body: String
+  }
 
   private let paths: Paths
   private let fm: FileManager
@@ -75,6 +90,34 @@ actor GeminiSettingsService {
 
   func setOptionalString(_ value: String?, at path: [String]) throws {
     try setValue(value, at: path)
+  }
+
+  // MARK: - Notification hooks
+
+  func codMateNotificationHooksStatus() -> NotificationHooksStatus {
+    let object = loadJSONObject()
+    let hooksEnabled = boolValue(in: object, path: ["tools", "enableHooks"]) ?? false
+    guard let hooks = object["hooks"] as? JSONObject else {
+      return NotificationHooksStatus(hookInstalled: false, hooksEnabled: hooksEnabled)
+    }
+    let installed = containsCodMateHook(in: hooks)
+    return NotificationHooksStatus(hookInstalled: installed, hooksEnabled: hooksEnabled)
+  }
+
+  func setCodMateNotificationHooks(enabled: Bool) throws {
+    var object = loadJSONObject()
+    var hooks = object["hooks"] as? JSONObject ?? [:]
+    hooks = updateNotificationHooksContainer(hooks, enabled: enabled)
+    if hooks.isEmpty {
+      object.removeValue(forKey: "hooks")
+    } else {
+      object["hooks"] = hooks
+    }
+    if enabled {
+      update(&object, path: ["tools", "enableMessageBusIntegration"], value: true)
+      update(&object, path: ["tools", "enableHooks"], value: true)
+    }
+    try writeJSONObject(object)
   }
 
   // MARK: - MCP Servers
@@ -206,6 +249,74 @@ actor GeminiSettingsService {
     if let number = value(in: object, path: path) as? NSNumber { return number.doubleValue }
     if let str = value(in: object, path: path) as? String { return Double(str) }
     return nil
+  }
+
+  private func containsCodMateHook(in hooks: JSONObject) -> Bool {
+    guard let entries = hooks["Notification"] as? [JSONObject] else { return false }
+    let marker = "\(codMateHookURLPrefix)\(HookEvent.permission.rawValue)"
+    for entry in entries {
+      guard let nested = entry["hooks"] as? [JSONObject] else { continue }
+      if nested.contains(where: { ($0["command"] as? String)?.contains(marker) == true }) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private func updateNotificationHooksContainer(_ hooks: JSONObject, enabled: Bool) -> JSONObject {
+    var container = hooks
+    var entries = (container["Notification"] as? [JSONObject]) ?? []
+    let marker = "\(codMateHookURLPrefix)\(HookEvent.permission.rawValue)"
+    entries.removeAll { entry in
+      guard let nested = entry["hooks"] as? [JSONObject] else { return false }
+      return nested.contains { ($0["command"] as? String)?.contains(marker) == true }
+    }
+    if enabled, let urlString = hookURL(for: .permission) {
+      let command = "/usr/bin/open -j \"\(urlString)\""
+      entries.append([
+        "matcher": "*",
+        "hooks": [[
+          "name": "codmate-notify",
+          "type": "command",
+          "command": command
+        ]]
+      ])
+    }
+    if entries.isEmpty {
+      container.removeValue(forKey: "Notification")
+    } else {
+      container["Notification"] = entries
+    }
+    return container
+  }
+
+  private func hookURL(for event: HookEvent) -> String? {
+    let payload = hookPayload(for: event)
+    var comps = URLComponents()
+    comps.scheme = "codmate"
+    comps.host = "notify"
+    var query: [URLQueryItem] = [
+      URLQueryItem(name: "source", value: "gemini"),
+      URLQueryItem(name: "event", value: event.rawValue)
+    ]
+    if let titleData = payload.title.data(using: .utf8) {
+      query.append(URLQueryItem(name: "title64", value: titleData.base64EncodedString()))
+    }
+    if let bodyData = payload.body.data(using: .utf8) {
+      query.append(URLQueryItem(name: "body64", value: bodyData.base64EncodedString()))
+    }
+    comps.queryItems = query
+    return comps.url?.absoluteString
+  }
+
+  private func hookPayload(for event: HookEvent) -> HookPayload {
+    switch event {
+    case .permission:
+      return HookPayload(
+        title: "Gemini CLI",
+        body: "Gemini requires approval. Return to the Gemini window to respond."
+      )
+    }
   }
 
   private func stripComments(from text: String) -> String {

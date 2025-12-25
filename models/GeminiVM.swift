@@ -23,6 +23,10 @@ final class GeminiVM: ObservableObject {
   @Published var compressionThreshold: Double = 0.5
   @Published var skipNextSpeakerCheck = true
 
+  @Published var notificationsEnabled = false
+  @Published var notificationBridgeHealthy = false
+  @Published var notificationSelfTestResult: String? = nil
+
   @Published var rawSettingsText: String = ""
   @Published var lastError: String?
   @Published private(set) var hasLoadedInitialState = false
@@ -38,10 +42,12 @@ final class GeminiVM: ObservableObject {
   }
 
   private let service = GeminiSettingsService()
+  private var notificationDebounceTask: Task<Void, Never>? = nil
 
   func loadIfNeeded() async {
     if hasLoadedInitialState { return }
     await refreshSettings()
+    await loadNotificationSettings()
     await reloadRawSettings()
     hasLoadedInitialState = true
   }
@@ -115,6 +121,70 @@ final class GeminiVM: ObservableObject {
   func applySkipNextSpeakerChange() {
     guard hasLoadedInitialState else { return }
     persist { [self] in try await self.service.setBool(self.skipNextSpeakerCheck, at: ["model", "skipNextSpeakerCheck"]) }
+  }
+
+  func loadNotificationSettings() async {
+    let status = await service.codMateNotificationHooksStatus()
+    await MainActor.run {
+      self.notificationsEnabled = status.hookInstalled
+      self.notificationBridgeHealthy = status.hookInstalled && status.hooksEnabled
+      if !self.notificationBridgeHealthy {
+        self.notificationSelfTestResult = nil
+      }
+    }
+  }
+
+  private func applyNotificationSettings() async {
+    if SecurityScopedBookmarks.shared.isSandboxed {
+      let home = SessionPreferencesStore.getRealUserHomeURL()
+      _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(
+        directory: home.appendingPathComponent(".gemini", isDirectory: true),
+        purpose: .generalAccess,
+        message: "Authorize ~/.gemini to update Gemini notifications"
+      )
+    }
+    do {
+      try await service.setCodMateNotificationHooks(enabled: notificationsEnabled)
+      await loadNotificationSettings()
+    } catch {
+      await MainActor.run { self.lastError = "Failed to update Gemini notifications" }
+    }
+  }
+
+  func runNotificationSelfTest() async {
+    notificationSelfTestResult = nil
+    var comps = URLComponents()
+    comps.scheme = "codmate"
+    comps.host = "notify"
+    let title = "CodMate"
+    let body = "Gemini notifications self-test"
+    var items = [
+      URLQueryItem(name: "source", value: "gemini"),
+      URLQueryItem(name: "event", value: "test")
+    ]
+    if let titleData = title.data(using: .utf8) {
+      items.append(URLQueryItem(name: "title64", value: titleData.base64EncodedString()))
+    }
+    if let bodyData = body.data(using: .utf8) {
+      items.append(URLQueryItem(name: "body64", value: bodyData.base64EncodedString()))
+    }
+    comps.queryItems = items
+    guard let url = comps.url else {
+      notificationSelfTestResult = "Invalid test URL"
+      return
+    }
+    let success = NSWorkspace.shared.open(url)
+    notificationSelfTestResult = success ? "Sent (check Notification Center)" : "Failed to open codmate:// URL"
+  }
+
+  func scheduleApplyNotificationSettingsDebounced(delayMs: UInt64 = 250) {
+    notificationDebounceTask?.cancel()
+    notificationDebounceTask = Task { [weak self] in
+      guard let self else { return }
+      do { try await Task.sleep(nanoseconds: delayMs * 1_000_000) } catch { return }
+      if Task.isCancelled { return }
+      await self.applyNotificationSettings()
+    }
   }
 
   private func persist(_ work: @escaping () async throws -> Void) {
