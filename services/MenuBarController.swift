@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import SwiftUI
 
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
@@ -24,6 +25,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   private var refreshTask: Task<Void, Never>?
   private var actionHandlers: [() -> Void] = []
   private var preferencesCancellable: AnyCancellable?
+  private var usageCancellable: AnyCancellable?
+  private var isShowingDynamicIcon = false
 
   private let relativeFormatter: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
@@ -54,6 +57,14 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     preferencesCancellable = preferences.$systemMenuVisibility.sink { [weak self] visibility in
       self?.applySystemMenuVisibility(visibility)
     }
+    
+    usageCancellable?.cancel()
+    usageCancellable = viewModel.$usageSnapshots
+      .receive(on: RunLoop.main)
+      .sink { [weak self] snapshots in
+        self?.updateStatusItemIcon(with: snapshots)
+      }
+
     applySystemMenuVisibility(preferences.systemMenuVisibility)
     refreshMenuData()
   }
@@ -72,19 +83,101 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   private func ensureStatusItem() {
     guard statusItem == nil else { return }
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    if let button = item.button {
-      if let image = NSImage(
-        systemSymbolName: "fossil.shell.fill", accessibilityDescription: "CodMate")
-      {
-        image.isTemplate = true
-        // Apply horizontal flip to make the shell spiral clockwise
-        let flipped = horizontallyFlippedImage(image)
-        button.image = flipped ?? image
-        button.imagePosition = .imageOnly
-      }
-    }
+    item.button?.imagePosition = .imageOnly
     item.menu = statusMenu
     statusItem = item
+    
+    // Initial icon update
+    if let snapshots = viewModel?.usageSnapshots {
+        updateStatusItemIcon(with: snapshots)
+    } else {
+        // Fallback to static icon if no snapshots yet
+        applyStaticIcon(to: item.button)
+    }
+  }
+
+  private func applyStaticIcon(to button: NSStatusBarButton?) {
+    guard let button else { return }
+    if let image = NSImage(
+      systemSymbolName: "fossil.shell.fill", accessibilityDescription: "CodMate")
+    {
+      image.isTemplate = true
+      let flipped = horizontallyFlippedImage(image)
+      button.image = flipped ?? image
+    }
+  }
+
+  private func updateStatusItemIcon(with snapshots: [UsageProviderKind: UsageProviderSnapshot]) {
+    guard let button = statusItem?.button else { return }
+    
+    // Check if we have any valid usage data to show
+    let hasData = snapshots.values.contains { $0.availability == .ready || $0.origin == .thirdParty }
+    
+    guard hasData else {
+        // If no data, keep or revert to static icon
+        if isShowingDynamicIcon || button.image == nil {
+            applyStaticIcon(to: button)
+            isShowingDynamicIcon = false
+        }
+        return
+    }
+
+    let referenceDate = Date()
+    // Use white color for menu bar icon (monochrome style)
+    let outerState = ringState(for: .gemini, relativeTo: referenceDate, snapshots: snapshots, colorOverride: .white)
+    let middleState = ringState(for: .claude, relativeTo: referenceDate, snapshots: snapshots, colorOverride: .white)
+    let innerState = ringState(for: .codex, relativeTo: referenceDate, snapshots: snapshots, colorOverride: .white)
+
+    let view = TripleUsageDonutView(
+      outerState: outerState,
+      middleState: middleState,
+      innerState: innerState,
+      trackColor: .white
+    )
+    .scaleEffect(0.7)
+    
+    let renderer = ImageRenderer(content: view)
+    renderer.scale = NSScreen.main?.backingScaleFactor ?? 2.0
+    
+    if let nsImage = renderer.nsImage {
+        nsImage.isTemplate = false // Use true colors (white)
+        button.image = nsImage
+        isShowingDynamicIcon = true
+    }
+  }
+
+  private func ringState(
+    for provider: UsageProviderKind, 
+    relativeTo date: Date, 
+    snapshots: [UsageProviderKind: UsageProviderSnapshot],
+    colorOverride: Color? = nil
+  ) -> UsageRingState {
+    let color = colorOverride ?? providerColor(provider)
+    guard let snapshot = snapshots[provider] else {
+      return UsageRingState(progress: nil, color: color, disabled: false)
+    }
+    if snapshot.origin == .thirdParty {
+      return UsageRingState(progress: nil, color: color, disabled: true)
+    }
+    guard snapshot.availability == .ready else {
+      return UsageRingState(progress: nil, color: color, disabled: false)
+    }
+    return UsageRingState(
+      progress: snapshot.urgentMetric(relativeTo: date)?.progress,
+      color: color,
+      disabled: false
+    )
+  }
+
+  private func providerColor(_ provider: UsageProviderKind) -> Color {
+    switch provider {
+    case .codex:
+      return Color.accentColor
+    case .claude:
+      return Color(nsColor: .systemPurple)
+    case .gemini:
+      return Color(nsColor: .systemTeal)
+    }
   }
 
   private func horizontallyFlippedImage(_ image: NSImage) -> NSImage? {
@@ -170,9 +263,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     // 1) Usage
     for provider in usageOrder() {
-      let item = NSMenuItem(title: usageTitle(for: provider), action: nil, keyEquivalent: "")
-      item.image = providerImage(for: provider)
-      item.submenu = buildUsageProviderMenu(provider)
+      let item = makeUsageMenuItem(for: provider)
       statusMenu.addItem(item)
     }
 
@@ -186,10 +277,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       statusMenu.addItem(item)
     } else {
       for entry in recentProjects {
-        let title = "\(entry.project.name) \(relativeDateString(entry.lastActive))"
-        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        applySystemImage(item, name: "square.grid.2x2")
-        item.submenu = buildProjectMenu(entry)
+        let item = makeProjectMenuItem(entry)
         statusMenu.addItem(item)
       }
     }
@@ -246,6 +334,157 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     statusMenu.addItem(quitItem)
   }
 
+  // MARK: - Menu Item Styling Helpers
+
+  private func makeAlignedMenuTitle(left: String, right: String) -> NSAttributedString {
+    let paragraph = NSMutableParagraphStyle()
+    // Tab stop at 252pt to align right-side text (timestamp/status) to the menu edge.
+    // Shared by Projects, Providers, and Usage to ensure vertical alignment consistency.
+    let tab = NSTextTab(textAlignment: .right, location: 252, options: [:])
+    paragraph.tabStops = [tab]
+    paragraph.alignment = .left
+
+    let fullString = "\(left)\t\(right)"
+    let attr = NSMutableAttributedString(string: fullString)
+    let fullRange = NSRange(location: 0, length: attr.length)
+
+    // Use system default menu font for the entire string to ensure perfect baseline alignment.
+    // Mixing font sizes (e.g. 13pt and 12pt) causes visual jumping and non-native look on macOS 15.
+    let defaultMenuFont = NSFont.menuFont(ofSize: 0)
+    attr.addAttribute(.paragraphStyle, value: paragraph, range: fullRange)
+    attr.addAttribute(.font, value: defaultMenuFont, range: fullRange)
+    attr.addAttribute(.foregroundColor, value: NSColor.labelColor, range: fullRange)
+
+    // Style right-side text (secondary color only, same font size)
+    let rightLoc = (left as NSString).length + 1
+    if rightLoc < attr.length {
+      let rightRange = NSRange(location: rightLoc, length: (right as NSString).length)
+      if NSMaxRange(rightRange) <= attr.length {
+        attr.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: rightRange)
+      }
+    }
+    
+    return attr
+  }
+
+  private func makeProjectMenuItem(_ entry: RecentProjectEntry) -> NSMenuItem {
+    let name = entry.project.name
+    let time = relativeDateString(entry.lastActive)
+
+    let item = NSMenuItem(title: "\(name)  \(time)", action: nil, keyEquivalent: "")
+    item.attributedTitle = makeAlignedMenuTitle(left: name, right: time)
+
+    applySystemImage(item, name: "square.grid.2x2")
+    item.submenu = buildProjectMenu(entry)
+
+    return item
+  }
+
+  private func makeSessionMenuItem(_ session: SessionSummary) -> NSMenuItem {
+    let name = session.effectiveTitle
+    let time = relativeDateString(anchorDate(for: session))
+
+    let item = actionItem(title: "\(name)  \(time)", action: #selector(handleResumeSession(_:)))
+    item.representedObject = session.id
+    item.image = providerImage(for: providerKind(for: session))
+    item.attributedTitle = makeAlignedMenuTitle(left: name, right: time)
+
+    return item
+  }
+
+  private func providerMenuItem(for provider: UsageProviderKind) -> NSMenuItem {
+    let baseTitle = "\(provider.displayName) Provider"
+    let item = NSMenuItem(title: baseTitle, action: nil, keyEquivalent: "")
+    item.image = providerImage(for: provider)
+
+    if provider == .gemini {
+      item.isEnabled = false
+      return item
+    }
+
+    if let rightLabel = activeProviderLabel(for: provider) {
+      item.attributedTitle = makeAlignedMenuTitle(left: baseTitle, right: rightLabel)
+    }
+
+    item.submenu = buildProviderMenu(for: provider)
+    return item
+  }
+
+  // MARK: - Usage Helpers
+
+  private func usageOrder() -> [UsageProviderKind] {
+    [.codex, .claude, .gemini]
+  }
+
+  private func makeUsageMenuItem(for provider: UsageProviderKind) -> NSMenuItem {
+    guard let viewModel, let snapshot = viewModel.usageSnapshots[provider] else {
+      let item = NSMenuItem(title: provider.displayName, action: nil, keyEquivalent: "")
+      item.image = providerImage(for: provider)
+      item.submenu = buildUsageProviderMenu(provider)
+      return item
+    }
+
+    if snapshot.origin == .thirdParty {
+      let item = NSMenuItem(title: "\(provider.displayName) Custom provider", action: nil, keyEquivalent: "")
+      item.image = providerImage(for: provider)
+      item.submenu = buildUsageProviderMenu(provider)
+      return item
+    }
+
+    let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    item.image = providerImage(for: provider)
+    item.submenu = buildUsageProviderMenu(provider)
+
+    switch snapshot.availability {
+    case .ready:
+      let urgent = snapshot.urgentMetric()
+      let percent = urgent?.percentText ?? "-"
+      let name = "\(provider.displayName) (\(percent))"
+      var reset = resetSummaryText(for: urgent)
+      // Capitalize first letter for better presentation
+      if !reset.isEmpty, reset.first?.isLowercase == true {
+        reset = reset.prefix(1).uppercased() + reset.dropFirst()
+      }
+      
+      // Always use aligned title to keep the provider name in the same vertical column.
+      // Use a space if reset is empty to ensure the tab stop is applied.
+      item.attributedTitle = makeAlignedMenuTitle(left: name, right: reset.isEmpty ? " " : reset)
+      
+    case .empty:
+      item.title = "\(provider.displayName) Not available"
+    case .comingSoon:
+      item.title = provider.displayName
+    }
+
+    return item
+  }
+
+  private func makeUsageMetricMenuItem(_ metric: UsageMetricSnapshot, referenceDate: Date, provider: UsageProviderKind) -> NSMenuItem {
+    let state = MetricDisplayState(
+      metric: metric, referenceDate: referenceDate, resetFormatter: usageResetFormatter)
+
+    var name = metric.label
+    if provider == .gemini && name.lowercased().hasPrefix("gemini-") {
+      name = String(name.dropFirst("gemini-".count))
+    }
+    if let percent = state.percentText, !percent.isEmpty {
+      name += " (\(percent))"
+    }
+
+    var time = state.resetText
+    if time.hasPrefix("Expires at ") {
+      time = String(time.dropFirst("Expires at ".count))
+    }
+
+    let item = disabledItem(title: "\(name)  \(time)")
+    if !time.isEmpty {
+      item.attributedTitle = makeAlignedMenuTitle(left: name, right: time)
+    }
+    return item
+  }
+
+  // MARK: - Submenu Builders
+
   private func buildUsageProviderMenu(_ provider: UsageProviderKind) -> NSMenu {
     let menu = NSMenu()
     guard let viewModel, let snapshot = viewModel.usageSnapshots[provider] else {
@@ -266,8 +505,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(disabledItem(title: "No usage metrics"))
       } else {
         for metric in metrics {
-          let line = usageMetricLine(metric, referenceDate: referenceDate)
-          menu.addItem(disabledItem(title: line))
+          let item = makeUsageMetricMenuItem(metric, referenceDate: referenceDate, provider: provider)
+          menu.addItem(item)
         }
       }
       menu.addItem(.separator())
@@ -309,10 +548,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     for session in history {
-      let title = "\(session.effectiveTitle) \(relativeDateString(anchorDate(for: session)))"
-      let item = actionItem(title: title, action: #selector(handleResumeSession(_:)))
-      item.representedObject = session.id
-      item.image = providerImage(for: providerKind(for: session))
+      let item = makeSessionMenuItem(session)
       menu.addItem(item)
     }
 
@@ -324,20 +560,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     return menu
-  }
-
-  private func providerMenuItem(for provider: UsageProviderKind) -> NSMenuItem {
-    let title = "\(provider.displayName) Provider"
-    let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-    item.image = providerImage(for: provider)
-
-    if provider == .gemini {
-      item.isEnabled = false
-      return item
-    }
-
-    item.submenu = buildProviderMenu(for: provider)
-    return item
   }
 
   private func buildProviderMenu(for provider: UsageProviderKind) -> NSMenu {
@@ -425,53 +647,35 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     return menu
   }
 
-  // MARK: - Usage Helpers
+  // MARK: - Helpers
 
-  private func usageOrder() -> [UsageProviderKind] {
-    [.codex, .claude, .gemini]
-  }
-
-  private func usageTitle(for provider: UsageProviderKind) -> String {
-    guard let viewModel, let snapshot = viewModel.usageSnapshots[provider] else {
-      return provider.displayName
-    }
-
-    if snapshot.origin == .thirdParty {
-      return "\(provider.displayName) Custom provider"
-    }
-
-    switch snapshot.availability {
-    case .ready:
-      let urgent = snapshot.urgentMetric()
-      let percent = urgent?.percentText ?? "-"
-      let reset = resetSummaryText(for: urgent)
-      if reset.isEmpty {
-        return "\(provider.displayName) (\(percent))"
+  private func activeProviderLabel(for provider: UsageProviderKind) -> String? {
+    let consumer: ProvidersRegistryService.Consumer? = {
+      switch provider {
+      case .codex: return .codex
+      case .claude: return .claudeCode
+      case .gemini: return nil
       }
-      return "\(provider.displayName) \(reset) (\(percent))"
-    case .empty:
-      return "\(provider.displayName) Not available"
-    case .comingSoon:
-      return provider.displayName
-    }
-  }
+    }()
+    guard let consumer else { return nil }
 
-  private func usageMetricLine(_ metric: UsageMetricSnapshot, referenceDate: Date) -> String {
-    let state = MetricDisplayState(
-      metric: metric, referenceDate: referenceDate, resetFormatter: usageResetFormatter)
-    var parts: [String] = [metric.label]
-    if let usage = state.usageText, !usage.isEmpty { parts.append(usage) }
-    if let percent = state.percentText, !percent.isEmpty { parts.append(percent) }
-    if !state.resetText.isEmpty { parts.append(state.resetText) }
-    return parts.joined(separator: " | ")
+    let activeId = cachedBindings.activeProvider?[consumer.rawValue]
+    if let activeId, !activeId.isEmpty {
+      if let p = cachedProviders.first(where: { $0.id == activeId }) {
+        return providerDisplayName(p)
+      }
+      return activeId
+    }
+    return "(Built-in)"
   }
 
   private func updatedLabel(_ snapshot: UsageProviderSnapshot, referenceDate: Date) -> String {
     if let updated = snapshot.updatedAt {
       let relative = relativeFormatter.localizedString(for: updated, relativeTo: referenceDate)
       return "Updated \(relative)"
+    } else {
+      return "Waiting for usage data"
     }
-    return "Waiting for usage data"
   }
 
   private func resetSummaryText(for metric: UsageMetricSnapshot?) -> String {

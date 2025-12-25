@@ -255,53 +255,6 @@ extension View {
   }
 }
 
-private struct UsageRingState {
-  var progress: Double?
-  var color: Color
-  var disabled: Bool
-}
-
-private struct TripleUsageDonutView: View {
-  var outerState: UsageRingState
-  var middleState: UsageRingState
-  var innerState: UsageRingState
-
-  var body: some View {
-    ZStack {
-      Circle()
-        .stroke(Color.secondary.opacity(0.25), lineWidth: 2)
-        .frame(width: 22, height: 22)
-      ring(for: outerState, lineWidth: 2, size: 22)
-
-      Circle()
-        .stroke(Color.secondary.opacity(0.22), lineWidth: 2)
-        .frame(width: 16, height: 16)
-      ring(for: middleState, lineWidth: 2, size: 16)
-
-      Circle()
-        .stroke(Color.secondary.opacity(0.2), lineWidth: 2)
-        .frame(width: 10, height: 10)
-      ring(for: innerState, lineWidth: 2, size: 10)
-    }
-  }
-
-  @ViewBuilder
-  private func ring(for state: UsageRingState, lineWidth: CGFloat, size: CGFloat) -> some View {
-    if state.disabled {
-      Circle()
-        .stroke(Color(nsColor: .quaternaryLabelColor), lineWidth: lineWidth)
-        .frame(width: size, height: size)
-    } else if let progress = state.progress {
-      Circle()
-        .trim(from: 0, to: CGFloat(max(0, min(progress, 1))))
-        .stroke(style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-        .foregroundStyle(state.color)
-        .rotationEffect(.degrees(-90))
-        .frame(width: size, height: size)
-    }
-  }
-}
-
 private struct UsageStatusPopover: View {
   var snapshots: [UsageProviderKind: UsageProviderSnapshot]
   @Binding var selectedProvider: UsageProviderKind
