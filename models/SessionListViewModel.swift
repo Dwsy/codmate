@@ -3368,6 +3368,32 @@ extension SessionListViewModel {
     return raw.prefix(1).uppercased() + raw.dropFirst()
   }
 
+  private static func claudePlanBadge(from rawPlanType: String?) -> String? {
+    guard let raw = rawPlanType?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
+    else {
+      return nil
+    }
+    let plan = raw.lowercased()
+    if plan.contains("free") || plan.contains("unknown") { return nil }
+    if plan.contains("max") { return "Max" }
+    if plan.contains("pro") { return "Pro" }
+    if plan.contains("team") { return "Team" }
+    if plan.contains("enterprise") { return "Ent" }
+    return raw.prefix(1).uppercased() + raw.dropFirst()
+  }
+
+  private static func geminiPlanBadge(from rawPlanType: String?) -> String? {
+    guard let raw = rawPlanType?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty
+    else {
+      return nil
+    }
+    let plan = raw.lowercased()
+    if plan.contains("free") || plan.contains("unknown") { return nil }
+    if plan.contains("ultra") { return "Ultra" }
+    if plan.contains("pro") { return "Pro" }
+    return raw.prefix(1).uppercased() + raw.dropFirst()
+  }
+
   nonisolated private static func fallbackTokenUsage(from sessions: [SessionSummary])
     -> TokenUsageSnapshot?
   {
@@ -3409,7 +3435,9 @@ extension SessionListViewModel {
         let status = try await client.fetchUsageStatus()
         guard !Task.isCancelled else { return }
         await MainActor.run {
-          self.setUsageSnapshot(.claude, status.asProviderSnapshot())
+          let badge = Self.claudePlanBadge(from: status.planType)
+          NSLog("[ClaudeUsage] planType=\(status.planType ?? "nil"), badge=\(badge ?? "nil")")
+          self.setUsageSnapshot(.claude, status.asProviderSnapshot(titleBadge: badge))
         }
       } catch {
         NSLog("[ClaudeUsage] API fetch failed: \(error)")
@@ -3454,7 +3482,8 @@ extension SessionListViewModel {
         let status = try await self.geminiUsageClient.fetchUsageStatus()
         guard !Task.isCancelled else { return }
         await MainActor.run {
-          self.setUsageSnapshot(.gemini, status.asProviderSnapshot())
+          let badge = Self.geminiPlanBadge(from: status.planType)
+          self.setUsageSnapshot(.gemini, status.asProviderSnapshot(titleBadge: badge))
         }
       } catch {
         NSLog("[GeminiUsage] API fetch failed: \(error)")
@@ -3649,6 +3678,7 @@ extension SessionListViewModel {
     if a.availability != b.availability { return false }
     if a.statusMessage != b.statusMessage { return false }
     if a.action != b.action { return false }
+    if a.titleBadge != b.titleBadge { return false }  // Compare titleBadge
     let au = a.updatedAt?.timeIntervalSinceReferenceDate
     let bu = b.updatedAt?.timeIntervalSinceReferenceDate
     if au != bu { return false }

@@ -12,8 +12,9 @@ struct GeminiUsageStatus: Equatable {
   let updatedAt: Date
   let projectId: String?
   let buckets: [Bucket]
+  let planType: String?  // Subscription type (AI Pro, AI Ultra, etc.)
 
-  func asProviderSnapshot() -> UsageProviderSnapshot {
+  func asProviderSnapshot(titleBadge: String? = nil) -> UsageProviderSnapshot {
     // Filter buckets to only show models that have been used (remainingFraction < 1.0)
     let usedBuckets = buckets.filter { bucket in
       guard let remaining = bucket.remainingFraction else { return false }
@@ -73,6 +74,7 @@ struct GeminiUsageStatus: Equatable {
     return UsageProviderSnapshot(
       provider: .gemini,
       title: UsageProviderKind.gemini.displayName,
+      titleBadge: titleBadge,
       availability: availability,
       metrics: metrics,
       updatedAt: updatedAt,
