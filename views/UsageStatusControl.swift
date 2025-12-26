@@ -179,17 +179,19 @@ struct UsageStatusControl: View {
   private func ringState(for provider: UsageProviderKind, relativeTo date: Date) -> UsageRingState {
     let color = providerColor(provider)
     guard let snapshot = snapshots[provider] else {
-      return UsageRingState(progress: nil, color: color, disabled: false)
+      return UsageRingState(progress: nil, baseColor: color, disabled: false)
     }
     if snapshot.origin == .thirdParty {
-      return UsageRingState(progress: nil, color: color, disabled: true)
+      return UsageRingState(progress: nil, baseColor: color, disabled: true)
     }
     guard snapshot.availability == .ready else {
-      return UsageRingState(progress: nil, color: color, disabled: false)
+      return UsageRingState(progress: nil, baseColor: color, disabled: false)
     }
+    let urgentMetric = snapshot.urgentMetric(relativeTo: date)
     return UsageRingState(
-      progress: snapshot.urgentMetric(relativeTo: date)?.progress,
-      color: color,
+      progress: urgentMetric?.progress,
+      baseColor: color,
+      healthState: urgentMetric?.healthState(relativeTo: date),
       disabled: false
     )
   }
@@ -400,7 +402,7 @@ private struct UsageSnapshotView: View {
       } else if snapshot.availability == .ready {
         ForEach(snapshot.metrics.filter { $0.kind != .snapshot && $0.kind != .context }) { metric in
           let state = MetricDisplayState(metric: metric, referenceDate: referenceDate)
-          UsageMetricRowView(metric: metric, state: state)
+          UsageMetricRowView(metric: metric, state: state, now: referenceDate)
         }
 
         HStack {
@@ -558,6 +560,7 @@ private struct MetricDisplayState {
 private struct UsageMetricRowView: View {
   var metric: UsageMetricSnapshot
   var state: MetricDisplayState
+  var now: Date = Date()
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
@@ -571,8 +574,11 @@ private struct UsageMetricRowView: View {
       }
 
       if let progress = state.progress {
-        UsageProgressBar(progress: progress)
-          .frame(height: 4)
+        UsageProgressBar(
+          progress: progress,
+          healthState: metric.healthState(relativeTo: now)
+        )
+        .frame(height: 4)
       }
 
       HStack {
@@ -590,6 +596,7 @@ private struct UsageMetricRowView: View {
 
 private struct UsageProgressBar: View {
   var progress: Double
+  var healthState: UsageMetricSnapshot.HealthState
 
   var body: some View {
     GeometryReader { geo in
@@ -599,14 +606,25 @@ private struct UsageProgressBar: View {
           .fill(Color.secondary.opacity(0.2))
         if clamped <= 0.002 {
           Circle()
-            .fill(Color.accentColor)
+            .fill(barColor)
             .frame(width: 6, height: 6)
         } else {
           Capsule(style: .continuous)
-            .fill(Color.accentColor)
+            .fill(barColor)
             .frame(width: max(6, geo.size.width * CGFloat(clamped)))
         }
       }
+    }
+  }
+
+  private var barColor: Color {
+    switch healthState {
+    case .healthy:
+      return .accentColor  // Blue - usage is slower than time
+    case .warning:
+      return .orange       // Orange - usage is faster than time
+    case .unknown:
+      return .accentColor  // Default blue
     }
   }
 }

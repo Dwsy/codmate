@@ -147,24 +147,26 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   }
 
   private func ringState(
-    for provider: UsageProviderKind, 
-    relativeTo date: Date, 
+    for provider: UsageProviderKind,
+    relativeTo date: Date,
     snapshots: [UsageProviderKind: UsageProviderSnapshot],
     colorOverride: Color? = nil
   ) -> UsageRingState {
     let color = colorOverride ?? providerColor(provider)
     guard let snapshot = snapshots[provider] else {
-      return UsageRingState(progress: nil, color: color, disabled: false)
+      return UsageRingState(progress: nil, baseColor: color, disabled: false)
     }
     if snapshot.origin == .thirdParty {
-      return UsageRingState(progress: nil, color: color, disabled: true)
+      return UsageRingState(progress: nil, baseColor: color, disabled: true)
     }
     guard snapshot.availability == .ready else {
-      return UsageRingState(progress: nil, color: color, disabled: false)
+      return UsageRingState(progress: nil, baseColor: color, disabled: false)
     }
+    let urgentMetric = snapshot.urgentMetric(relativeTo: date)
     return UsageRingState(
-      progress: snapshot.urgentMetric(relativeTo: date)?.progress,
-      color: color,
+      progress: urgentMetric?.progress,
+      baseColor: color,
+      healthState: urgentMetric?.healthState(relativeTo: date),
       disabled: false
     )
   }
@@ -337,33 +339,30 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   // MARK: - Menu Item Styling Helpers
 
   private func makeAlignedMenuTitle(left: String, right: String) -> NSAttributedString {
-    let paragraph = NSMutableParagraphStyle()
-    // Tab stop at 252pt to align right-side text (timestamp/status) to the menu edge.
-    // Shared by Projects, Providers, and Usage to ensure vertical alignment consistency.
-    let tab = NSTextTab(textAlignment: .right, location: 252, options: [:])
-    paragraph.tabStops = [tab]
-    paragraph.alignment = .left
+    // CRITICAL for macOS 15 modern UI:
+    // - Do NOT use custom tabStops
+    // - Do NOT use custom font sizes
+    // - Use ONLY system default menuFont(ofSize: 0) and color changes
+    // Any deviation triggers legacy menu rendering mode
 
-    let fullString = "\(left)\t\(right)"
+    let fullString = "\(left)  \(right)"  // Use spaces instead of tab for simpler layout
     let attr = NSMutableAttributedString(string: fullString)
     let fullRange = NSRange(location: 0, length: attr.length)
 
-    // Use system default menu font for the entire string to ensure perfect baseline alignment.
-    // Mixing font sizes (e.g. 13pt and 12pt) causes visual jumping and non-native look on macOS 15.
+    // Use system default menu font - the ONLY font we should use for menu items
     let defaultMenuFont = NSFont.menuFont(ofSize: 0)
-    attr.addAttribute(.paragraphStyle, value: paragraph, range: fullRange)
     attr.addAttribute(.font, value: defaultMenuFont, range: fullRange)
     attr.addAttribute(.foregroundColor, value: NSColor.labelColor, range: fullRange)
 
-    // Style right-side text (secondary color only, same font size)
-    let rightLoc = (left as NSString).length + 1
+    // Style right-side text (secondary color only - no font changes, no paragraph styles)
+    let rightLoc = (left as NSString).length + 2  // +2 for the two spaces
     if rightLoc < attr.length {
       let rightRange = NSRange(location: rightLoc, length: (right as NSString).length)
       if NSMaxRange(rightRange) <= attr.length {
         attr.addAttribute(.foregroundColor, value: NSColor.secondaryLabelColor, range: rightRange)
       }
     }
-    
+
     return attr
   }
 

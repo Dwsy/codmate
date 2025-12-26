@@ -2,13 +2,40 @@ import SwiftUI
 
 public struct UsageRingState {
   public var progress: Double?
-  public var color: Color
+  public var baseColor: Color
+  public var healthState: UsageMetricSnapshot.HealthState?
   public var disabled: Bool
 
-  public init(progress: Double? = nil, color: Color, disabled: Bool) {
+  public init(
+    progress: Double? = nil,
+    baseColor: Color,
+    healthState: UsageMetricSnapshot.HealthState? = nil,
+    disabled: Bool
+  ) {
     self.progress = progress
-    self.color = color
+    self.baseColor = baseColor
+    self.healthState = healthState
     self.disabled = disabled
+  }
+
+  public var effectiveColor: Color {
+    if disabled {
+      return Color(nsColor: .quaternaryLabelColor)
+    }
+
+    // Apply health state color if available
+    if let state = healthState {
+      switch state {
+      case .healthy:
+        return baseColor  // Use provider color
+      case .warning:
+        return .orange    // Warning color
+      case .unknown:
+        return baseColor  // Default to provider color
+      }
+    }
+
+    return baseColor
   }
 }
 
@@ -33,19 +60,19 @@ public struct TripleUsageDonutView: View {
   public var body: some View {
     ZStack {
       Circle()
-        .stroke(trackColor.opacity(0.25), lineWidth: 2)
+        .stroke(trackColor.opacity(0.25), lineWidth: 1.5)
         .frame(width: 22, height: 22)
-      ring(for: outerState, lineWidth: 2, size: 22)
+      ring(for: outerState, lineWidth: 1.5, size: 22)
 
       Circle()
-        .stroke(trackColor.opacity(0.22), lineWidth: 2)
+        .stroke(trackColor.opacity(0.22), lineWidth: 1.5)
         .frame(width: 16, height: 16)
-      ring(for: middleState, lineWidth: 2, size: 16)
+      ring(for: middleState, lineWidth: 1.5, size: 16)
 
       Circle()
-        .stroke(trackColor.opacity(0.2), lineWidth: 2)
+        .stroke(trackColor.opacity(0.2), lineWidth: 1.5)
         .frame(width: 10, height: 10)
-      ring(for: innerState, lineWidth: 2, size: 10)
+      ring(for: innerState, lineWidth: 1.5, size: 10)
     }
   }
 
@@ -59,7 +86,7 @@ public struct TripleUsageDonutView: View {
       Circle()
         .trim(from: 0, to: CGFloat(max(0, min(progress, 1))))
         .stroke(style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-        .foregroundStyle(state.color)
+        .foregroundStyle(state.effectiveColor)
         .rotationEffect(.degrees(-90))
         .frame(width: size, height: size)
     }

@@ -25,19 +25,63 @@ enum UsageProviderKind: String, CaseIterable, Identifiable {
 
 }
 
-struct UsageMetricSnapshot: Identifiable, Equatable {
-  enum Kind { case context, fiveHour, weekly, sessionExpiry, quota, snapshot }
+public struct UsageMetricSnapshot: Identifiable, Equatable {
+  public enum Kind { case context, fiveHour, weekly, sessionExpiry, quota, snapshot }
 
-  let id = UUID()
-  let kind: Kind
-  let label: String
-  let usageText: String?
-  let percentText: String?
-  let progress: Double?
-  let resetDate: Date?
-  let fallbackWindowMinutes: Int?
+  public enum HealthState {
+    case healthy   // Usage is slower than time progress (blue)
+    case warning   // Usage is faster than time progress (orange)
+    case unknown   // Cannot determine (no time cycle or insufficient data)
+  }
+
+  public let id = UUID()
+  public let kind: Kind
+  public let label: String
+  public let usageText: String?
+  public let percentText: String?
+  public let progress: Double?
+  public let resetDate: Date?
+  public let fallbackWindowMinutes: Int?
 
   fileprivate var priorityDate: Date? { resetDate }
+
+  /// Calculate health state by comparing usage progress vs time progress
+  public func healthState(relativeTo now: Date = Date()) -> HealthState {
+    // Only applicable to time-based metrics
+    guard kind == .fiveHour || kind == .weekly else {
+      return .unknown  // context, snapshot, etc. have no time cycle
+    }
+
+    // Need complete data to calculate
+    guard let remainingPercent = progress,
+          let resetDate = resetDate,
+          let windowMinutes = fallbackWindowMinutes,
+          resetDate > now else {
+      return .unknown
+    }
+
+    // Calculate total cycle duration in seconds
+    let totalDuration = Double(windowMinutes) * 60.0
+
+    // Infer cycle start time by subtracting total duration from reset time
+    let cycleStart = resetDate.addingTimeInterval(-totalDuration)
+
+    // Sanity check: cycle should have already started
+    guard cycleStart <= now else {
+      return .unknown  // Anomaly: cycle starts in the future
+    }
+
+    // Calculate time progress (how much of the cycle has elapsed)
+    let elapsed = now.timeIntervalSince(cycleStart)
+    let timeProgress = elapsed / totalDuration  // 0..1
+
+    // Calculate usage progress (how much quota has been consumed)
+    let usageProgress = 1.0 - remainingPercent  // 0..1
+
+    // Compare: if usage is slower than time → healthy
+    //          if usage is faster than time → warning
+    return usageProgress < timeProgress ? .healthy : .warning
+  }
 }
 
 enum UsageProviderOrigin: String, Equatable {
