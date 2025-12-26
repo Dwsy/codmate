@@ -101,7 +101,7 @@ struct CodMateApp: App {
     }
     .defaultSize(width: 1200, height: 780)
     .windowToolbarStyle(.unified)  // Prevent toolbar KVO issues with Window singleton
-    .handlesExternalEvents(matching: [])  // 防止 URL scheme 触发新窗口创建
+    .handlesExternalEvents(matching: [])  // Prevent URL scheme from triggering new window creation
     .commands { bodyCommands }
     #if os(macOS)
       Window("Settings", id: "settings") {
@@ -116,6 +116,7 @@ struct CodMateApp: App {
       .windowStyle(.titleBar)
       .windowToolbarStyle(.automatic)
       .windowResizability(.contentMinSize)
+      .handlesExternalEvents(matching: [])  // Prevent URL scheme from triggering new window creation
     #endif
   }
 

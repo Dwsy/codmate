@@ -1453,21 +1453,21 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     NSApp.activate(ignoringOtherApps: true)
     guard raiseWindows else { return }
 
-    // Try to find and activate visible windows first
-    let keyable = NSApp.windows.filter { $0.canBecomeKey }
-    if let front = keyable.first(where: { $0.isVisible }) {
-      front.makeKeyAndOrderFront(nil)
-      return
-    }
-
-    // Then try to find main window by identifier (should always exist since Window is singleton)
+    // Prioritize main window to ensure Dock clicks and menu actions show the main window
     let mainWindowId = NSUserInterfaceItemIdentifier("CodMateMainWindow")
     if let mainWindow = NSApp.windows.first(where: { $0.identifier == mainWindowId }) {
       mainWindow.makeKeyAndOrderFront(nil)
       return
     }
 
-    // Fallback: post notification to create/show window (e.g., first launch)
+    // Fallback: try to find and activate any other visible window
+    let keyable = NSApp.windows.filter { $0.canBecomeKey }
+    if let front = keyable.first(where: { $0.isVisible }) {
+      front.makeKeyAndOrderFront(nil)
+      return
+    }
+
+    // Last resort: post notification to create/show main window (e.g., first launch)
     NotificationCenter.default.post(name: .codMateOpenMainWindow, object: nil)
   }
 }
