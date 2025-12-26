@@ -35,7 +35,14 @@ import SwiftUI
             attachTerminalIfNeeded(in: nsView, coordinator: context.coordinator)
         }
 
-        private func applyTheme(_ v: LocalProcessTerminalView) {
+        static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+            if let key = coordinator.currentSessionKey {
+                TerminalSessionManager.shared.detachView(for: key)
+            }
+            TerminalSessionManager.shared.registerActiveView(nil, sessionKey: nil)
+        }
+
+        private func applyTheme(_ v: CodMateTerminalView) {
             // Transparent background for visual integration with surrounding surface.
             v.wantsLayer = true
             v.layer?.backgroundColor = NSColor.clear.cgColor
@@ -52,15 +59,14 @@ import SwiftUI
             }
         }
 
-        private func applyCursorStyle(_ v: LocalProcessTerminalView) {
+        private func applyCursorStyle(_ v: CodMateTerminalView) {
             v.getTerminal().setCursorStyle(cursorStyleOption.cursorStyleValue)
         }
 
         @MainActor
         final class Coordinator: NSObject {
-            weak var terminal: LocalProcessTerminalView?
-            private var relayoutWork: DispatchWorkItem?
-            private let debounceInterval: TimeInterval = 0.12
+            weak var terminalView: CodMateTerminalView?
+            var currentSessionKey: String?
             weak var container: NSView?
             var overlay: OverlayBar?
             private var lastOverlayPosition: Double?
@@ -71,8 +77,8 @@ import SwiftUI
             var inactiveCursorStyle: CursorStyle = .steadyBlock
             private var isActiveTerminal = false
 
-            func attach(to view: LocalProcessTerminalView) {
-                self.terminal = view
+            func attach(to view: CodMateTerminalView) {
+                terminalView = view
                 view.menu = makeMenu()
             }
 
@@ -92,14 +98,14 @@ import SwiftUI
             }
 
             @objc func copyAction(_ sender: Any?) {
-                guard let term = terminal else { return }
+                guard let term = terminalView else { return }
                 // Delegate copy to the view; our subclass sanitizes the pasteboard.
                 if NSApp.sendAction(#selector(NSText.copy(_:)), to: term, from: sender) { return }
                 NSSound.beep()
             }
 
             @objc func pasteAction(_ sender: Any?) {
-                guard let term = terminal else { return }
+                guard let term = terminalView else { return }
                 let pb = NSPasteboard.general
                 if let s = pb.string(forType: .string), !s.isEmpty {
                     term.send(txt: s)
@@ -107,23 +113,17 @@ import SwiftUI
             }
 
             @objc func selectAllAction(_ sender: Any?) {
-                guard let term = terminal else { return }
+                guard let term = terminalView else { return }
                 _ = NSApp.sendAction(#selector(NSText.selectAll(_:)), to: term, from: sender)
             }
-            // Debounced relayout to stabilize grid/scroll after reattachment or theme/font changes
-            func scheduleRelayout(_ view: LocalProcessTerminalView) {
-                relayoutWork?.cancel()
-                let work = DispatchWorkItem { [weak self, weak view] in
-                    guard let self, let v = view else { return }
-                    v.needsLayout = true
-                    v.layoutSubtreeIfNeeded()
-                    v.needsDisplay = true
-                    // Reassert visible vertical scroller after layout changes
-                    v.disableBuiltInScroller()
-                    self.updateOverlay(position: v.scrollPosition, thumb: v.scrollThumbsize)
-                }
-                relayoutWork = work
-                DispatchQueue.main.asyncAfter(deadline: .now() + debounceInterval, execute: work)
+            // Immediate relayout to keep session switching responsive.
+            func relayoutNow(_ view: CodMateTerminalView) {
+                view.needsLayout = true
+                view.layoutSubtreeIfNeeded()
+                view.needsDisplay = true
+                // Reassert visible vertical scroller after layout changes
+                view.disableBuiltInScroller()
+                updateOverlay(position: view.scrollPosition, thumb: view.scrollThumbsize)
             }
 
             func configureCursorStyles(preferred: CursorStyle, inactive: CursorStyle) {
@@ -133,15 +133,13 @@ import SwiftUI
 
             func handleFocusChange(isActive: Bool) {
                 isActiveTerminal = isActive
-                guard let terminal else { return }
+                guard let terminal = terminalView else { return }
                 let targetStyle = isActive ? preferredCursorStyle : inactiveCursorStyle
                 terminal.getTerminal().setCursorStyle(targetStyle)
-                if let codmate = terminal as? CodMateTerminalView {
-                    codmate.setOverlaySuppressed(!isActive)
-                    // Update cursor style tracking for TUI apps that override cursor settings
-                    codmate.preferredCursorStyle = targetStyle
-                    codmate.isActiveTerminal = isActive
-                }
+                terminal.setOverlaySuppressed(!isActive)
+                // Update cursor style tracking for TUI apps that override cursor settings
+                terminal.preferredCursorStyle = targetStyle
+                terminal.isActiveTerminal = isActive
                 if !isActive {
                     overlay?.isHidden = true
                 }
@@ -153,7 +151,7 @@ import SwiftUI
                     overlay.isHidden = true
                     return
                 }
-                if let v = terminal, v.canScroll == false {
+                if let v = terminalView, v.canScroll == false {
                     overlay.isHidden = true
                     return
                 }
@@ -189,82 +187,95 @@ import SwiftUI
                 preferred: cursorStyleOption.cursorStyleValue,
                 inactive: cursorStyleOption.steadyCursorStyleValue)
 
-            // Fast-path: if we're already showing this terminal, just refresh theme and return
-            if let existing = coordinator.terminal,
-               existing.superview === container,
-               let existingKey = (existing as? CodMateTerminalView)?.sessionID,
-               existingKey == terminalKey {
-                // Terminal already attached, just update theme and font if changed
-                var needsRelayout = false
-                if existing.font != font {
-                    existing.font = font
-                    needsRelayout = true
-                }
-                applyTheme(existing)
-                applyCursorStyle(existing)
-                // Only relayout when font actually changed; avoid triggering layout on every SwiftUI update
-                // to prevent terminal size jitter that causes SIGWINCH storms in nested TUIs like Claude Code.
-                if needsRelayout {
-                    coordinator.scheduleRelayout(existing)
-                }
-                let isActive = container.window?.firstResponder === existing
-                coordinator.handleFocusChange(isActive: isActive)
-                return
-            }
-
-            // Get or create terminal view from manager (reuses existing if available)
-            let v = TerminalSessionManager.shared.view(
+            let terminalView = ensureTerminalView(in: container, coordinator: coordinator)
+            let session = TerminalSessionManager.shared.session(
                 for: terminalKey,
                 initialCommands: initialCommands,
-                font: font,
                 consoleSpec: consoleSpec.map { spec in
                     TerminalSessionManager.ConsoleSpec(
                         executable: spec.executable, args: spec.args, cwd: spec.cwd, env: spec.env)
                 }
             )
-            applyTheme(v)
-            applyCursorStyle(v)
-            v.disableBuiltInScroller()
-            // Freeze grid reflow during live-resize; reflow once at the end to avoid duplicate/garbled text
-            v.deferReflowDuringLiveResize = true
 
-            // Detach and reattach if this terminal is in a different container
-            if v.superview !== container {
-                v.removeFromSuperview()
-                v.translatesAutoresizingMaskIntoConstraints = false
-                container.addSubview(v)
-                NSLayoutConstraint.activate([
-                    v.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-                    v.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-                    v.topAnchor.constraint(equalTo: container.topAnchor),
-                    v.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-                ])
-                coordinator.attach(to: v)
-                // Install overlay scrollbar once
-                if coordinator.overlay == nil {
-                    let bar = OverlayBar(frame: .zero)
-                    bar.translatesAutoresizingMaskIntoConstraints = true
-                    container.addSubview(bar)
-                    coordinator.overlay = bar
+            if coordinator.currentSessionKey != terminalKey
+                || !terminalView.isAttached(to: session.terminal) {
+                if let oldKey = coordinator.currentSessionKey {
+                    TerminalSessionManager.shared.detachView(for: oldKey)
                 }
-                // Ensure the embedded terminal gains focus for immediate input
+                terminalView.sessionID = terminalKey
+                terminalView.attach(
+                    to: session,
+                    fullRedraw: coordinator.currentSessionKey == nil
+                )
+                coordinator.currentSessionKey = terminalKey
+                TerminalSessionManager.shared.registerActiveView(terminalView, sessionKey: terminalKey)
                 DispatchQueue.main.async {
-                    container.window?.makeFirstResponder(v)
+                    container.window?.makeFirstResponder(terminalView)
+                }
+                if consoleSpec == nil,
+                   !initialCommands.isEmpty,
+                   TerminalSessionManager.shared.shouldBootstrap(key: terminalKey)
+                {
+                    TerminalSessionManager.shared.injectInitialCommandsOnce(
+                        key: terminalKey,
+                        view: terminalView,
+                        payload: initialCommands
+                    )
                 }
             }
-            coordinator.scheduleRelayout(v)
-            if let ctv = v as? CodMateTerminalView {
-                ctv.onScrolled = { [weak coordinator] pos, thumb in
-                    DispatchQueue.main.async {
-                        coordinator?.updateOverlay(position: pos, thumb: thumb)
-                    }
-                }
-                ctv.onFocusChanged = { [weak coordinator] isActive in
-                    coordinator?.handleFocusChange(isActive: isActive)
+
+            if terminalView.font != font {
+                terminalView.font = font
+                coordinator.relayoutNow(terminalView)
+            }
+
+            applyTheme(terminalView)
+            applyCursorStyle(terminalView)
+            terminalView.disableBuiltInScroller()
+            // Freeze grid reflow during live-resize; reflow once at the end to avoid duplicate/garbled text
+            terminalView.deferReflowDuringLiveResize = true
+            terminalView.onScrolled = { [weak coordinator] pos, thumb in
+                DispatchQueue.main.async {
+                    coordinator?.updateOverlay(position: pos, thumb: thumb)
                 }
             }
-            let isActive = container.window?.firstResponder === v
+            terminalView.onScrollActivity = { _ in
+                TerminalSessionManager.shared.recordScrollActivity(for: terminalKey)
+            }
+            terminalView.onFocusChanged = { [weak coordinator] isActive in
+                coordinator?.handleFocusChange(isActive: isActive)
+            }
+            let isActive = container.window?.firstResponder === terminalView
             coordinator.handleFocusChange(isActive: isActive)
+            coordinator.relayoutNow(terminalView)
+            TerminalSessionManager.shared.registerActiveView(terminalView, sessionKey: terminalKey)
+        }
+
+        private func ensureTerminalView(
+            in container: NSView,
+            coordinator: Coordinator
+        ) -> CodMateTerminalView {
+            if let existing = coordinator.terminalView {
+                return existing
+            }
+            let view = CodMateTerminalView(frame: .zero)
+            view.translatesAutoresizingMaskIntoConstraints = false
+            view.font = font
+            container.addSubview(view)
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                view.topAnchor.constraint(equalTo: container.topAnchor),
+                view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            ])
+            coordinator.attach(to: view)
+            if coordinator.overlay == nil {
+                let bar = OverlayBar(frame: .zero)
+                bar.translatesAutoresizingMaskIntoConstraints = true
+                container.addSubview(bar)
+                coordinator.overlay = bar
+            }
+            return view
         }
 
         // Minimal overlay scrollbar view that never intercepts events

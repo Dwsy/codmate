@@ -9,12 +9,11 @@ import SwiftUI
     final class EmbeddedTerminalCoordinator: NSObject {
         private let initialCommands: String
         private var appearanceObserver: NSKeyValueObservation?
+        let sessionKey = "embedded-\(UUID().uuidString)"
 
         init(initialCommands: String) { self.initialCommands = initialCommands }
 
-        // Intentionally no TerminalViewDelegate conformance to avoid version mismatches
-
-        fileprivate func bootstrap(_ view: LocalProcessTerminalView) {
+        fileprivate func bootstrap(_ view: CodMateTerminalView) {
             // Apply initial theme based on current appearance
             updateTheme(for: view, appearance: NSApp.effectiveAppearance)
 
@@ -27,12 +26,25 @@ import SwiftUI
                 }
             }
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                view.send(txt: self.initialCommands)
+            let session = TerminalSessionManager.shared.session(
+                for: sessionKey,
+                initialCommands: initialCommands,
+                consoleSpec: nil
+            )
+            view.sessionID = sessionKey
+            view.attach(to: session, fullRedraw: true)
+            if TerminalSessionManager.shared.shouldBootstrap(key: sessionKey),
+               !initialCommands.isEmpty
+            {
+                TerminalSessionManager.shared.injectInitialCommandsOnce(
+                    key: sessionKey,
+                    view: view,
+                    payload: initialCommands
+                )
             }
         }
 
-        private func updateTheme(for view: LocalProcessTerminalView, appearance: NSAppearance) {
+        private func updateTheme(for view: CodMateTerminalView, appearance: NSAppearance) {
             let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
 
             if isDark {
@@ -63,17 +75,20 @@ import SwiftUI
             .init(initialCommands: initialCommands)
         }
 
-        func makeNSView(context: Context) -> LocalProcessTerminalView {
+        func makeNSView(context: Context) -> CodMateTerminalView {
             let term = CodMateTerminalView(frame: CGRect.zero)
             let font = makeTerminalFont(size: 12)
             term.font = font
-            term.startProcess(executable: "/bin/zsh", args: ["-l"])
             context.coordinator.bootstrap(term)
             return term
         }
 
-        func updateNSView(_ nsView: LocalProcessTerminalView, context: Context) {
+        func updateNSView(_ nsView: CodMateTerminalView, context: Context) {
             // Theme will be updated automatically via appearance observer in coordinator
+        }
+
+        static func dismantleNSView(_ nsView: CodMateTerminalView, coordinator: EmbeddedTerminalCoordinator) {
+            TerminalSessionManager.shared.stop(key: coordinator.sessionKey)
         }
     }
 

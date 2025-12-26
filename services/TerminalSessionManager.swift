@@ -1,4 +1,3 @@
-import AppKit
 import Darwin
 import Foundation
 
@@ -66,15 +65,17 @@ import Foundation
     static let shared = TerminalSessionManager()
     static let standardExecutablePrefix = CLIEnvironment.buildBasePATH()
     // Keyed by terminalKey (not session id). Allows multiple panes per session.
-    private var views: [String: LocalProcessTerminalView] = [:]
+    private var sessions: [String: HeadlessTerminalSession] = [:]
     private var bootstrapped: Set<String> = []
     private var lastUsedAt: [String: Date] = [:]
     private var nudgedSlash: Set<String> = []
     private var consoleModeKeys: Set<String> = []
+    private weak var activeTerminalView: CodMateTerminalView?
+    private var activeSessionKey: String?
     private let shellBootstrapper = TerminalShellBootstrapper.shared
     private let processInfoQueue = DispatchQueue(
       label: "io.codmate.terminal.procinfo", qos: .userInitiated)
-    private let maxCachedTerminals = 6
+    private let maxCachedSessions = 12
     private let baseScrollbackLines = 6_000
     private let boostedScrollbackLines = 120_000
     private let scrollbackShrinkDelay: TimeInterval = 180
@@ -93,23 +94,19 @@ import Foundation
       var env: [String: String]  // environment overlay
     }
 
-    func view(
+    func session(
       for terminalKey: String,
       initialCommands: String,
-      font: NSFont,
       consoleSpec: ConsoleSpec? = nil
-    ) -> LocalProcessTerminalView {
-      if let v = views[terminalKey] {
-        // If the cached terminal's process died, drop it and recreate to avoid a dead view
-        if v.process?.running == true {
+    ) -> HeadlessTerminalSession {
+      if let existing = sessions[terminalKey] {
+        if existing.process.running {
           lastUsedAt[terminalKey] = Date()
-          v.needsLayout = true
-          v.needsDisplay = true
           setConsoleMode(for: terminalKey, isConsole: consoleSpec != nil)
-          return v
+          return existing
         } else {
           NSLog("📺 [TerminalSessionManager] Process died for key %@, recreating", terminalKey)
-          views.removeValue(forKey: terminalKey)
+          sessions.removeValue(forKey: terminalKey)
           bootstrapped.remove(terminalKey)
           consoleModeKeys.remove(terminalKey)
         }
@@ -118,26 +115,19 @@ import Foundation
       // Ensure SwiftTerm disables OSC 10/11 color query responses for embedded sessions
       setenv("CODEX_DISABLE_COLOR_QUERY", "1", 1)
 
-      let term: LocalProcessTerminalView = CodMateTerminalView(frame: .zero)
-      term.font = font
-      term.translatesAutoresizingMaskIntoConstraints = false
-      if let ctv = term as? CodMateTerminalView {
-        ctv.getTerminal().changeHistorySize(baseScrollbackLines)
-        scrollbackStates[terminalKey] = ScrollbackState(
-          currentLines: baseScrollbackLines, shrinkTask: nil)
-        ctv.sessionID = terminalKey
-        ctv.onScrollActivity = { [weak self] _ in
-          self?.handleScrollActivity(for: terminalKey)
-        }
-      } else {
-        scrollbackStates[terminalKey] = ScrollbackState(
-          currentLines: baseScrollbackLines, shrinkTask: nil)
+      var options = TerminalOptions.default
+      options.scrollback = baseScrollbackLines
+      let session = HeadlessTerminalSession(sessionKey: terminalKey, options: options)
+      session.onProcessTerminated = { [weak self] _ in
+        self?.bootstrapped.remove(terminalKey)
       }
+      scrollbackStates[terminalKey] = ScrollbackState(
+        currentLines: baseScrollbackLines, shrinkTask: nil)
 
       let (_, envArray) = buildEnvironment(consoleSpec: consoleSpec)
       if let spec = consoleSpec {
         let launch = resolvedExecutable(for: spec)
-        term.startProcess(
+        session.startProcess(
           executable: launch.executable,
           args: launch.args,
           environment: envArray,
@@ -145,7 +135,7 @@ import Foundation
           currentDirectory: spec.cwd
         )
       } else {
-        term.startProcess(
+        session.startProcess(
           executable: "/bin/zsh",
           args: ["-l"],
           environment: envArray,
@@ -153,28 +143,23 @@ import Foundation
           currentDirectory: nil
         )
       }
-      views[terminalKey] = term
+
+      sessions[terminalKey] = session
       lastUsedAt[terminalKey] = Date()
       setConsoleMode(for: terminalKey, isConsole: consoleSpec != nil)
-      pruneLRU(keepingMostRecent: maxCachedTerminals)
+      pruneLRU(keepingMostRecent: maxCachedSessions)
       NSLog(
         "📺 [TerminalSessionManager] Created terminal for key %@, PID: %d", terminalKey,
-        term.process?.shellPid ?? -1)
+        session.process.shellPid)
       scheduleScrollbackShrink(for: terminalKey)
       if initialCommands.contains("resume ") || initialCommands.contains("codex") {
         ensureScrollback(for: terminalKey, minimumLines: boostedScrollbackLines)
       }
-
-      // Inject commands once – when the grid is ready (avoid tiny cols causing wrap)
-      if consoleSpec == nil, !bootstrapped.contains(terminalKey) {
-        bootstrapped.insert(terminalKey)
-        injectInitialCommandsOnce(key: terminalKey, term: term, payload: initialCommands)
-      }
-      return term
+      return session
     }
 
     func stop(key: String, sync: Bool = false) {
-      guard let v = views.removeValue(forKey: key) else {
+      guard let session = sessions.removeValue(forKey: key) else {
         return
       }
       consoleModeKeys.remove(key)
@@ -185,7 +170,8 @@ import Foundation
       let pid: pid_t
       let hasRunningProcess: Bool
 
-      if let proc = v.process, proc.running {
+      let proc = session.process
+      if proc.running {
         pid = proc.shellPid
         hasRunningProcess = pid > 0
       } else {
@@ -207,7 +193,7 @@ import Foundation
         }
 
         // Stage 2: Now close PTY (this sends SIGHUP)
-        v.terminate()
+        session.terminate()
 
         // Stage 3: Wait and force kill if needed
         let killProcess = {
@@ -248,9 +234,7 @@ import Foundation
           }
 
           // Mark process as terminated in LocalProcess
-          if let proc = v.process {
-            proc.markAsTerminated()
-          }
+          proc.markAsTerminated()
         }
 
         if sync {
@@ -264,12 +248,17 @@ import Foundation
         }
       } else {
         // No running process, just close PTY
-        v.terminate()
+        session.terminate()
       }
 
       bootstrapped.remove(key)
       lastUsedAt.removeValue(forKey: key)
       nudgedSlash.remove(key)
+      scrollbackStates.removeValue(forKey: key)
+      if activeSessionKey == key {
+        activeSessionKey = nil
+        activeTerminalView = nil
+      }
     }
 
     /// Aggressively kill a process tree by finding and killing all descendants
@@ -367,7 +356,8 @@ import Foundation
     /// Returns true only if there are active programs (codex, claude, etc.) running
     /// Returns false if just an idle shell waiting for input
     func hasRunningProcess(key: String) -> Bool {
-      guard let v = views[key], let proc = v.process else { return false }
+      guard let session = sessions[key] else { return false }
+      let proc = session.process
       guard proc.running && isProcessRunning(pid: proc.shellPid) else { return false }
 
       // Shell exists, but check if it has active children
@@ -376,18 +366,17 @@ import Foundation
 
     /// Check if any terminal session has a running process
     func hasAnyRunningProcesses() -> Bool {
-      for (_, view) in views {
-        if let proc = view.process, proc.running, isProcessRunning(pid: proc.shellPid) {
-          if hasActiveChildren(shellPid: proc.shellPid) {
-            return true
-          }
+      for (_, session) in sessions {
+        let proc = session.process
+        if proc.running, isProcessRunning(pid: proc.shellPid) {
+          if hasActiveChildren(shellPid: proc.shellPid) { return true }
         }
       }
       return false
     }
 
     func stopAll(withPrefix prefix: String, sync: Bool = false) {
-      let keys = views.keys.filter { $0.hasPrefix(prefix) }
+      let keys = sessions.keys.filter { $0.hasPrefix(prefix) }
       for k in keys { stop(key: k, sync: sync) }
     }
 
@@ -402,12 +391,15 @@ import Foundation
     // Useful when a "new" session is created from an anchor and we learn the final session id later.
     func rekey(from oldKey: String, to newKey: String) {
       guard oldKey != newKey else { return }
-      guard let view = views.removeValue(forKey: oldKey) else { return }
+      guard let session = sessions.removeValue(forKey: oldKey) else { return }
       // If destination exists, stop the old one to avoid duplicate shells
-      if let existing = views.removeValue(forKey: newKey) {
+      if let existing = sessions.removeValue(forKey: newKey) {
         existing.terminate()
       }
-      views[newKey] = view
+      sessions[newKey] = session
+      if let state = scrollbackStates.removeValue(forKey: oldKey) {
+        scrollbackStates[newKey] = state
+      }
       let now = Date()
       lastUsedAt[newKey] = now
       lastUsedAt.removeValue(forKey: oldKey)
@@ -425,6 +417,9 @@ import Foundation
       } else {
         consoleModeKeys.remove(newKey)
       }
+      if activeSessionKey == oldKey {
+        activeSessionKey = newKey
+      }
     }
 
     /// Schedules a tiny "/" then backspace keystroke to nudge Codex to redraw cleanly after resume.
@@ -433,8 +428,8 @@ import Foundation
       if nudgedSlash.contains(key) { return }
       nudgedSlash.insert(key)
       DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-        guard let self = self, let v = self.views[key] else { return }
-        v.send(txt: "/\u{7F}")
+        guard let self = self, let session = self.sessions[key] else { return }
+        session.send(data: [UInt8(47), UInt8(127)][...])
       }
     }
 
@@ -450,56 +445,72 @@ import Foundation
       }
     }
 
+    func registerActiveView(_ view: CodMateTerminalView?, sessionKey: String?) {
+      activeTerminalView = view
+      activeSessionKey = sessionKey
+    }
+
+    func detachView(for key: String) {
+      sessions[key]?.detachView()
+    }
+
+    func shouldBootstrap(key: String) -> Bool {
+      if bootstrapped.contains(key) { return false }
+      bootstrapped.insert(key)
+      return true
+    }
+
     // Intentionally no global "copy-all" API exposed; large clipboard operations can be costly.
 
     /// Sends raw text to the running terminal identified by key, if present.
     /// Does not append a newline; callers control execution semantics.
     func send(to key: String, text: String) {
-      guard let v = views[key] else { return }
-      v.send(txt: text)
+      guard let session = sessions[key] else { return }
+      let data = Array(text.utf8)
+      session.send(data: data[...])
     }
 
     /// Sends a command and appends a carriage return (CR) to execute it immediately.
     /// Uses a single send call to avoid timing issues where the return
     /// could be processed before the command text by the PTY.
     func execute(key: String, command: String) {
-      guard let v = views[key] else { return }
+      guard let session = sessions[key] else { return }
       // Terminals typically treat Return as CR (\r, 0x0D), not LF (\n, 0x0A).
       // Some shells might ignore a bare LF for execution. Always ensure a CR is sent.
       let needsCR = !(command.hasSuffix("\r") || command.hasSuffix("\n"))
       if needsCR {
-        v.send(txt: command)
-        v.send([13])  // CR
+        session.send(data: Array(command.utf8)[...])
+        session.send(data: [UInt8(13)][...])  // CR
       } else if command.hasSuffix("\n") {
         // Replace trailing LF with CR to emulate Return key precisely.
         let trimmed = String(command.dropLast())
-        v.send(txt: trimmed)
-        v.send([13])
+        session.send(data: Array(trimmed.utf8)[...])
+        session.send(data: [UInt8(13)][...])
       } else {
         // Already has CR
-        v.send(txt: command)
+        session.send(data: Array(command.utf8)[...])
       }
     }
 
     /// Attempts to focus the terminal view to receive keyboard input.
     func focus(key: String) {
-      guard let v = views[key] else { return }
-      v.window?.makeFirstResponder(v)
+      guard let activeTerminalView, activeSessionKey == key else { return }
+      activeTerminalView.window?.makeFirstResponder(activeTerminalView)
     }
 
     /// Clears screen and scrollback similar to Cmd+K in Terminal.
     /// Achieved by executing: printf '\e[3J'; clear
     func clear(key: String) {
-      guard views[key] != nil else { return }
+      guard sessions[key] != nil else { return }
       let seq = "printf '\u{001B}[3J'; clear\n"
       send(to: key, text: seq)
     }
 
     private func ensureScrollback(for key: String, minimumLines: Int) {
       guard var state = scrollbackStates[key], state.currentLines < minimumLines,
-        let view = views[key] as? CodMateTerminalView
+        let session = sessions[key]
       else { return }
-      view.getTerminal().changeHistorySize(minimumLines)
+      session.terminal.changeHistorySize(minimumLines)
       state.currentLines = minimumLines
       state.shrinkTask?.cancel()
       state.shrinkTask = nil
@@ -522,9 +533,9 @@ import Foundation
 
     private func shrinkScrollbackToBase(for key: String) {
       guard var state = scrollbackStates[key], state.currentLines > baseScrollbackLines,
-        let view = views[key] as? CodMateTerminalView
+        let session = sessions[key]
       else { return }
-      view.getTerminal().changeHistorySize(baseScrollbackLines)
+      session.terminal.changeHistorySize(baseScrollbackLines)
       state.currentLines = baseScrollbackLines
       state.shrinkTask?.cancel()
       state.shrinkTask = nil
@@ -535,24 +546,28 @@ import Foundation
       scheduleScrollbackShrink(for: key)
     }
 
+    func recordScrollActivity(for key: String) {
+      handleScrollActivity(for: key)
+    }
+
     // Waits for a reasonable terminal size before injecting the initial commands to avoid
     // the appearance of 1–2 column widths and "typing" artifacts.
-    private func injectInitialCommandsOnce(
-      key: String, term: LocalProcessTerminalView, payload: String
+    func injectInitialCommandsOnce(
+      key: String, view: CodMateTerminalView, payload: String
     ) {
       let maxTries = 30
       let interval: TimeInterval = 0.05
       func ready() -> Bool {
-        guard term.window != nil else { return false }
-        let cols = (term.getTerminal()).cols
-        let w = term.bounds.width
+        guard view.window != nil else { return false }
+        let cols = view.getTerminal().cols
+        let w = view.bounds.width
         return cols >= 40 && w >= 80
       }
       func attempt(_ n: Int) {
         if ready() {
           // Send atomically (with newline) to reduce perceived "typing"
           let text = payload.hasSuffix("\n") ? payload : (payload + "\n")
-          term.send(txt: text)
+          view.send(txt: text)
         } else if n < maxTries {
           DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
             attempt(n + 1)
@@ -560,7 +575,7 @@ import Foundation
         } else {
           // Fallback: inject anyway after timeout
           let text = payload.hasSuffix("\n") ? payload : (payload + "\n")
-          term.send(txt: text)
+          view.send(txt: text)
         }
       }
       DispatchQueue.main.async { attempt(0) }

@@ -8,7 +8,7 @@ import Foundation
   /// Behavior:
   /// - If the pasteboard contains an image reference (and no plain string), simulate Ctrl+V so the CLI can handle it.
   /// - Otherwise, fall back to SwiftTerm's default text paste.
-  final class CodMateTerminalView: LocalProcessTerminalView {
+  final class CodMateTerminalView: TerminalView {
     private var keyMonitor: Any?
     override var isOpaque: Bool { false }
     // Lightweight scroll listener for overlay scrollbar in the host view
@@ -17,17 +17,6 @@ import Foundation
     // Session identifier used to attribute OSC 777 notifications to a list row
     var sessionID: String?
 
-    private let processDispatchQueue = DispatchQueue(
-      label: "io.codmate.terminal.process", qos: .userInitiated)
-    private var pendingChunks: [[UInt8]] = []
-    private var pendingByteLength: Int = 0
-    private var pendingFlushWork: DispatchWorkItem?
-    private let flushInterval: TimeInterval = 0.002
-    private let maxBatchChunks = 32
-    private let immediateFlushThresholdBytes = 96
-    private let typingFlushWindow: TimeInterval = 0.08
-    private let typingChunkSoftLimit = 512
-    private var lastTypingAt: TimeInterval = 0
     private let dragTypes: [NSPasteboard.PasteboardType] = [
       .fileURL,
       .URL,
@@ -48,8 +37,14 @@ import Foundation
 
     deinit {}
 
-    override func makeLocalProcess() -> LocalProcess {
-      LocalProcess(delegate: self, dispatchQueue: processDispatchQueue)
+    func attach(to session: HeadlessTerminalSession, fullRedraw: Bool = false) {
+      session.attach(view: self)
+      attachTerminal(session.terminal, fullRedraw: fullRedraw)
+      terminalDelegate = session
+      session.onDataReceived = { [weak self] in
+        self?.noteDataReceived()
+      }
+      session.flushPendingData()
     }
 
     override func viewDidMoveToWindow() {
@@ -66,14 +61,6 @@ import Foundation
       }
     }
 
-    private func markTypingEvent() {
-      lastTypingAt = CFAbsoluteTimeGetCurrent()
-    }
-
-    override func send(source: TerminalView, data: ArraySlice<UInt8>) {
-      markTypingEvent()
-      super.send(source: source, data: data)
-    }
 
     override func paste(_ sender: Any) {
       let pb = NSPasteboard.general
@@ -200,9 +187,10 @@ import Foundation
     }
 
     // TerminalViewDelegate: capture normalized scroll updates for overlay
-    override public func scrolled(source: TerminalView, position: Double) {
+    override func scrolled(source terminal: Terminal, yDisp: Int) {
+      super.scrolled(source: terminal, yDisp: yDisp)
       if !overlaySuppressed {
-        onScrolled?(position, self.scrollThumbsize)
+        onScrolled?(scrollPosition, scrollThumbsize)
       }
       // Throttle scroll activity callbacks to avoid excessive Task churn in TerminalSessionManager.
       // The scrolled() delegate fires on every data receipt, creating/canceling Tasks hundreds
@@ -214,87 +202,10 @@ import Foundation
       }
     }
 
-    override func dataReceived(slice: ArraySlice<UInt8>) {
-      if Thread.isMainThread {
-        forwardDataReceived(slice: slice)
-        // Reapply cursor style after data receipt to counter any cursor control sequences
-        // from nested TUIs like Claude Code CLI that may override our configured style.
-        scheduleReapplyCursorStyle()
-        return
-      }
-      enqueueChunk(Array(slice))
-    }
-
-    private func enqueueChunk(_ chunk: [UInt8]) {
-      if shouldFlushImmediately(for: chunk) {
-        DispatchQueue.main.async { [weak self] in
-          guard let self else { return }
-          self.forwardDataReceived(slice: chunk[...])
-          self.scheduleReapplyCursorStyle()
-        }
-        return
-      }
-      pendingChunks.append(chunk)
-      pendingByteLength += chunk.count
-      if pendingChunks.count >= maxBatchChunks {
-        flushPendingChunks()
-      } else {
-        scheduleFlush()
-      }
-    }
-
-    private func shouldFlushImmediately(for chunk: [UInt8]) -> Bool {
-      if pendingChunks.isEmpty && chunk.count <= immediateFlushThresholdBytes {
-        return true
-      }
-      if chunk.count <= typingChunkSoftLimit {
-        let now = CFAbsoluteTimeGetCurrent()
-        if now - lastTypingAt <= typingFlushWindow {
-          return true
-        }
-      }
-      return false
-    }
-
-    private func scheduleFlush() {
-      guard pendingFlushWork == nil else { return }
-      let work = DispatchWorkItem { [weak self] in
-        self?.flushPendingChunks()
-      }
-      pendingFlushWork = work
-      processDispatchQueue.asyncAfter(deadline: .now() + flushInterval, execute: work)
-    }
-
-    private func flushPendingChunks() {
-      pendingFlushWork?.cancel()
-      pendingFlushWork = nil
-      guard !pendingChunks.isEmpty else { return }
-      let chunks = pendingChunks
-      pendingChunks.removeAll(keepingCapacity: true)
-      let totalBytes = pendingByteLength
-      pendingByteLength = 0
-      DispatchQueue.main.async { [weak self] in
-        guard let self else { return }
-        if chunks.count == 1 {
-          self.forwardDataReceived(slice: chunks[0][...])
-          self.scheduleReapplyCursorStyle()
-          return
-        }
-        var merged = [UInt8]()
-        let capacity = totalBytes > 0 ? totalBytes : chunks.reduce(into: 0) { $0 += $1.count }
-        if capacity > 0 {
-          merged.reserveCapacity(capacity)
-        }
-        for chunk in chunks {
-          merged.append(contentsOf: chunk)
-        }
-        self.forwardDataReceived(slice: merged[...])
-        self.scheduleReapplyCursorStyle()
-      }
-    }
-
-    private func forwardDataReceived(slice: ArraySlice<UInt8>) {
-      super.dataReceived(slice: slice)
+    func noteDataReceived() {
+      // Reapply cursor style after data receipt to counter any cursor control sequences
+      // from nested TUIs like Claude Code CLI that may override our configured style.
+      scheduleReapplyCursorStyle()
     }
 
     private func scheduleReapplyCursorStyle() {
@@ -359,32 +270,6 @@ import Foundation
     }
 
     // No-op for now: path injection fallback removed in favor of Ctrl+V simulation.
-
-    override func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
-      let id = sessionID ?? ""
-      let action: () -> Void = { [weak self] in
-        guard let self else { return }
-        self.finalizeProcessTermination(source: source, exitCode: exitCode, sessionID: id)
-      }
-      if Thread.isMainThread {
-        action()
-      } else {
-        DispatchQueue.main.async(execute: action)
-      }
-    }
-
-    private func finalizeProcessTermination(
-      source: LocalProcess,
-      exitCode: Int32?,
-      sessionID: String
-    ) {
-      super.processTerminated(source, exitCode: exitCode)
-      NotificationCenter.default.post(
-        name: .codMateTerminalExited,
-        object: nil,
-        userInfo: ["sessionID": sessionID, "exitCode": exitCode as Any]
-      )
-    }
 
     // MARK: - Drag & Drop
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
