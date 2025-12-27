@@ -68,11 +68,6 @@ import SwiftUI
             weak var terminalView: CodMateTerminalView?
             var currentSessionKey: String?
             weak var container: NSView?
-            var overlay: OverlayBar?
-            private var lastOverlayPosition: Double?
-            private var lastOverlayThumb: CGFloat?
-            private let overlayDeltaThreshold: Double = 0.002
-            private let overlayThumbThreshold: CGFloat = 0.01
             var preferredCursorStyle: CursorStyle = .blinkBlock
             var inactiveCursorStyle: CursorStyle = .steadyBlock
             private var isActiveTerminal = false
@@ -121,9 +116,6 @@ import SwiftUI
                 view.needsLayout = true
                 view.layoutSubtreeIfNeeded()
                 view.needsDisplay = true
-                // Reassert visible vertical scroller after layout changes
-                view.disableBuiltInScroller()
-                updateOverlay(position: view.scrollPosition, thumb: view.scrollThumbsize)
             }
 
             func configureCursorStyles(preferred: CursorStyle, inactive: CursorStyle) {
@@ -140,45 +132,7 @@ import SwiftUI
                 // Update cursor style tracking for TUI apps that override cursor settings
                 terminal.preferredCursorStyle = targetStyle
                 terminal.isActiveTerminal = isActive
-                if !isActive {
-                    overlay?.isHidden = true
-                }
             }
-
-            func updateOverlay(position: Double? = nil, thumb: CGFloat? = nil) {
-                guard let container, let overlay else { return }
-                guard isActiveTerminal else {
-                    overlay.isHidden = true
-                    return
-                }
-                if let v = terminalView, v.canScroll == false {
-                    overlay.isHidden = true
-                    return
-                }
-                let pos = position ?? overlay.position
-                let th = max(thumb ?? overlay.thumbProportion, 0.01)
-                if let lastPos = lastOverlayPosition,
-                   abs(lastPos - pos) < overlayDeltaThreshold,
-                   let lastThumb = lastOverlayThumb,
-                   abs(lastThumb - th) < overlayThumbThreshold {
-                    return
-                }
-                lastOverlayPosition = pos
-                lastOverlayThumb = th
-                overlay.position = pos
-                overlay.thumbProportion = th
-                overlay.isHidden = false
-                let inset: CGFloat = 2
-                let width: CGFloat = 4
-                let H = max(container.bounds.height, 1)
-                let barH = max(ceil(H * th), 8)
-                let travel = max(H - 2 * inset - barH, 0)
-                let y = inset + travel * CGFloat(1.0 - pos)
-                let x = container.bounds.width - width - inset
-                overlay.frame = CGRect(x: max(0, x), y: max(0, y), width: width, height: barH)
-                overlay.needsDisplay = true
-            }
-
         }
 
         private func attachTerminalIfNeeded(in container: NSView, coordinator: Coordinator) {
@@ -231,14 +185,13 @@ import SwiftUI
 
             applyTheme(terminalView)
             applyCursorStyle(terminalView)
-            terminalView.disableBuiltInScroller()
+            
+            // Re-enable built-in scroller for reliable interaction
+            terminalView.enableBuiltInScroller()
+            
             // Freeze grid reflow during live-resize; reflow once at the end to avoid duplicate/garbled text
             terminalView.deferReflowDuringLiveResize = true
-            terminalView.onScrolled = { [weak coordinator] pos, thumb in
-                DispatchQueue.main.async {
-                    coordinator?.updateOverlay(position: pos, thumb: thumb)
-                }
-            }
+            
             terminalView.onScrollActivity = { _ in
                 TerminalSessionManager.shared.recordScrollActivity(for: terminalKey)
             }
@@ -269,26 +222,7 @@ import SwiftUI
                 view.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             ])
             coordinator.attach(to: view)
-            if coordinator.overlay == nil {
-                let bar = OverlayBar(frame: .zero)
-                bar.translatesAutoresizingMaskIntoConstraints = true
-                container.addSubview(bar)
-                coordinator.overlay = bar
-            }
             return view
-        }
-
-        // Minimal overlay scrollbar view that never intercepts events
-        final class OverlayBar: NSView {
-            var position: Double = 0  // 0..1 top->bottom
-            var thumbProportion: CGFloat = 0.1
-            override var isOpaque: Bool { false }
-            override func hitTest(_ point: NSPoint) -> NSView? { nil }
-            override func draw(_ dirtyRect: NSRect) {
-                NSColor.secondaryLabelColor.withAlphaComponent(0.35).setFill()
-                let path = NSBezierPath(roundedRect: bounds, xRadius: 2, yRadius: 2)
-                path.fill()
-            }
         }
     }
 

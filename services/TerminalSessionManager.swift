@@ -546,11 +546,13 @@ import Foundation
       var didChange = false
       if state.currentLines < minimumLines {
         session.terminal.changeHistorySize(minimumLines)
+        session.updateTargetScrollback(minimumLines)
         state.currentLines = minimumLines
         didChange = true
       }
       if pin && !state.pinned {
         state.pinned = true
+        session.setScrollbackPinned(true)
         didChange = true
       }
       if didChange {

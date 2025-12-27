@@ -42,6 +42,12 @@ import Foundation
     var onDataReceived: (() -> Void)?
     var onProcessTerminated: ((Int32?) -> Void)?
 
+    // Aggressive scrollback management for background sessions
+    private var targetScrollbackLines: Int
+    private var currentScrollbackLines: Int
+    private var isPinned: Bool = false
+    private let minimumScrollbackLines = 1_000
+
     private var pendingChunks: [[UInt8]] = []
     private var pendingChunkIndex: Int = 0
     private var pendingFlushWork: DispatchWorkItem?
@@ -58,6 +64,8 @@ import Foundation
 
     init(sessionKey: String, options: TerminalOptions, ioQueue: DispatchQueue? = nil) {
       self.sessionKey = sessionKey
+      self.targetScrollbackLines = options.scrollback
+      self.currentScrollbackLines = options.scrollback
       self.ioQueue = ioQueue ?? DispatchQueue(
         label: "io.codmate.terminal.session.\(sessionKey)", qos: .userInitiated)
       terminal = Terminal(delegate: TerminalDelegateStub(), options: options)
@@ -68,13 +76,46 @@ import Foundation
 
     func attach(view: TerminalView) {
       attachedView = view
+
+      // Restore scrollback to target size when view is attached
+      if currentScrollbackLines < targetScrollbackLines {
+        terminal.changeHistorySize(targetScrollbackLines)
+        NSLog("📺 [HeadlessTerminalSession] Restored scrollback for %@: %d -> %d lines",
+              sessionKey, currentScrollbackLines, targetScrollbackLines)
+        currentScrollbackLines = targetScrollbackLines
+      }
+
       updateWindowSize(from: view, cols: terminal.cols, rows: terminal.rows)
     }
 
     func detachView() {
       attachedView = nil
+
+      // Aggressively shrink scrollback for background sessions (unless pinned)
+      if !isPinned {
+        if currentScrollbackLines > minimumScrollbackLines {
+          terminal.changeHistorySize(minimumScrollbackLines)
+          NSLog("📺 [HeadlessTerminalSession] Shrunk scrollback for %@: %d -> %d lines",
+                sessionKey, currentScrollbackLines, minimumScrollbackLines)
+          currentScrollbackLines = minimumScrollbackLines
+        }
+      }
+
       terminal.setDelegate(self)
       onDataReceived = nil
+    }
+
+    func setScrollbackPinned(_ pinned: Bool) {
+      isPinned = pinned
+    }
+
+    func updateTargetScrollback(_ lines: Int) {
+      targetScrollbackLines = lines
+      // Also update current if it's currently at target
+      if currentScrollbackLines == targetScrollbackLines || currentScrollbackLines < lines {
+        terminal.changeHistorySize(lines)
+        currentScrollbackLines = lines
+      }
     }
 
     func consumeDetachedOutputFlag() -> Bool {

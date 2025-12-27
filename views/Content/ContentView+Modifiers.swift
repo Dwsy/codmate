@@ -362,7 +362,7 @@ extension ContentView {
       ) {
         Button("Stop", role: .destructive) {
           if let st = confirmStopState {
-            stopEmbedded(forID: st.sessionId)
+            stopEmbedded(forKey: st.terminalKey)
             confirmStopState = nil
           }
         }
