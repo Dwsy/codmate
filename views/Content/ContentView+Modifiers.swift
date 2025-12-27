@@ -298,6 +298,25 @@ extension ContentView {
           resumeFromList(summary)
         }
       }
+      .onReceive(NotificationCenter.default.publisher(for: .codMateTerminalSessionsUpdated)) { _ in
+        syncRunningSessionIDsFromManager()
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .codMateFocusSessionSummary)) { note in
+        guard let summary = note.userInfo?["summary"] as? SessionSummary else { return }
+        if let pid = viewModel.projectId(for: summary) {
+          viewModel.setSelectedProject(pid)
+        } else {
+          viewModel.setSelectedProject(SessionListViewModel.otherProjectId)
+        }
+        viewModel.projectWorkspaceMode = .tasks
+        selection = [summary.id]
+        selectionPrimaryId = summary.id
+        runningSessionIDs.insert(summary.id)
+        selectedTerminalKey = summary.id
+        selectedDetailTab = .terminal
+        sessionDetailTabs[summary.id] = .terminal
+        viewModel.clearAwaitingFollowup(summary.id)
+      }
       .onReceive(NotificationCenter.default.publisher(for: .codMateStartEmbeddedNewProject)) {
         note in
         NSLog("📌 [ContentView] Received codMateStartEmbeddedNewProject: %@", note.userInfo ?? [:])

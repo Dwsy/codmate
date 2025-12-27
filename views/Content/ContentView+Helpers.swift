@@ -55,6 +55,20 @@ extension ContentView {
         #endif
     }
 
+    func syncRunningSessionIDsFromManager() {
+        #if canImport(SwiftTerm) && !APPSTORE
+            let managerKeys = Set(
+                TerminalSessionManager.shared.getActiveSessions().map(\.terminalKey)
+            )
+            if managerKeys != runningSessionIDs {
+                runningSessionIDs = managerKeys
+                if let selected = selectedTerminalKey, !managerKeys.contains(selected) {
+                    selectedTerminalKey = managerKeys.first
+                }
+            }
+        #endif
+    }
+
     func hasAvailableEmbeddedTerminal() -> Bool {
         #if canImport(SwiftTerm) && !APPSTORE
             // Check if there's a terminal available for the focused session
@@ -66,6 +80,21 @@ extension ContentView {
             return runningSessionIDs.contains(focused.id)
         #else
             return false
+        #endif
+    }
+
+    func visibleTerminalKeyInDetail() -> String? {
+        #if canImport(SwiftTerm) && !APPSTORE
+            guard selectedDetailTab == .terminal else { return nil }
+            if let active = TerminalSessionManager.shared.currentActiveSessionKey() {
+                return active
+            }
+            if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
+                return focused.id
+            }
+            return fallbackRunningAnchorId()
+        #else
+            return nil
         #endif
     }
 

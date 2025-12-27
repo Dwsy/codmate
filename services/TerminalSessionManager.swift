@@ -68,6 +68,7 @@ import Foundation
     private var sessions: [String: HeadlessTerminalSession] = [:]
     private var bootstrapped: Set<String> = []
     private var lastUsedAt: [String: Date] = [:]
+    private var startedAt: [String: Date] = [:]
     private var nudgedSlash: Set<String> = []
     private var consoleModeKeys: Set<String> = []
     private weak var activeTerminalView: CodMateTerminalView?
@@ -113,6 +114,7 @@ import Foundation
           sessions.removeValue(forKey: terminalKey)
           bootstrapped.remove(terminalKey)
           consoleModeKeys.remove(terminalKey)
+          startedAt.removeValue(forKey: terminalKey)
         }
       }
 
@@ -124,7 +126,11 @@ import Foundation
       options.scrollback = wantsBoostedScrollback ? boostedScrollbackLines : baseScrollbackLines
       let session = HeadlessTerminalSession(sessionKey: terminalKey, options: options)
       session.onProcessTerminated = { [weak self] _ in
-        self?.bootstrapped.remove(terminalKey)
+        Task { @MainActor in
+          self?.bootstrapped.remove(terminalKey)
+          self?.startedAt.removeValue(forKey: terminalKey)
+          self?.notifyTerminalSessionsUpdated()
+        }
       }
       scrollbackStates[terminalKey] = ScrollbackState(
         currentLines: options.scrollback, shrinkTask: nil, pinned: wantsBoostedScrollback)
@@ -150,7 +156,9 @@ import Foundation
       }
 
       sessions[terminalKey] = session
-      lastUsedAt[terminalKey] = Date()
+      let now = Date()
+      lastUsedAt[terminalKey] = now
+      startedAt[terminalKey] = now
       setConsoleMode(for: terminalKey, isConsole: consoleSpec != nil)
       pruneLRU(keepingMostRecent: maxCachedSessions)
       NSLog(
@@ -160,6 +168,7 @@ import Foundation
       if wantsBoostedScrollback {
         ensureScrollback(for: terminalKey, minimumLines: boostedScrollbackLines, pin: true)
       }
+      notifyTerminalSessionsUpdated()
       return session
     }
 
@@ -167,7 +176,9 @@ import Foundation
       guard let session = sessions.removeValue(forKey: key) else {
         return
       }
+
       consoleModeKeys.remove(key)
+      startedAt.removeValue(forKey: key)
 
       // Multi-stage termination to ensure all processes (codex/claude and descendants) are cleaned up
 
@@ -260,6 +271,7 @@ import Foundation
       lastUsedAt.removeValue(forKey: key)
       nudgedSlash.remove(key)
       scrollbackStates.removeValue(forKey: key)
+      notifyTerminalSessionsUpdated()
       if activeSessionKey == key {
         activeSessionKey = nil
         activeTerminalView = nil
@@ -455,6 +467,10 @@ import Foundation
       activeSessionKey = sessionKey
     }
 
+    func currentActiveSessionKey() -> String? {
+      activeSessionKey
+    }
+
     func detachView(for key: String) {
       sessions[key]?.detachView()
     }
@@ -570,30 +586,36 @@ import Foundation
     func injectInitialCommandsOnce(
       key: String, view: CodMateTerminalView, payload: String
     ) {
-      let maxTries = 30
-      let interval: TimeInterval = 0.05
-      func ready() -> Bool {
-        guard view.window != nil else { return false }
-        let cols = view.getTerminal().cols
-        let w = view.bounds.width
-        return cols >= 40 && w >= 80
-      }
-      func attempt(_ n: Int) {
-        if ready() {
-          // Send atomically (with newline) to reduce perceived "typing"
-          let text = payload.hasSuffix("\n") ? payload : (payload + "\n")
-          view.send(txt: text)
-        } else if n < maxTries {
-          DispatchQueue.main.asyncAfter(deadline: .now() + interval) {
-            attempt(n + 1)
+      let timeout: TimeInterval = 1.5
+      let checkInterval: UInt64 = 8_000_000  // 8ms in nanoseconds
+
+      Task { @MainActor in
+        let deadline = Date().addingTimeInterval(timeout)
+
+        // Wait for terminal to be ready (window visible and sufficient size)
+        while Date() < deadline {
+          guard view.window != nil else {
+            try? await Task.sleep(nanoseconds: checkInterval)
+            continue
           }
-        } else {
-          // Fallback: inject anyway after timeout
-          let text = payload.hasSuffix("\n") ? payload : (payload + "\n")
-          view.send(txt: text)
+
+          let cols = view.getTerminal().cols
+          let width = view.bounds.width
+
+          if cols >= 40 && width >= 80 {
+            // Ready - inject commands atomically
+            let text = payload.hasSuffix("\n") ? payload : (payload + "\n")
+            view.send(txt: text)
+            return
+          }
+
+          try? await Task.sleep(nanoseconds: checkInterval)
         }
+
+        // Timeout fallback - inject anyway
+        let text = payload.hasSuffix("\n") ? payload : (payload + "\n")
+        view.send(txt: text)
       }
-      DispatchQueue.main.async { attempt(0) }
     }
 
     private func buildEnvironment(consoleSpec: ConsoleSpec?) -> ([String: String], [String]) {
@@ -646,6 +668,37 @@ import Foundation
         }
       }
       return false
+    }
+
+    // MARK: - Active Sessions Query
+
+    struct ActiveSessionInfo {
+      let terminalKey: String
+      let pid: Int32
+      let startedAt: Date
+      let isConsoleMode: Bool
+    }
+
+    func getActiveSessions() -> [ActiveSessionInfo] {
+      return sessions.compactMap { key, session in
+        guard session.process.running else { return nil }
+        let startDate = startedAt[key] ?? lastUsedAt[key] ?? Date()
+        let isConsole = consoleModeKeys.contains(key)
+        return ActiveSessionInfo(
+          terminalKey: key,
+          pid: session.process.shellPid,
+          startedAt: startDate,
+          isConsoleMode: isConsole
+        )
+      }.sorted { $0.startedAt > $1.startedAt }
+    }
+
+    func getActiveSessionsCount() -> Int {
+      return sessions.values.filter { $0.process.running }.count
+    }
+
+    private func notifyTerminalSessionsUpdated() {
+      NotificationCenter.default.post(name: .codMateTerminalSessionsUpdated, object: nil)
     }
   }
 

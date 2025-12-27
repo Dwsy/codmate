@@ -260,6 +260,15 @@ extension ContentView {
         onRequestRefresh: { viewModel.requestUsageStatusRefreshThrottled(for: $0) }
       )
 
+      #if canImport(SwiftTerm) && !APPSTORE
+        if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+          ActiveTerminalSessionsControl(
+            viewModel: viewModel,
+            runningSessionIDs: runningSessionIDs
+          )
+        }
+      #endif
+
       searchToolbarButton
 
       ToolbarCircleButton(
