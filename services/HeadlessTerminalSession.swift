@@ -37,15 +37,20 @@ import Foundation
     private(set) var isRunning: Bool = false
     private weak var attachedView: TerminalView?
     private var lastWindowSize = winsize(ws_row: 25, ws_col: 80, ws_xpixel: 16, ws_ypixel: 16)
+    private var receivedWhileDetached: Bool = false
 
     var onDataReceived: (() -> Void)?
     var onProcessTerminated: ((Int32?) -> Void)?
 
     private var pendingChunks: [[UInt8]] = []
-    private var pendingByteLength: Int = 0
+    private var pendingChunkIndex: Int = 0
     private var pendingFlushWork: DispatchWorkItem?
-    private let flushInterval: TimeInterval = 0.002
-    private let maxBatchChunks = 32
+    private var drainScheduled: Bool = false
+    private let flushInterval: TimeInterval = 0.004
+    private let maxDrainBytes = 8 * 1024
+    private let maxDrainChunks = 12
+    private let fastDrainBytes = 64 * 1024
+    private let fastDrainChunks = 48
     private let immediateFlushThresholdBytes = 96
     private let typingFlushWindow: TimeInterval = 0.08
     private let typingChunkSoftLimit = 512
@@ -70,6 +75,14 @@ import Foundation
       attachedView = nil
       terminal.setDelegate(self)
       onDataReceived = nil
+    }
+
+    func consumeDetachedOutputFlag() -> Bool {
+      return ioQueue.sync {
+        let hadOutput = receivedWhileDetached
+        receivedWhileDetached = false
+        return hadOutput
+      }
     }
 
     func startProcess(
@@ -99,9 +112,7 @@ import Foundation
     }
 
     func flushPendingData() {
-      ioQueue.async { [weak self] in
-        self?.flushPendingChunks()
-      }
+      scheduleDrain()
     }
 
     // MARK: - TerminalViewDelegate
@@ -155,10 +166,6 @@ import Foundation
     }
 
     func dataReceived(slice: ArraySlice<UInt8>) {
-      if Thread.isMainThread {
-        feedToTerminal(slice: slice)
-        return
-      }
       enqueueChunk(Array(slice))
     }
 
@@ -186,18 +193,12 @@ import Foundation
 
     private func enqueueChunk(_ chunk: [UInt8]) {
       if shouldFlushImmediately(for: chunk) {
-        DispatchQueue.main.async { [weak self] in
-          self?.feedToTerminal(slice: chunk[...])
-        }
+        pendingChunks.append(chunk)
+        scheduleDrain()
         return
       }
       pendingChunks.append(chunk)
-      pendingByteLength += chunk.count
-      if pendingChunks.count >= maxBatchChunks {
-        flushPendingChunks()
-      } else {
-        scheduleFlush()
-      }
+      scheduleFlush()
     }
 
     private func shouldFlushImmediately(for chunk: [UInt8]) -> Bool {
@@ -216,41 +217,108 @@ import Foundation
     private func scheduleFlush() {
       guard pendingFlushWork == nil else { return }
       let work = DispatchWorkItem { [weak self] in
-        self?.flushPendingChunks()
+        self?.scheduleDrain()
       }
       pendingFlushWork = work
       ioQueue.asyncAfter(deadline: .now() + flushInterval, execute: work)
     }
 
-    private func flushPendingChunks() {
+    private func scheduleDrain() {
+      ioQueue.async { [weak self] in
+        self?.scheduleDrainOnQueue()
+      }
+    }
+
+    private func scheduleDrainOnQueue() {
+      guard !drainScheduled else { return }
+      drainScheduled = true
+      drainNextBatchOnQueue()
+    }
+
+    private func drainNextBatchOnQueue() {
       pendingFlushWork?.cancel()
       pendingFlushWork = nil
-      guard !pendingChunks.isEmpty else { return }
-      let chunks = pendingChunks
-      pendingChunks.removeAll(keepingCapacity: true)
-      let totalBytes = pendingByteLength
-      pendingByteLength = 0
+      let (batchBytes, batchChunks) = drainTuning()
+      let batch = takeBatch(maxBytes: batchBytes, maxChunks: batchChunks)
+      guard !batch.isEmpty else {
+        drainScheduled = false
+        notifyFlushComplete()
+        return
+      }
       DispatchQueue.main.async { [weak self] in
         guard let self else { return }
-        if chunks.count == 1 {
-          self.feedToTerminal(slice: chunks[0][...])
-          return
+        self.feedToTerminal(slice: batch[...])
+        self.ioQueue.async { [weak self] in
+          self?.drainNextBatchOnQueue()
         }
-        var merged = [UInt8]()
-        let capacity = totalBytes > 0 ? totalBytes : chunks.reduce(into: 0) { $0 += $1.count }
-        if capacity > 0 {
-          merged.reserveCapacity(capacity)
-        }
-        for chunk in chunks {
+      }
+    }
+
+    private func drainTuning() -> (Int, Int) {
+      let remainingChunks = pendingChunks.count - pendingChunkIndex
+      let backlog = max(remainingChunks, 0)
+      if backlog > 96 {
+        return (fastDrainBytes, fastDrainChunks)
+      }
+      return (maxDrainBytes, maxDrainChunks)
+    }
+
+    private func takeBatch(maxBytes: Int, maxChunks: Int) -> [UInt8] {
+      guard pendingChunkIndex < pendingChunks.count else {
+        pendingChunks.removeAll(keepingCapacity: true)
+        pendingChunkIndex = 0
+        return []
+      }
+      var merged: [UInt8] = []
+      merged.reserveCapacity(maxBytes)
+      var bytes = 0
+      var chunksUsed = 0
+      while pendingChunkIndex < pendingChunks.count && chunksUsed < maxChunks && bytes < maxBytes {
+        let chunk = pendingChunks[pendingChunkIndex]
+        pendingChunkIndex += 1
+        if chunk.isEmpty { continue }
+        let remaining = maxBytes - bytes
+        if chunk.count <= remaining {
           merged.append(contentsOf: chunk)
+          bytes += chunk.count
+        } else {
+          merged.append(contentsOf: chunk.prefix(remaining))
+          let tail = Array(chunk.dropFirst(remaining))
+          pendingChunkIndex -= 1
+          pendingChunks[pendingChunkIndex] = tail
+          bytes = maxBytes
         }
-        self.feedToTerminal(slice: merged[...])
+        chunksUsed += 1
+      }
+      if pendingChunkIndex > 64 && pendingChunkIndex * 2 > pendingChunks.count {
+        pendingChunks.removeFirst(pendingChunkIndex)
+        pendingChunkIndex = 0
+      }
+      return merged
+    }
+
+    private func notifyFlushComplete() {
+      DispatchQueue.main.async { [weak self] in
+        guard let self, let view = self.attachedView else { return }
+        view.startDisplayUpdates()
+        view.requestDisplayRefresh()
       }
     }
 
     private func feedToTerminal(slice: ArraySlice<UInt8>) {
-      terminal.feed(buffer: slice)
-      onDataReceived?()
+      if let view = attachedView {
+        view.feed(byteArray: slice)
+      } else {
+        ioQueue.async { [weak self] in
+          self?.receivedWhileDetached = true
+        }
+        terminal.feed(buffer: slice)
+      }
+      if let onDataReceived {
+        DispatchQueue.main.async {
+          onDataReceived()
+        }
+      }
     }
   }
 #endif

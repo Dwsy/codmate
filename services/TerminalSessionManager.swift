@@ -82,6 +82,7 @@ import Foundation
     private struct ScrollbackState {
       var currentLines: Int
       var shrinkTask: Task<Void, Never>?
+      var pinned: Bool
     }
     private var scrollbackStates: [String: ScrollbackState] = [:]
 
@@ -103,6 +104,9 @@ import Foundation
         if existing.process.running {
           lastUsedAt[terminalKey] = Date()
           setConsoleMode(for: terminalKey, isConsole: consoleSpec != nil)
+          if initialCommands.localizedCaseInsensitiveContains("resume") {
+            ensureScrollback(for: terminalKey, minimumLines: boostedScrollbackLines, pin: true)
+          }
           return existing
         } else {
           NSLog("📺 [TerminalSessionManager] Process died for key %@, recreating", terminalKey)
@@ -115,14 +119,15 @@ import Foundation
       // Ensure SwiftTerm disables OSC 10/11 color query responses for embedded sessions
       setenv("CODEX_DISABLE_COLOR_QUERY", "1", 1)
 
+      let wantsBoostedScrollback = initialCommands.localizedCaseInsensitiveContains("resume")
       var options = TerminalOptions.default
-      options.scrollback = baseScrollbackLines
+      options.scrollback = wantsBoostedScrollback ? boostedScrollbackLines : baseScrollbackLines
       let session = HeadlessTerminalSession(sessionKey: terminalKey, options: options)
       session.onProcessTerminated = { [weak self] _ in
         self?.bootstrapped.remove(terminalKey)
       }
       scrollbackStates[terminalKey] = ScrollbackState(
-        currentLines: baseScrollbackLines, shrinkTask: nil)
+        currentLines: options.scrollback, shrinkTask: nil, pinned: wantsBoostedScrollback)
 
       let (_, envArray) = buildEnvironment(consoleSpec: consoleSpec)
       if let spec = consoleSpec {
@@ -152,8 +157,8 @@ import Foundation
         "📺 [TerminalSessionManager] Created terminal for key %@, PID: %d", terminalKey,
         session.process.shellPid)
       scheduleScrollbackShrink(for: terminalKey)
-      if initialCommands.contains("resume ") || initialCommands.contains("codex") {
-        ensureScrollback(for: terminalKey, minimumLines: boostedScrollbackLines)
+      if wantsBoostedScrollback {
+        ensureScrollback(for: terminalKey, minimumLines: boostedScrollbackLines, pin: true)
       }
       return session
     }
@@ -506,19 +511,28 @@ import Foundation
       send(to: key, text: seq)
     }
 
-    private func ensureScrollback(for key: String, minimumLines: Int) {
-      guard var state = scrollbackStates[key], state.currentLines < minimumLines,
-        let session = sessions[key]
-      else { return }
-      session.terminal.changeHistorySize(minimumLines)
-      state.currentLines = minimumLines
-      state.shrinkTask?.cancel()
-      state.shrinkTask = nil
-      scrollbackStates[key] = state
+    private func ensureScrollback(for key: String, minimumLines: Int, pin: Bool = false) {
+      guard var state = scrollbackStates[key], let session = sessions[key] else { return }
+      var didChange = false
+      if state.currentLines < minimumLines {
+        session.terminal.changeHistorySize(minimumLines)
+        state.currentLines = minimumLines
+        didChange = true
+      }
+      if pin && !state.pinned {
+        state.pinned = true
+        didChange = true
+      }
+      if didChange {
+        state.shrinkTask?.cancel()
+        state.shrinkTask = nil
+        scrollbackStates[key] = state
+      }
     }
 
     private func scheduleScrollbackShrink(for key: String) {
       guard var state = scrollbackStates[key] else { return }
+      if state.pinned { return }
       state.shrinkTask?.cancel()
       state.shrinkTask = Task { [weak self] in
         guard let self = self else { return }
@@ -535,6 +549,7 @@ import Foundation
       guard var state = scrollbackStates[key], state.currentLines > baseScrollbackLines,
         let session = sessions[key]
       else { return }
+      if state.pinned { return }
       session.terminal.changeHistorySize(baseScrollbackLines)
       state.currentLines = baseScrollbackLines
       state.shrinkTask?.cancel()

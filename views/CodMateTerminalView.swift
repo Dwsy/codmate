@@ -45,6 +45,9 @@ import Foundation
         self?.noteDataReceived()
       }
       session.flushPendingData()
+      if session.consumeDetachedOutputFlag() {
+        scroll(toPosition: 1.0)
+      }
     }
 
     override func viewDidMoveToWindow() {
@@ -54,6 +57,8 @@ import Foundation
         layer?.backgroundColor = NSColor.clear.cgColor
         installKeyMonitorIfNeeded()
         registerForDraggedTypes(dragTypes)
+        startDisplayUpdates()
+        requestDisplayRefresh()
       } else if let m = keyMonitor {
         NSEvent.removeMonitor(m)
         keyMonitor = nil
