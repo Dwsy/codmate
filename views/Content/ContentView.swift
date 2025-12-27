@@ -42,6 +42,7 @@ struct ContentView: View {
   struct ConfirmStopState: Identifiable {
     let id = UUID()
     let sessionId: String
+    let terminalKey: String
   }
   @State var confirmStopState: ConfirmStopState? = nil
   struct PendingTerminalLaunch: Identifiable {
@@ -360,6 +361,7 @@ struct ContentView: View {
     // visibility to keep the view stable.
     if softReturnPending {
       softReturnPending = false
+      NotificationCenter.default.post(name: .codMateTerminalSessionsUpdated, object: nil)
       return
     }
     // Default behavior: if no embedded terminals left, restore default columns
@@ -367,6 +369,35 @@ struct ContentView: View {
       isDetailMaximized = false
       columnVisibility = .all
     }
+    NotificationCenter.default.post(name: .codMateTerminalSessionsUpdated, object: nil)
+  }
+
+  func stopEmbedded(forKey key: String) {
+    if summaryLookup[key] != nil {
+      stopEmbedded(forID: key)
+      return
+    }
+    #if canImport(SwiftTerm) && !APPSTORE
+      TerminalSessionManager.shared.stop(key: key)
+    #endif
+    runningSessionIDs.remove(key)
+    embeddedInitialCommands.removeValue(forKey: key)
+    if selectedTerminalKey == key {
+      selectedTerminalKey = runningSessionIDs.first
+    }
+    if selectedDetailTab == .terminal {
+      selectedDetailTab = .timeline
+    }
+    if softReturnPending {
+      softReturnPending = false
+      NotificationCenter.default.post(name: .codMateTerminalSessionsUpdated, object: nil)
+      return
+    }
+    if runningSessionIDs.isEmpty {
+      isDetailMaximized = false
+      columnVisibility = .all
+    }
+    NotificationCenter.default.post(name: .codMateTerminalSessionsUpdated, object: nil)
   }
 
   private func isTerminalLikelyRunning(forID id: SessionSummary.ID) -> Bool {
@@ -397,11 +428,25 @@ struct ContentView: View {
 
     if isRunning {
       // Show confirmation dialog for running sessions
-      confirmStopState = ConfirmStopState(sessionId: id)
+      confirmStopState = ConfirmStopState(sessionId: id, terminalKey: id)
     } else {
       // Directly stop if not running
       stopEmbedded(forID: id)
     }
+  }
+
+  func requestStopEmbedded(forKey key: String) {
+    #if canImport(SwiftTerm) && !APPSTORE
+      let isRunning = TerminalSessionManager.shared.hasRunningProcess(key: key)
+      if isRunning {
+        let sessionId = summaryLookup[key]?.id ?? key
+        confirmStopState = ConfirmStopState(sessionId: sessionId, terminalKey: key)
+      } else {
+        stopEmbedded(forKey: key)
+      }
+    #else
+      stopEmbedded(forKey: key)
+    #endif
   }
 
   private func shellEscapeForCD(_ path: String) -> String {

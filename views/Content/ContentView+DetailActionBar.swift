@@ -242,12 +242,9 @@ extension ContentView {
         } else {
           ChromedIconButton(systemImage: "arrow.uturn.backward", help: "Return to History") {
             // Close the terminal currently displayed in the Terminal tab.
-            // In Terminal tab, we always show focused.id's terminal (see ContentView+MainDetail.swift:30-32),
-            // so we must close focused.id to ensure we close what the user sees.
-            // Previously used activeTerminalKey() which could point to a different session during fast switches.
-            let id = focused.id
+            let id = visibleTerminalKeyInDetail() ?? focused.id
             softReturnPending = true
-            requestStopEmbedded(forID: id)
+            requestStopEmbedded(forKey: id)
           }
         }
       } else if let project = selectedProjectForDetailNew() {

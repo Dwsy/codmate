@@ -86,6 +86,8 @@ import Foundation
       var pinned: Bool
     }
     private var scrollbackStates: [String: ScrollbackState] = [:]
+    // Prevent immediate resurrection of sessions that are being stopped (fixes view race condition)
+    private var recentlyStopped: Set<String> = []
 
     private init() {}
 
@@ -116,6 +118,13 @@ import Foundation
           consoleModeKeys.remove(terminalKey)
           startedAt.removeValue(forKey: terminalKey)
         }
+      }
+
+      // Check if this session was recently stopped to prevent view update races from resurrecting it
+      if recentlyStopped.contains(terminalKey) {
+        NSLog("⚠️ [TerminalSessionManager] Refusing to resurrect recently stopped session %@", terminalKey)
+        let options = TerminalOptions.default
+        return HeadlessTerminalSession(sessionKey: terminalKey, options: options)
       }
 
       // Ensure SwiftTerm disables OSC 10/11 color query responses for embedded sessions
@@ -175,6 +184,11 @@ import Foundation
     func stop(key: String, sync: Bool = false) {
       guard let session = sessions.removeValue(forKey: key) else {
         return
+      }
+      // Mark as recently stopped to prevent immediate resurrection
+      recentlyStopped.insert(key)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+        self?.recentlyStopped.remove(key)
       }
 
       consoleModeKeys.remove(key)

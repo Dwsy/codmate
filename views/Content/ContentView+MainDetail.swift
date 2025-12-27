@@ -7,8 +7,11 @@ extension ContentView {
             // Session-level Git Review is removed from Tasks mode. Show Terminal or Conversation only.
             // Non-review paths: either Terminal tab or Timeline
             #if canImport(SwiftTerm) && !APPSTORE
-            if selectedDetailTab == .terminal, let terminalKey = fallbackRunningAnchorId() {
-                // Prefer showing anchor terminal (for new sessions) when available
+            if selectedDetailTab == .terminal,
+               let focused = focusedSummary,
+               runningSessionIDs.contains(focused.id) {
+                // Otherwise show the terminal for the currently focused session
+                let terminalKey = focused.id
                 let isConsole = viewModel.preferences.useEmbeddedCLIConsole
                 let host = TerminalHostView(
                     terminalKey: terminalKey,
@@ -22,9 +25,8 @@ extension ContentView {
                     .id(terminalKey)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(16)
-            } else if selectedDetailTab == .terminal, let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
-                // Otherwise show the terminal for the currently focused session
-                let terminalKey = focused.id
+            } else if selectedDetailTab == .terminal, let terminalKey = fallbackRunningAnchorId() {
+                // Fallback to anchor terminal (for new sessions) when focused has no running terminal
                 let isConsole = viewModel.preferences.useEmbeddedCLIConsole
                 let host = TerminalHostView(
                     terminalKey: terminalKey,
