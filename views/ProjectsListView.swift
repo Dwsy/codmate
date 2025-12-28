@@ -476,8 +476,10 @@ private struct ProjectTreeNodeView: View {
         Label("New Session", systemImage: "plus")
       }
     }
-    Button("New Project…") {
+    Button {
       onNewProjectClick()
+    } label: {
+      Label("New Project…", systemImage: "square.grid.2x2")
     }
     Button {
       onNewTask(project)
@@ -679,7 +681,8 @@ struct ProjectEditorSheet: View {
   @EnvironmentObject private var viewModel: SessionListViewModel
   @Binding var isPresented: Bool
   let mode: Mode
-  struct Prefill: Sendable {
+  struct Prefill: Sendable, Identifiable {
+    let id = UUID()
     var name: String?
     var directory: String?
     var trustLevel: String?

@@ -32,8 +32,15 @@ extension ContentView {
       }
       .navigationSplitViewColumnWidth(min: 260, ideal: 260, max: 260)
     }
-    .sheet(isPresented: $showSidebarNewProjectSheet) {
-      ProjectEditorSheet(isPresented: $showSidebarNewProjectSheet, mode: .new)
+    .sheet(item: $sidebarNewProjectPrefill) { prefill in
+      ProjectEditorSheet(
+        isPresented: Binding(
+          get: { sidebarNewProjectPrefill != nil },
+          set: { if !$0 { sidebarNewProjectPrefill = nil } }
+        ),
+        mode: .new,
+        prefill: prefill
+      )
         .environmentObject(viewModel)
     }
   }

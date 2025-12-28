@@ -330,6 +330,9 @@ extension ContentView {
                 note.userInfo?["projectId"] as? String ?? "<nil>")
         }
       }
+      .onReceive(NotificationCenter.default.publisher(for: .codMateOpenNewProject)) { note in
+        handleDockNewProjectRequest(userInfo: note.userInfo)
+      }
       .onReceive(NotificationCenter.default.publisher(for: .codMateToggleSidebar)) { _ in
         toggleSidebarVisibility()
       }
@@ -350,6 +353,42 @@ extension ContentView {
           Task { await vm.refreshStatus() }
         }
       }
+      .onAppear {
+        // Mark ContentView as ready first, so any queued requests can be processed
+        DockOpenCoordinator.shared.markContentViewReady()
+        // Then consume any pending new project request from initial launch
+        applyPendingDockNewProjectIfNeeded()
+      }
+  }
+
+  private func applyPendingDockNewProjectIfNeeded() {
+    guard let pending = DockOpenCoordinator.shared.consumePendingNewProject() else { return }
+    presentDockNewProject(directory: pending.directory, name: pending.name)
+  }
+
+  private func handleDockNewProjectRequest(userInfo: [AnyHashable: Any]?) {
+    if let pending = DockOpenCoordinator.shared.consumePendingNewProject() {
+      presentDockNewProject(directory: pending.directory, name: pending.name)
+      return
+    }
+    guard let directory = userInfo?["directory"] as? String else { return }
+    let name = userInfo?["name"] as? String
+    presentDockNewProject(directory: directory, name: name)
+  }
+
+  private func presentDockNewProject(directory: String, name: String?) {
+    let trimmedDirectory = directory.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedDirectory.isEmpty else { return }
+    let trimmedName = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+    // Using .sheet(item:) so setting prefill directly triggers the sheet with correct data
+    sidebarNewProjectPrefill = ProjectEditorSheet.Prefill(
+      name: (trimmedName?.isEmpty == false) ? trimmedName : nil,
+      directory: trimmedDirectory,
+      trustLevel: nil,
+      overview: nil,
+      profileId: nil,
+      parentId: nil
+    )
   }
 
   func applyDialogsAndAlerts<V: View>(to view: V) -> some View {

@@ -158,6 +158,7 @@ private struct SettingsWindowContainer: View {
 }
 
 #if os(macOS)
+  @MainActor
   final class AppDelegate: NSObject, NSApplicationDelegate {
     private var suppressNextReopenActivation = false
     private var suppressResetTask: Task<Void, Never>? = nil
@@ -166,7 +167,12 @@ private struct SettingsWindowContainer: View {
       print("🔗 [AppDelegate] Received URLs: \(urls)")
       print("🪟 [AppDelegate] Current windows count: \(application.windows.count)")
       print("🪟 [AppDelegate] Visible windows: \(application.windows.filter { $0.isVisible }.count)")
-      if urls.contains(where: { $0.scheme?.lowercased() == "codmate" && ($0.host ?? "").lowercased() == "notify" }) {
+      let fileURLs = urls.filter { $0.isFileURL }
+      let nonFileURLs = urls.filter { !$0.isFileURL }
+      if let directoryURL = firstDirectoryURL(in: fileURLs) {
+        handleDockFolderDrop(directoryURL)
+      }
+      if nonFileURLs.contains(where: { $0.scheme?.lowercased() == "codmate" && ($0.host ?? "").lowercased() == "notify" }) {
         suppressNextReopenActivation = true
         suppressResetTask?.cancel()
         suppressResetTask = Task { @MainActor [weak self] in
@@ -174,7 +180,18 @@ private struct SettingsWindowContainer: View {
           self?.suppressNextReopenActivation = false
         }
       }
-      ExternalURLRouter.handle(urls)
+      if !nonFileURLs.isEmpty {
+        ExternalURLRouter.handle(nonFileURLs)
+      }
+    }
+
+    func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+      handleDockFileOpenPaths([filename])
+    }
+
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+      let handled = handleDockFileOpenPaths(filenames)
+      sender.reply(toOpenOrPrint: handled ? .success : .failure)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool)
@@ -228,6 +245,47 @@ private struct SettingsWindowContainer: View {
         }
       #endif
       return .terminateNow
+    }
+
+    private func firstDirectoryURL(in urls: [URL]) -> URL? {
+      for url in urls {
+        guard url.isFileURL else { continue }
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+           isDirectory.boolValue {
+          return url.standardizedFileURL
+        }
+      }
+      return nil
+    }
+
+    @discardableResult
+    private func handleDockFileOpenPaths(_ paths: [String]) -> Bool {
+      let urls = paths.map { URL(fileURLWithPath: $0) }
+      guard let directoryURL = firstDirectoryURL(in: urls) else { return false }
+      handleDockFolderDrop(directoryURL)
+      return true
+    }
+
+    private func handleDockFolderDrop(_ url: URL) {
+      let directory = url.path
+      let name = url.lastPathComponent
+      guard !directory.isEmpty else { return }
+      MenuBarController.shared.handleDockIconClick()
+      NotificationCenter.default.post(name: .codMateOpenMainWindow, object: nil)
+      Task {
+        await waitForMainWindow()
+        DockOpenCoordinator.shared.enqueueNewProject(directory: directory, name: name)
+      }
+    }
+
+    @MainActor
+    private func waitForMainWindow() async {
+      if MainWindowCoordinator.shared.hasAttachedWindow { return }
+      for _ in 0..<20 {
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        if MainWindowCoordinator.shared.hasAttachedWindow { return }
+      }
     }
   }
 #endif

@@ -109,4 +109,5 @@ extension Notification.Name {
   static let codMateExpandAllTasks = Notification.Name("CodMate.ExpandAllTasks")
   static let codMateOpenSettings = Notification.Name("CodMate.OpenSettings")
   static let codMateFocusSessionSummary = Notification.Name("CodMate.FocusSessionSummary")
+  static let codMateOpenNewProject = Notification.Name("CodMate.OpenNewProject")
 }

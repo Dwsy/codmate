@@ -31,7 +31,7 @@ struct ContentView: View {
   @SceneStorage("cm.listHidden") var storeListHidden: Bool = false
   // Persist content column (sessions list / review left pane) preferred width
   @State var contentColumnIdealWidth: CGFloat = 420
-  @State var showSidebarNewProjectSheet = false
+  @State var sidebarNewProjectPrefill: ProjectEditorSheet.Prefill? = nil
   @State var projectEditorTarget: Project? = nil
   // When starting embedded sessions, record the initial command lines per-session
   @State var embeddedInitialCommands: [SessionSummary.ID: String] = [:]
@@ -136,7 +136,10 @@ struct ContentView: View {
   func makeSidebarActions() -> SidebarActions {
     SidebarActions(
       selectAllProjects: { viewModel.setSelectedProject(nil) },
-      requestNewProject: { showSidebarNewProjectSheet = true },
+      requestNewProject: {
+        // Using .sheet(item:) - set empty prefill to trigger sheet without pre-filled data
+        sidebarNewProjectPrefill = ProjectEditorSheet.Prefill()
+      },
       setDateDimension: { viewModel.dateDimension = $0 },
       setMonthStart: { viewModel.setSidebarMonthStart($0) },
       setSelectedDay: { viewModel.setSelectedDay($0) },
