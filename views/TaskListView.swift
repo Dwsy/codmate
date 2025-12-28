@@ -131,6 +131,30 @@ struct TaskListView: View {
               sessionAssigningTask = nil
             }
           },
+          onCreate: { title in
+            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            Task {
+              await workspaceVM.createTask(
+                title: trimmed,
+                description: nil,
+                projectId: projectId
+              )
+              if let newTask = workspaceVM.tasks.first(
+                where: {
+                  $0.projectId == projectId
+                    && $0.effectiveTitle.localizedCaseInsensitiveCompare(trimmed) == .orderedSame
+                }
+              ) {
+                var updatedTask = newTask
+                if !updatedTask.sessionIds.contains(session.id) {
+                  updatedTask.sessionIds.append(session.id)
+                  await workspaceVM.updateTask(updatedTask)
+                }
+              }
+              sessionAssigningTask = nil
+            }
+          },
           onCancel: {
             sessionAssigningTask = nil
           }
@@ -1334,6 +1358,7 @@ struct TaskDropDelegate: DropDelegate {
 struct TaskSelectionSheet: View {
   let tasks: [CodMateTask]
   let onSelect: (CodMateTask) -> Void
+  let onCreate: (String) -> Void
   let onCancel: () -> Void
   @State private var searchText = ""
 
@@ -1344,6 +1369,17 @@ struct TaskSelectionSheet: View {
     return tasks.filter { $0.effectiveTitle.localizedCaseInsensitiveContains(searchText) }
   }
 
+  private var trimmedSearch: String {
+    searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private var canCreateNewTask: Bool {
+    guard !trimmedSearch.isEmpty else { return false }
+    return !tasks.contains {
+      $0.effectiveTitle.localizedCaseInsensitiveCompare(trimmedSearch) == .orderedSame
+    }
+  }
+
   var body: some View {
     VStack(spacing: 16) {
       Text("Add to Task")
@@ -1352,6 +1388,23 @@ struct TaskSelectionSheet: View {
 
       TextField("Search tasks", text: $searchText)
         .textFieldStyle(.roundedBorder)
+        .onSubmit {
+          if canCreateNewTask {
+            onCreate(trimmedSearch)
+          }
+        }
+        .overlay(alignment: .trailing) {
+          if canCreateNewTask {
+            Button {
+              onCreate(trimmedSearch)
+            } label: {
+              Image(systemName: "plus.circle.fill")
+                .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 6)
+          }
+        }
 
       if filteredTasks.isEmpty {
         Text("No tasks found.")
@@ -1380,9 +1433,9 @@ struct TaskSelectionSheet: View {
       }
 
       HStack {
+        Spacer()
         Button("Cancel", action: onCancel)
           .keyboardShortcut(.cancelAction)
-        Spacer()
       }
     }
     .padding()
