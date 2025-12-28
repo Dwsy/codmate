@@ -18,11 +18,12 @@ struct TaskListView: View {
   var isUpdating: ((SessionSummary) -> Bool)? = nil
   var isAwaitingFollowup: ((SessionSummary) -> Bool)? = nil
   var onPrimarySelect: ((SessionSummary) -> Void)? = nil
-  var onNewSessionWithTaskContext: ((CodMateTask, SessionSummary) -> Void)? = nil
+  var onNewSessionWithTaskContext: ((CodMateTask, SessionSummary, SessionSource, ExternalTerminalProfile) -> Void)? = nil
   @State private var showNewTaskSheet = false
   @State private var newTaskTitle = ""
   @State private var newTaskDescription = ""
   @State private var editingTask: CodMateTask? = nil
+  @Environment(\.colorScheme) private var colorScheme
   @State private var draggedSession: SessionSummary? = nil
   @State private var taskToDelete: CodMateTask? = nil
   @State private var showDeleteConfirmation = false
@@ -501,16 +502,31 @@ struct TaskListView: View {
       }
       .contextMenu {
         if let project = projectForTask(taskWithSessions.task) {
-          Button("New Session") {
-            if let handler = onNewSessionWithTaskContext,
-              let anchor = latestLocalSession(for: taskWithSessions)
-            {
-              handler(taskWithSessions.task, anchor)
-            } else {
-              viewModel.newSession(project: project)
+          let anchor = latestLocalSession(for: taskWithSessions)
+          let items = buildNewMenuItems(anchor: anchor) { anchor, source, profile in
+            if let handler = onNewSessionWithTaskContext {
+              handler(taskWithSessions.task, anchor, source, profile)
             }
           }
-          Button("New Task…") {
+          if items.isEmpty {
+            Button {
+              if let handler = onNewSessionWithTaskContext, let anchor {
+                // Fallback to default behavior if menu generation failed but anchor exists
+                // We'll use the anchor's source and default profile
+                let defaultProfile = ExternalTerminalProfileStore.shared.resolvePreferredProfile(
+                  id: viewModel.preferences.defaultResumeExternalAppId
+                ) ?? ExternalTerminalProfileStore.shared.availableProfiles().first!
+                handler(taskWithSessions.task, anchor, anchor.source, defaultProfile)
+              } else {
+                viewModel.newSession(project: project)
+              }
+            } label: {
+              Label("Collaborate with", systemImage: "person.2")
+            }
+          } else {
+            Menu { SplitMenuItemsView(items: items) } label: { Label("Collaborate with…", systemImage: "person.2") }
+          }
+          Button {
             let draft = CodMateTask(
               title: "",
               description: nil,
@@ -518,17 +534,23 @@ struct TaskListView: View {
             )
             editingMode = .new
             editingTask = draft
+          } label: {
+            Label("New Task…", systemImage: "checklist")
           }
-          Divider()
         }
-        Button("Edit Task") {
+        Button {
           editingMode = .edit
           editingTask = taskWithSessions.task
+        } label: {
+          Label("Edit Task", systemImage: "pencil")
         }
-        Button("Delete Task", role: .destructive) {
+        Button(role: .destructive) {
           taskToDelete = taskWithSessions.task
           showDeleteConfirmation = true
+        } label: {
+          Label("Delete Task", systemImage: "trash")
         }
+        taskCollapseContextMenuItems()
       }
 
     }
@@ -562,17 +584,39 @@ struct TaskListView: View {
       handleClick(on: session)
     }
     .contextMenu {
-      Button("Resume") { onResume(session) }
-      Button("Export as Markdown") { onExportMarkdown(session) }
+      let resumeItems = buildResumeMenuItems(for: session)
+      if !resumeItems.isEmpty {
+        Menu { SplitMenuItemsView(items: resumeItems) } label: {
+          let icon = assetIconForSessionSource(session.source)
+          Label {
+            Text("Resume session")
+          } icon: {
+            if let menuIcon = menuAssetNSImage(
+              named: icon,
+              invertForDarkMode: icon == "ChatGPTIcon" && colorScheme == .dark
+            ) {
+              Image(nsImage: menuIcon)
+                .frame(width: 14, height: 14)
+            } else {
+              Image(icon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 14, height: 14)
+                .clipped()
+                .modifier(DarkModeInvertModifier(active: icon == "ChatGPTIcon" && colorScheme == .dark))
+            }
+          }
+        }
+      }
       if let project = projectForSession(session, parentTask: parentTask) {
-        Divider()
         let items = buildNewMenuItems(anchor: session)
         if items.isEmpty {
-          Button("New Session") { viewModel.newSession(project: project) }
+          Button { viewModel.newSession(project: project) } label: { Label("New Session", systemImage: "plus") }
         } else {
-          Menu("New Session…") { SplitMenuItemsView(items: items) }
+          Menu { SplitMenuItemsView(items: items) } label: { Label("New Session…", systemImage: "plus") }
         }
-        Button("New Task…") {
+        Divider()
+        Button {
           let draft = CodMateTask(
             title: "",
             description: nil,
@@ -580,28 +624,32 @@ struct TaskListView: View {
           )
           editingMode = .new
           editingTask = draft
+        } label: {
+          Label("New Task…", systemImage: "checklist")
         }
         if parentTask == nil {
-          Button("Add to Task…") {
-            sessionAssigningTask = session
-          }
+          Button { sessionAssigningTask = session } label: { Label("Add to Task…", systemImage: "plus.circle") }
         }
       }
       if parentTask != nil {
-        Divider()
-        Button("Remove from Task") {
+        Button {
           Task {
             guard let task = parentTask else { return }
             var updatedTask = task
             updatedTask.sessionIds.removeAll { $0 == session.id }
             await viewModel.workspaceVM?.updateTask(updatedTask)
           }
+        } label: {
+          Label("Remove from Task", systemImage: "minus.circle")
         }
       }
       Divider()
-      Button("Copy Absolute Path") { copyAbsolutePath(session) }
-      Button("Reveal in Finder") { onReveal(session) }
-      Button("Move to Trash", role: .destructive) { onDeleteRequest(session) }
+      Button { copyAbsolutePath(session) } label: { Label("Copy Absolute Path", systemImage: "doc.on.doc") }
+      Button { onExportMarkdown(session) } label: { Label("Export as Markdown", systemImage: "square.and.arrow.up") }
+      Divider()
+      Button { onReveal(session) } label: { Label("Reveal in Finder", systemImage: "finder") }
+      Button(role: .destructive) { onDeleteRequest(session) } label: { Label("Move to Trash", systemImage: "trash") }
+      taskCollapseContextMenuItems()
     }
     .onDrag {
       self.draggedSession = session
@@ -757,29 +805,37 @@ struct TaskListView: View {
       let project = viewModel.projects.first(where: { $0.id == projectId })
     {
       let items = buildNewMenuItems(anchor: latestAnchor(for: project))
-      Menu("New Session…") {
+      Menu {
         if items.isEmpty {
           Button("No recent session to anchor", action: {}).disabled(true)
         } else {
           SplitMenuItemsView(items: items)
         }
+      } label: {
+        Label("New Session…", systemImage: "plus")
       }
-      Button("New Task…") {
+      Button {
         newTaskTitle = ""
         newTaskDescription = ""
         showNewTaskSheet = true
+      } label: {
+        Label("New Task…", systemImage: "checklist")
       }
     }
     Divider()
-    Button("Collapse all Tasks") {
+    Button {
       NotificationCenter.default.post(
         name: .codMateCollapseAllTasks, object: nil,
         userInfo: ["projectId": currentProjectId as Any])
+    } label: {
+      Label("Collapse all Tasks", systemImage: "arrow.down.right.and.arrow.up.left")
     }
-    Button("Expand all Tasks") {
+    Button {
       NotificationCenter.default.post(
         name: .codMateExpandAllTasks, object: nil,
         userInfo: ["projectId": currentProjectId as Any])
+    } label: {
+      Label("Expand all Tasks", systemImage: "arrow.up.left.and.arrow.down.right")
     }
   }
 
@@ -789,7 +845,81 @@ struct TaskListView: View {
     pb.setString(session.fileURL.path, forType: .string)
   }
 
-  private func buildNewMenuItems(anchor: SessionSummary?) -> [SplitMenuItem] {
+  @ViewBuilder
+  private func taskCollapseContextMenuItems() -> some View {
+    Divider()
+    Button {
+      NotificationCenter.default.post(
+        name: .codMateCollapseAllTasks, object: nil,
+        userInfo: ["projectId": currentProjectId as Any])
+    } label: {
+      Label("Collapse all Tasks", systemImage: "arrow.down.right.and.arrow.up.left")
+    }
+    Button {
+      NotificationCenter.default.post(
+        name: .codMateExpandAllTasks, object: nil,
+        userInfo: ["projectId": currentProjectId as Any])
+    } label: {
+      Label("Expand all Tasks", systemImage: "arrow.up.left.and.arrow.down.right")
+    }
+  }
+
+  private func buildResumeMenuItems(for session: SessionSummary) -> [SplitMenuItem] {
+    var items: [SplitMenuItem] = []
+
+    if viewModel.preferences.isEmbeddedTerminalEnabled {
+      items.append(
+        SplitMenuItem(
+          id: "resume-embedded-\(session.id)",
+          kind: .action(
+            title: "CodMate",
+            systemImage: "macwindow",
+            run: {
+              NotificationCenter.default.post(
+                name: .codMateResumeSession,
+                object: nil,
+                userInfo: ["sessionId": session.id, "forceEmbedded": true]
+              )
+            }
+          )
+        )
+      )
+    }
+
+    for profile in externalTerminalOrderedProfiles(includeNone: false) {
+      items.append(
+        SplitMenuItem(
+          id: "resume-\(profile.id)-\(session.id)",
+          kind: .action(
+            title: profile.displayTitle,
+            systemImage: "terminal",
+            run: {
+              NotificationCenter.default.post(
+                name: .codMateResumeSession,
+                object: nil,
+                userInfo: ["sessionId": session.id, "profileId": profile.id]
+              )
+            }
+          )
+        )
+      )
+    }
+
+    return items
+  }
+
+  private func assetIconForSessionSource(_ source: SessionSource) -> String {
+    switch source.baseKind {
+    case .codex: return "ChatGPTIcon"
+    case .claude: return "ClaudeIcon"
+    case .gemini: return "GeminiIcon"
+    }
+  }
+
+  private func buildNewMenuItems(
+    anchor: SessionSummary?,
+    customAction: ((SessionSummary, SessionSource, ExternalTerminalProfile) -> Void)? = nil
+  ) -> [SplitMenuItem] {
     guard let anchor else { return [] }
     let allowed = Set(viewModel.allowedSources(for: anchor))
     let requestedOrder: [ProjectSessionSource] = [.claude, .codex, .gemini]
@@ -808,9 +938,31 @@ struct TaskListView: View {
 
     func launchItems(for source: SessionSource) -> [SplitMenuItem] {
       let key = sourceKey(source)
-      return externalTerminalMenuItems(idPrefix: key) { profile in
-        onNewSession(with: anchor, using: source, profile: profile)
+      var items = externalTerminalMenuItems(idPrefix: key) { profile in
+        if let customAction {
+          customAction(anchor, source, profile)
+        } else {
+          onNewSession(with: anchor, using: source, profile: profile)
+        }
       }
+      if viewModel.preferences.isEmbeddedTerminalEnabled {
+        let embedded = embeddedTerminalProfile()
+        items.insert(
+          SplitMenuItem(
+            id: "\(key)-\(embedded.id)",
+            kind: .action(
+              title: embedded.displayTitle,
+              systemImage: "macwindow",
+              run: {
+                if let customAction {
+                  customAction(anchor, source, embedded)
+                } else {
+                  onNewSession(with: anchor, using: source, profile: embedded)
+                }
+              })
+          ), at: 0)
+      }
+      return items
     }
 
     func remoteSource(for base: ProjectSessionSource, host: String) -> SessionSource {
@@ -818,6 +970,14 @@ struct TaskListView: View {
       case .codex: return .codexRemote(host: host)
       case .claude: return .claudeRemote(host: host)
       case .gemini: return .geminiRemote(host: host)
+      }
+    }
+
+    func providerAssetIcon(_ source: ProjectSessionSource) -> String {
+      switch source {
+      case .codex: return "ChatGPTIcon"
+      case .claude: return "ClaudeIcon"
+      case .gemini: return "GeminiIcon"
       }
     }
 
@@ -831,14 +991,14 @@ struct TaskListView: View {
           providerItems.append(
             .init(
               id: "remote-\(base.rawValue)-\(host)",
-              kind: .submenu(title: host, items: launchItems(for: remote))
+              kind: .submenu(title: host, systemImage: "network", items: launchItems(for: remote))
             ))
         }
       }
       menuItems.append(
         .init(
           id: "provider-\(base.rawValue)",
-          kind: .submenu(title: base.displayName, items: providerItems)
+          kind: .submenu(title: base.displayName, assetImage: providerAssetIcon(base), items: providerItems)
         ))
     }
 
@@ -847,7 +1007,7 @@ struct TaskListView: View {
       menuItems.append(
         .init(
           id: "fallback-\(sourceKey(fallback))",
-          kind: .submenu(title: fallback.branding.displayName, items: launchItems(for: fallback))
+          kind: .submenu(title: fallback.branding.displayName, systemImage: "terminal", items: launchItems(for: fallback))
         ))
     }
     return menuItems
@@ -861,6 +1021,12 @@ struct TaskListView: View {
     let target = anchor.overridingSource(source)
     viewModel.recordIntentForDetailNew(anchor: target)
     let dir = target.cwd
+
+    if profile.id == "codmate.embedded" {
+      _ = viewModel.openNewSession(session: target)
+      return
+    }
+
     guard viewModel.copyNewSessionCommandsIfEnabled(session: target, destinationApp: profile)
     else { return }
     if profile.usesWarpCommands {
@@ -1169,6 +1335,14 @@ struct TaskSelectionSheet: View {
   let tasks: [CodMateTask]
   let onSelect: (CodMateTask) -> Void
   let onCancel: () -> Void
+  @State private var searchText = ""
+
+  var filteredTasks: [CodMateTask] {
+    if searchText.isEmpty {
+      return tasks
+    }
+    return tasks.filter { $0.effectiveTitle.localizedCaseInsensitiveContains(searchText) }
+  }
 
   var body: some View {
     VStack(spacing: 16) {
@@ -1176,12 +1350,15 @@ struct TaskSelectionSheet: View {
         .font(.title2)
         .fontWeight(.bold)
 
-      if tasks.isEmpty {
-        Text("No tasks found in this project.")
+      TextField("Search tasks", text: $searchText)
+        .textFieldStyle(.roundedBorder)
+
+      if filteredTasks.isEmpty {
+        Text("No tasks found.")
           .foregroundColor(.secondary)
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
-        List(tasks) { task in
+        List(filteredTasks) { task in
           HStack {
             Image(systemName: task.status.icon)
               .foregroundColor(statusColor(task.status))

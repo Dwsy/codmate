@@ -22,8 +22,9 @@ struct SessionListColumnView: View {
   // notify which item is the user's primary (last clicked) for detail focus
   var onPrimarySelect: ((SessionSummary) -> Void)? = nil
   // callback for launching new session with task context
-  var onNewSessionWithTaskContext: ((CodMateTask, SessionSummary) -> Void)? = nil
+  var onNewSessionWithTaskContext: ((CodMateTask, SessionSummary, SessionSource, ExternalTerminalProfile) -> Void)? = nil
   @EnvironmentObject private var viewModel: SessionListViewModel
+  @Environment(\.colorScheme) private var colorScheme
   @State private var showNewProjectSheet = false
   @State private var showNewTaskSheet = false
   @State private var newTaskTitle = ""
@@ -313,10 +314,29 @@ struct SessionListColumnView: View {
     let project = projectForSession(session)
 
     if session.source == .codexLocal || session.source == .geminiLocal {
-      Button {
-        onResume(session)
-      } label: {
-        Label("Resume", systemImage: "play.fill")
+      let resumeItems = buildResumeMenuItems(for: session)
+      if !resumeItems.isEmpty {
+        Menu { SplitMenuItemsView(items: resumeItems) } label: {
+          let icon = assetIconForSessionSource(session.source)
+          Label {
+            Text("Resume")
+          } icon: {
+            if let menuIcon = menuAssetNSImage(
+              named: icon,
+              invertForDarkMode: icon == "ChatGPTIcon" && colorScheme == .dark
+            ) {
+              Image(nsImage: menuIcon)
+                .frame(width: 14, height: 14)
+            } else {
+              Image(icon)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 14, height: 14)
+                .clipped()
+                .modifier(DarkModeInvertModifier(active: icon == "ChatGPTIcon" && colorScheme == .dark))
+            }
+          }
+        }
       }
     }
     Divider()
@@ -355,10 +375,12 @@ struct SessionListColumnView: View {
 
     if !viewModel.projects.isEmpty {
       Menu {
-        Button("New Project…") {
+        Button {
           newProjectPrefill = prefillForProject(from: session)
           newProjectAssignIDs = [session.id]
           showNewProjectSheet = true
+        } label: {
+          Label("New Project…", systemImage: "square.grid.2x2")
         }
         Divider()
         ForEach(viewModel.projects) { p in
@@ -396,6 +418,20 @@ struct SessionListColumnView: View {
       Label(
         isBatchDelete ? "Move Sessions to Trash" : "Move Session to Trash",
         systemImage: "trash")
+    }
+
+    if shouldShowTaskCollapseControls {
+      Divider()
+      Button {
+        postTaskCollapseNotification(.codMateCollapseAllTasks)
+      } label: {
+        Label("Collapse all Tasks", systemImage: "arrow.down.right.and.arrow.up.left")
+      }
+      Button {
+        postTaskCollapseNotification(.codMateExpandAllTasks)
+      } label: {
+        Label("Expand all Tasks", systemImage: "arrow.up.left.and.arrow.down.right")
+      }
     }
   }
 
@@ -533,20 +569,26 @@ extension SessionListColumnView {
       if let project {
         newSessionMenu(for: project, anchor: anchor)
         if viewModel.workspaceVM != nil {
-          Button("New Task…") {
+          Button {
             newTaskTitle = ""
             newTaskDescription = ""
             showNewTaskSheet = true
+          } label: {
+            Label("New Task…", systemImage: "checklist")
           }
         }
       }
       if shouldShowTaskCollapseControls {
         Divider()
-        Button("Collapse all Tasks") {
+        Button {
           postTaskCollapseNotification(.codMateCollapseAllTasks)
+        } label: {
+          Label("Collapse all Tasks", systemImage: "arrow.down.right.and.arrow.up.left")
         }
-        Button("Expand all Tasks") {
+        Button {
           postTaskCollapseNotification(.codMateExpandAllTasks)
+        } label: {
+          Label("Expand all Tasks", systemImage: "arrow.up.left.and.arrow.down.right")
         }
       }
     }
@@ -694,14 +736,72 @@ extension SessionListColumnView {
     viewModel.resolvedWorkingDirectory(for: session)
   }
 
+  private func assetIconForSessionSource(_ source: SessionSource) -> String {
+    switch source.baseKind {
+    case .codex: return "ChatGPTIcon"
+    case .claude: return "ClaudeIcon"
+    case .gemini: return "GeminiIcon"
+    }
+  }
+
+  private func buildResumeMenuItems(for session: SessionSummary) -> [SplitMenuItem] {
+    var items: [SplitMenuItem] = []
+
+    if viewModel.preferences.isEmbeddedTerminalEnabled {
+      items.append(
+        SplitMenuItem(
+          id: "resume-embedded-\(session.id)",
+          kind: .action(
+            title: "CodMate",
+            systemImage: "macwindow",
+            run: {
+              NotificationCenter.default.post(
+                name: .codMateResumeSession,
+                object: nil,
+                userInfo: ["sessionId": session.id, "forceEmbedded": true]
+              )
+            }
+          )
+        )
+      )
+    }
+
+    for profile in externalTerminalOrderedProfiles(includeNone: false) {
+      items.append(
+        SplitMenuItem(
+          id: "resume-\(profile.id)-\(session.id)",
+          kind: .action(
+            title: profile.displayTitle,
+            systemImage: "terminal",
+            run: {
+              NotificationCenter.default.post(
+                name: .codMateResumeSession,
+                object: nil,
+                userInfo: ["sessionId": session.id, "profileId": profile.id]
+              )
+            }
+          )
+        )
+      )
+    }
+
+    return items
+  }
+
   private func launchNewSession(
     for session: SessionSummary,
     using source: SessionSource,
     profile: ExternalTerminalProfile
   ) {
-    let target = session.overridingSource(source)
+    let target = source == session.source ? session : session.overridingSource(source)
     viewModel.recordIntentForDetailNew(anchor: target)
     let dir = workingDirectory(for: target)
+
+    if profile.id == "codmate.embedded" {
+      _ = viewModel.openNewSession(session: target)
+      return
+    }
+
     guard viewModel.copyNewSessionCommandsIfEnabled(session: target, destinationApp: profile)
     else { return }
     if profile.usesWarpCommands {
@@ -781,9 +881,23 @@ extension SessionListColumnView {
 
     func launchItems(for source: SessionSource) -> [SplitMenuItem] {
       let key = sourceKey(source)
-      return externalTerminalMenuItems(idPrefix: key) { profile in
+      var items = externalTerminalMenuItems(idPrefix: key) { profile in
         launchNewSession(for: anchor, using: source, profile: profile)
       }
+      if viewModel.preferences.isEmbeddedTerminalEnabled {
+        let embedded = embeddedTerminalProfile()
+        items.insert(
+          SplitMenuItem(
+            id: "\(key)-\(embedded.id)",
+            kind: .action(
+              title: embedded.displayTitle,
+              systemImage: "macwindow",
+              run: {
+                launchNewSession(for: anchor, using: source, profile: embedded)
+              })
+          ), at: 0)
+      }
+      return items
     }
 
     func remoteSource(for base: ProjectSessionSource, host: String) -> SessionSource {
@@ -791,6 +905,14 @@ extension SessionListColumnView {
       case .codex: return .codexRemote(host: host)
       case .claude: return .claudeRemote(host: host)
       case .gemini: return .geminiRemote(host: host)
+      }
+    }
+
+    func providerAssetIcon(_ source: ProjectSessionSource) -> String {
+      switch source {
+      case .codex: return "ChatGPTIcon"
+      case .claude: return "ClaudeIcon"
+      case .gemini: return "GeminiIcon"
       }
     }
 
@@ -804,14 +926,14 @@ extension SessionListColumnView {
           providerItems.append(
             .init(
               id: "remote-\(base.rawValue)-\(host)",
-              kind: .submenu(title: host, items: launchItems(for: remote))
+              kind: .submenu(title: host, systemImage: "network", items: launchItems(for: remote))
             ))
         }
       }
       menuItems.append(
         .init(
           id: "provider-\(base.rawValue)",
-          kind: .submenu(title: base.displayName, items: providerItems)
+          kind: .submenu(title: base.displayName, assetImage: providerAssetIcon(base), items: providerItems)
         ))
     }
 
@@ -822,6 +944,7 @@ extension SessionListColumnView {
           id: "fallback-\(sourceKey(fallbackSource))",
           kind: .submenu(
             title: fallbackSource.branding.displayName,
+            systemImage: "terminal",
             items: launchItems(for: fallbackSource)
           )))
     }

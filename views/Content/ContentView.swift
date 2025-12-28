@@ -257,9 +257,19 @@ struct ContentView: View {
     return vm
   }
 
-  func resumeFromList(_ session: SessionSummary) {
+  func resumeFromList(_ session: SessionSummary, forceEmbedded: Bool = false, profileId: String? = nil) {
     selection = [session.id]
     selectionPrimaryId = session.id
+    if forceEmbedded {
+      startEmbedded(for: session)
+      return
+    }
+    if let pid = profileId,
+      let profile = ExternalTerminalProfileStore.shared.profile(for: pid)
+    {
+      launchResume(for: session, using: session.source, profile: profile)
+      return
+    }
     if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
       startEmbedded(for: session)
     } else {
@@ -459,7 +469,12 @@ struct ContentView: View {
 
   /// Launches a new session using the given anchor and shared task context.
   /// This regenerates ~/.codmate/tasks/context-<taskId>.md before launching.
-  func newSessionWithTaskContext(task: CodMateTask, anchor: SessionSummary) {
+  func newSessionWithTaskContext(
+    task: CodMateTask,
+    anchor: SessionSummary,
+    source: SessionSource,
+    profile: ExternalTerminalProfile
+  ) {
     // Only support local sessions as anchors for now; remote sessions
     // cannot reliably access the local ~/.codmate/tasks directory.
     guard !anchor.isRemote else { return }
@@ -480,50 +495,26 @@ struct ContentView: View {
 
       #if APPSTORE
         // App Store 版本不支持嵌入式终端，直接使用外部终端流程。
-        openPreferredExternalForNew(session: anchor, initialPrompt: prompt)
+        launchNewSession(
+          for: anchor,
+          using: source,
+          profile: profile,
+          initialPrompt: prompt,
+          warpTitle: task.effectiveTitle
+        )
       #else
-        if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+        if profile.id == "codmate.embedded" {
           // 在内置终端中运行新的会话，并把 Task 上下文作为初始提示注入。
-          selectedDetailTab = .terminal
-          sessionDetailTabs[anchor.id] = .terminal
-          let source = anchor.source
-          let target = source == anchor.source ? anchor : anchor.overridingSource(source)
-          let cwd =
-            FileManager.default.fileExists(atPath: target.cwd)
-            ? target.cwd : target.fileURL.deletingLastPathComponent().path
-          // 构造带 Task 上下文的 CLI 调用
-          let invocation = viewModel.buildNewSessionCLIInvocationRespectingProject(
-            session: target,
-            initialPrompt: prompt
-          )
-          let cd = "cd " + shellEscapeForCD(cwd)
-          let preclear = "printf '\\033[?1049h\\033[H\\033[2J'"
-
-          // 使用虚拟 anchor id 以便后续 rekey 到真实新会话。
-          let anchorId = "new-anchor:task:\(task.id.uuidString):\(Int(Date().timeIntervalSince1970)))"
-          embeddedInitialCommands[anchorId] =
-            preclear + "\n" + cd + "\n" + invocation + "\n"
-          runningSessionIDs.insert(anchorId)
-          selectedTerminalKey = anchorId
-          sessionDetailTabs[anchorId] = .terminal
-          pendingEmbeddedRekeys.append(
-            PendingEmbeddedRekey(
-              anchorId: anchorId,
-              expectedCwd: canonicalizePath(cwd),
-              t0: Date(),
-              selectOnSuccess: true,
-              projectId: task.projectId
-            )
-          )
-          // Event-driven incremental refresh for quick visibility in Tasks/Sessions lists
-          applyIncrementalHint(for: target.source, directory: cwd)
-          scheduleIncrementalRefresh(for: target.source, directory: cwd)
-          selection.removeAll()
-          isDetailMaximized = true
-          columnVisibility = .detailOnly
+          startEmbeddedNewWithPrompt(anchor: anchor, using: source, prompt: prompt, task: task)
         } else {
-          // 回退到现有的外部终端逻辑
-          openPreferredExternalForNew(session: anchor, initialPrompt: prompt)
+          // 使用选定的外部终端配置
+          launchNewSession(
+            for: anchor,
+            using: source,
+            profile: profile,
+            initialPrompt: prompt,
+            warpTitle: task.effectiveTitle
+          )
         }
       #endif
 
@@ -532,6 +523,50 @@ struct ContentView: View {
         body: "Command copied. Session starts with shared Task context."
       )
     }
+  }
+
+  func startEmbeddedNewWithPrompt(
+    anchor: SessionSummary,
+    using source: SessionSource,
+    prompt: String,
+    task: CodMateTask
+  ) {
+    selectedDetailTab = .terminal
+    sessionDetailTabs[anchor.id] = .terminal
+    let target = source == anchor.source ? anchor : anchor.overridingSource(source)
+    let cwd =
+      FileManager.default.fileExists(atPath: target.cwd)
+      ? target.cwd : target.fileURL.deletingLastPathComponent().path
+    // 构造带 Task 上下文的 CLI 调用
+    let invocation = viewModel.buildNewSessionCLIInvocationRespectingProject(
+      session: target,
+      initialPrompt: prompt
+    )
+    let cd = "cd " + shellEscapeForCD(cwd)
+    let preclear = "printf '\\033[?1049h\\033[H\\033[2J'"
+
+    // 使用虚拟 anchor id 以便后续 rekey 到真实新会话。
+    let anchorId = "new-anchor:task:\(task.id.uuidString):\(Int(Date().timeIntervalSince1970)))"
+    embeddedInitialCommands[anchorId] =
+      preclear + "\n" + cd + "\n" + invocation + "\n"
+    runningSessionIDs.insert(anchorId)
+    selectedTerminalKey = anchorId
+    sessionDetailTabs[anchorId] = .terminal
+    pendingEmbeddedRekeys.append(
+      PendingEmbeddedRekey(
+        anchorId: anchorId,
+        expectedCwd: canonicalizePath(cwd),
+        t0: Date(),
+        selectOnSuccess: true,
+        projectId: task.projectId
+      )
+    )
+    // Event-driven incremental refresh for quick visibility in Tasks/Sessions lists
+    applyIncrementalHint(for: target.source, directory: cwd)
+    scheduleIncrementalRefresh(for: target.source, directory: cwd)
+    selection.removeAll()
+    isDetailMaximized = true
+    columnVisibility = .detailOnly
   }
 
   func workingDirectory(for session: SessionSummary) -> String {
@@ -992,14 +1027,21 @@ struct ContentView: View {
   func launchNewSession(
     for session: SessionSummary,
     using source: SessionSource,
-    profile: ExternalTerminalProfile
+    profile: ExternalTerminalProfile,
+    initialPrompt: String? = nil,
+    warpTitle: String? = nil
   ) {
     let target = source == session.source ? session : session.overridingSource(source)
     viewModel.recordIntentForDetailNew(anchor: target)
     let dir = workingDirectory(for: target)
 
-    guard viewModel.copyNewSessionCommandsIfEnabled(session: target, destinationApp: profile)
-    else { return }
+    guard viewModel.copyNewSessionCommandsIfEnabled(
+      session: target,
+      destinationApp: profile,
+      initialPrompt: initialPrompt,
+      warpTitleOverride: warpTitle
+    ) else { return }
+
     if profile.isNone {
       if viewModel.shouldCopyCommandsToClipboard {
         Task {
@@ -1024,10 +1066,18 @@ struct ContentView: View {
 
     if profile.isTerminal {
       #if APPSTORE
-        _ = viewModel.copyNewSessionCommandsIfEnabled(session: target, destinationApp: profile)
+        _ = viewModel.copyNewSessionCommandsIfEnabled(
+          session: target,
+          destinationApp: profile,
+          initialPrompt: initialPrompt,
+          warpTitleOverride: warpTitle
+        )
         _ = viewModel.openAppleTerminal(at: dir)
       #else
-        if !viewModel.openNewSession(session: target) {
+        // Use openNewSessionRespectingProject to handle initialPrompt if supported
+        if let prompt = initialPrompt {
+           viewModel.openNewSessionRespectingProject(session: target, initialPrompt: prompt)
+        } else if !viewModel.openNewSession(session: target) {
           _ = viewModel.copyNewSessionCommandsIfEnabled(session: target, destinationApp: profile)
           _ = viewModel.openAppleTerminal(at: dir)
           if viewModel.shouldCopyCommandsToClipboard {
@@ -1043,10 +1093,18 @@ struct ContentView: View {
     }
 
     if !profile.supportsCommandResolved {
-      _ = viewModel.copyNewSessionCommandsIfEnabled(session: target, destinationApp: profile)
+      _ = viewModel.copyNewSessionCommandsIfEnabled(
+        session: target,
+        destinationApp: profile,
+        initialPrompt: initialPrompt,
+        warpTitleOverride: warpTitle
+      )
     }
     let cmd = profile.supportsCommandResolved
-      ? viewModel.buildNewSessionCLIInvocationRespectingProject(session: target)
+      ? viewModel.buildNewSessionCLIInvocationRespectingProject(
+          session: target,
+          initialPrompt: initialPrompt
+        )
       : nil
     viewModel.openPreferredTerminalViaScheme(profile: profile, directory: dir, command: cmd)
     if !profile.supportsCommandResolved, viewModel.shouldCopyCommandsToClipboard {
