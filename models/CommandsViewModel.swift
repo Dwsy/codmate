@@ -69,16 +69,28 @@ class CommandsViewModel: ObservableObject {
   }
 
   func updateCommandEnabled(id: String, value: Bool) {
+    updateLocalCommand(id: id) { record in
+      record.isEnabled = value
+    }
     Task {
       await store.update(id: id) { record in
         record.isEnabled = value
       }
-      await load()
       await syncToProviders()
     }
   }
 
   func updateCommandTarget(id: String, target: CommandTarget, value: Bool) {
+    updateLocalCommand(id: id) { record in
+      switch target {
+      case .codex:
+        record.targets.codex = value
+      case .claude:
+        record.targets.claude = value
+      case .gemini:
+        record.targets.gemini = value
+      }
+    }
     Task {
       await store.update(id: id) { record in
         switch target {
@@ -90,7 +102,6 @@ class CommandsViewModel: ObservableObject {
           record.targets.gemini = value
         }
       }
-      await load()
       await syncToProviders()
     }
   }
@@ -169,5 +180,12 @@ class CommandsViewModel: ObservableObject {
 
   var totalEnabledCount: Int {
     commands.filter { $0.isEnabled }.count
+  }
+
+  private func updateLocalCommand(id: String, mutate: (inout CommandRecord) -> Void) {
+    guard let index = commands.firstIndex(where: { $0.id == id }) else { return }
+    var updated = commands
+    mutate(&updated[index])
+    commands = updated
   }
 }

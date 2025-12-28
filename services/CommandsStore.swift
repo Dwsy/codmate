@@ -89,7 +89,23 @@ actor CommandsStore {
   func update(id: String, mutate: (inout CommandRecord) -> Void) {
     var records = load()
     guard let idx = records.firstIndex(where: { $0.id == id }) else { return }
-    mutate(&records[idx])
+    let baseRecord = loadCommandFromMarkdown(records[idx]) ?? records[idx]
+    var updatedRecord = baseRecord
+    mutate(&updatedRecord)
+
+    // Keep markdown in sync for target/metadata changes without clobbering prompt.
+    writeMarkdownFile(for: updatedRecord)
+
+    records[idx] = CommandRecord(
+      id: updatedRecord.id,
+      name: updatedRecord.id,
+      description: "",
+      prompt: "",
+      isEnabled: updatedRecord.isEnabled,
+      source: updatedRecord.source,
+      path: updatedRecord.path,
+      installedAt: updatedRecord.installedAt
+    )
     save(records)
   }
 

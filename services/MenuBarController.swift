@@ -16,12 +16,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   private let mcpStore = MCPServersStore()
   private let skillsStore = SkillsStore()
   private let skillsSyncer = SkillsSyncService()
+  private let commandsStore = CommandsStore()
+  private let commandsSyncer = CommandsSyncService()
 
   private var cachedBindings = ProvidersRegistryService.Bindings(
     activeProvider: nil, defaultModel: nil)
   private var cachedProviders: [ProvidersRegistryService.Provider] = []
   private var cachedMCPServers: [MCPServer] = []
   private var cachedSkills: [SkillRecord] = []
+  private var cachedCommands: [CommandRecord] = []
   private var refreshTask: Task<Void, Never>?
   private var actionHandlers: [() -> Void] = []
   private var preferencesCancellable: AnyCancellable?
@@ -312,6 +315,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     statusMenu.addItem(.separator())
 
     // 4) Extensions
+    let commandsItem = NSMenuItem(title: "Commands", action: nil, keyEquivalent: "")
+    applySystemImage(commandsItem, name: "command")
+    commandsItem.submenu = buildCommandsMenu()
+    statusMenu.addItem(commandsItem)
+
     let mcpItem = NSMenuItem(title: "MCP Servers", action: nil, keyEquivalent: "")
     applySystemImage(mcpItem, name: "puzzlepiece.extension")
     mcpItem.submenu = buildMCPServersMenu()
@@ -661,6 +669,26 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       let item = actionItem(title: skill.name, action: #selector(handleToggleSkill(_:)))
       item.representedObject = skill.id
       item.state = skill.isEnabled ? .on : .off
+      menu.addItem(item)
+    }
+
+    return menu
+  }
+
+  private func buildCommandsMenu() -> NSMenu {
+    let menu = NSMenu()
+    let commands = cachedCommands.sorted {
+      $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+    }
+    if commands.isEmpty {
+      menu.addItem(disabledItem(title: "No commands"))
+      return menu
+    }
+
+    for command in commands.prefix(10) {
+      let item = actionItem(title: command.name, action: #selector(handleToggleCommand(_:)))
+      item.representedObject = command.id
+      item.state = command.isEnabled ? .on : .off
       menu.addItem(item)
     }
 
@@ -1022,9 +1050,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       async let providers = providersRegistry.listProviders()
       async let mcpServers = mcpStore.list()
       async let skills = skillsStore.list()
+      async let commands = commandsStore.listWithBuiltIns()
 
-      let (bindingsResult, providersResult, mcpResult, skillsResult) = await (
-        bindings, providers, mcpServers, skills
+      let (bindingsResult, providersResult, mcpResult, skillsResult, commandsResult) = await (
+        bindings, providers, mcpServers, skills, commands
       )
 
       await MainActor.run {
@@ -1032,6 +1061,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         self.cachedProviders = providersResult
         self.cachedMCPServers = mcpResult
         self.cachedSkills = skillsResult
+        self.cachedCommands = commandsResult
         self.rebuildMenu()
       }
     }
@@ -1273,6 +1303,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
   }
 
+  @objc private func handleToggleCommand(_ sender: NSMenuItem) {
+    guard let id = sender.representedObject as? String else { return }
+    Task { [weak self] in
+      await self?.toggleCommand(id: id)
+    }
+  }
+
   private func resumeSession(_ session: SessionSummary) {
     guard let preferences else { return }
     activateApp(raiseWindows: true)
@@ -1476,6 +1513,41 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     await MainActor.run {
       cachedSkills = records
+      rebuildMenu()
+    }
+  }
+
+  private func toggleCommand(id: String) async {
+    if SecurityScopedBookmarks.shared.isSandboxed {
+      let home = SessionPreferencesStore.getRealUserHomeURL()
+      _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(
+        directory: home, purpose: .generalAccess)
+    }
+
+    await commandsStore.update(id: id) { record in
+      record.isEnabled.toggle()
+    }
+
+    let records = await commandsStore.listWithBuiltIns()
+
+    let home = SessionPreferencesStore.getRealUserHomeURL()
+    AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
+      directory: home.appendingPathComponent(".codex", isDirectory: true),
+      purpose: .generalAccess,
+      message: "Authorize ~/.codex to sync Codex commands"
+    )
+    AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
+      directory: home.appendingPathComponent(".claude", isDirectory: true),
+      purpose: .generalAccess,
+      message: "Authorize ~/.claude to sync Claude commands"
+    )
+    let warnings = await commandsSyncer.syncGlobal(commands: records)
+    if warnings.first != nil {
+      await SystemNotifier.shared.notify(title: "CodMate", body: "Failed to sync commands.")
+    }
+
+    await MainActor.run {
+      cachedCommands = records
       rebuildMenu()
     }
   }
