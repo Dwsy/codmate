@@ -1,5 +1,51 @@
 import AppKit
 import SwiftUI
+import CoreImage
+
+private let menuIconSize = NSSize(width: 14, height: 14)
+
+func menuAssetNSImage(named name: String, invertForDarkMode: Bool = false) -> NSImage? {
+  guard let image = NSImage(named: name) else { return nil }
+  let resized = resizedMenuImage(image)
+  if invertForDarkMode {
+    return invertedMenuImage(resized) ?? resized
+  }
+  return resized
+}
+
+func menuSystemNSImage(named name: String) -> NSImage? {
+  guard let image = NSImage(systemSymbolName: name, accessibilityDescription: nil) else { return nil }
+  let resized = resizedMenuImage(image)
+  resized.isTemplate = true
+  return resized
+}
+
+private func resizedMenuImage(_ image: NSImage) -> NSImage {
+  let newImage = NSImage(size: menuIconSize)
+  newImage.lockFocus()
+  image.draw(
+    in: NSRect(origin: .zero, size: menuIconSize),
+    from: NSRect(origin: .zero, size: image.size),
+    operation: .copy,
+    fraction: 1.0
+  )
+  newImage.unlockFocus()
+  return newImage
+}
+
+func invertedMenuImage(_ image: NSImage) -> NSImage? {
+  guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+    return nil
+  }
+  let ciImage = CIImage(cgImage: cgImage)
+  guard let filter = CIFilter(name: "CIColorInvert") else { return nil }
+  filter.setValue(ciImage, forKey: kCIInputImageKey)
+  guard let outputImage = filter.outputImage else { return nil }
+  let rep = NSCIImageRep(ciImage: outputImage)
+  let newImage = NSImage(size: image.size)
+  newImage.addRepresentation(rep)
+  return newImage
+}
 
 // Shared split primary button used across detail toolbar and list empty state
 struct SplitPrimaryMenuButton: View {
@@ -40,9 +86,9 @@ struct SplitPrimaryMenuButton: View {
 
 struct SplitMenuItem: Identifiable {
   enum Kind {
-    case action(title: String, disabled: Bool = false, run: () -> Void)
+    case action(title: String, systemImage: String? = nil, assetImage: String? = nil, disabled: Bool = false, run: () -> Void)
     case separator
-    case submenu(title: String, items: [SplitMenuItem])
+    case submenu(title: String, systemImage: String? = nil, assetImage: String? = nil, items: [SplitMenuItem])
   }
   let id: String
   let kind: Kind
@@ -55,18 +101,55 @@ struct SplitMenuItem: Identifiable {
 
 struct SplitMenuItemsView: View {
   let items: [SplitMenuItem]
+  @Environment(\.colorScheme) private var colorScheme
 
   var body: some View {
     ForEach(items) { item in
       switch item.kind {
       case .separator:
         Divider()
-      case .action(let title, let disabled, let run):
-        Button(title, action: run)
-          .disabled(disabled)
-      case .submenu(let title, let children):
-        Menu(title) {
+      case .action(let title, let systemImage, let assetImage, let disabled, let run):
+        Button(action: run) {
+          if let asset = assetImage,
+             let icon = menuAssetNSImage(
+              named: asset,
+              invertForDarkMode: asset == "ChatGPTIcon" && colorScheme == .dark
+             )
+          {
+            Label {
+              Text(title)
+            } icon: {
+              Image(nsImage: icon)
+                .frame(width: 14, height: 14)
+            }
+          } else if let systemImage {
+            Label(title, systemImage: systemImage)
+          } else {
+            Text(title)
+          }
+        }
+        .disabled(disabled)
+      case .submenu(let title, let systemImage, let assetImage, let children):
+        Menu {
           SplitMenuItemsView(items: children)
+        } label: {
+          if let asset = assetImage,
+             let icon = menuAssetNSImage(
+              named: asset,
+              invertForDarkMode: asset == "ChatGPTIcon" && colorScheme == .dark
+             )
+          {
+            Label {
+              Text(title)
+            } icon: {
+              Image(nsImage: icon)
+                .frame(width: 14, height: 14)
+            }
+          } else if let systemImage {
+            Label(title, systemImage: systemImage)
+          } else {
+            Text(title)
+          }
         }
       }
     }
@@ -107,16 +190,36 @@ struct ChevronMenuButton: NSViewRepresentable {
           switch item.kind {
           case .separator:
             menu.addItem(.separator())
-          case .action(let title, let disabled, let run):
+          case .action(let title, let systemImage, let assetImage, let disabled, let run):
             let mi = NSMenuItem(
               title: title, action: #selector(Coordinator.fire(_:)), keyEquivalent: "")
+            if let asset = assetImage,
+               let img = menuAssetNSImage(
+                named: asset,
+                invertForDarkMode: asset == "ChatGPTIcon" && isDarkMode()
+               )
+            {
+              mi.image = img
+            } else if let systemImage, let img = menuSystemNSImage(named: systemImage) {
+              mi.image = img
+            }
             mi.tag = runs.count
             mi.target = self
             mi.isEnabled = !disabled
             menu.addItem(mi)
             runs.append(run)
-          case .submenu(let title, let children):
+          case .submenu(let title, let systemImage, let assetImage, let children):
             let mi = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            if let asset = assetImage,
+               let img = menuAssetNSImage(
+                named: asset,
+                invertForDarkMode: asset == "ChatGPTIcon" && isDarkMode()
+               )
+            {
+              mi.image = img
+            } else if let systemImage, let img = menuSystemNSImage(named: systemImage) {
+              mi.image = img
+            }
             let sub = NSMenu(title: title)
             build(children, into: sub)
             mi.submenu = sub
@@ -134,5 +237,13 @@ struct ChevronMenuButton: NSViewRepresentable {
       guard idx >= 0 && idx < runs.count else { return }
       runs[idx]()
     }
+
+    private func isDarkMode() -> Bool {
+      if let appearance = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) {
+        return appearance == .darkAqua
+      }
+      return false
+    }
+
   }
 }
