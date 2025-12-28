@@ -92,17 +92,17 @@ struct ConversationTimelineView: View {
                 isActive: isActive,
                 extraLineHeight: extraLineHeight
               )
+              .contentShape(Rectangle())
+              .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                  proxy.scrollTo(stickyTurnID, anchor: .top)
+                }
+              }
+              .hoverHand()
               Spacer(minLength: 0)
             }
             .padding(.leading, 12)
             .padding(.top, topPadding)
-            .contentShape(Rectangle())
-            .onTapGesture {
-              withAnimation(.easeInOut(duration: 0.2)) {
-                proxy.scrollTo(stickyTurnID, anchor: .top)
-              }
-            }
-            .hoverHand()
           }
         }
       }

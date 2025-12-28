@@ -579,6 +579,22 @@ private struct ProjectTreeNodeView: View {
       }
     }
 
+    func providerAssetIcon(_ source: ProjectSessionSource) -> String {
+      switch source {
+      case .codex: return "ChatGPTIcon"
+      case .claude: return "ClaudeIcon"
+      case .gemini: return "GeminiIcon"
+      }
+    }
+
+    func assetIconForSessionSource(_ source: SessionSource) -> String {
+      switch source.baseKind {
+      case .codex: return "ChatGPTIcon"
+      case .claude: return "ClaudeIcon"
+      case .gemini: return "GeminiIcon"
+      }
+    }
+
     var menuItems: [SplitMenuItem] = []
     for base in requestedOrder where allowed.contains(base) {
       var providerItems = launchItems(for: base.sessionSource)
@@ -596,7 +612,7 @@ private struct ProjectTreeNodeView: View {
       menuItems.append(
         SplitMenuItem(
           id: "provider-\(base.rawValue)",
-          kind: .submenu(title: base.displayName, items: providerItems)
+          kind: .submenu(title: base.displayName, assetImage: providerAssetIcon(base), items: providerItems)
         ))
     }
 
@@ -607,6 +623,7 @@ private struct ProjectTreeNodeView: View {
           id: "fallback-\(sourceKey(fallbackSource))",
           kind: .submenu(
             title: fallbackSource.branding.displayName,
+            assetImage: assetIconForSessionSource(fallbackSource),
             items: launchItems(for: fallbackSource)
           )))
     }
