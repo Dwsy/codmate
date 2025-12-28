@@ -72,6 +72,7 @@ extension ContentView {
               let allowed = Set(viewModel.allowedSources(for: focused))
               let requestedOrder: [ProjectSessionSource] = [.claude, .codex, .gemini]
               let enabledRemoteHosts = viewModel.preferences.enabledRemoteHosts.sorted()
+              let embeddedEnabled = viewModel.preferences.isEmbeddedTerminalEnabled
 
               func sourceKey(_ source: SessionSource) -> String {
                 switch source {
@@ -85,9 +86,25 @@ extension ContentView {
               }
 
               func launchItems(for source: SessionSource) -> [SplitMenuItem] {
-                externalTerminalMenuItems(idPrefix: sourceKey(source)) { profile in
+                let key = sourceKey(source)
+                var items = externalTerminalMenuItems(idPrefix: key) { profile in
                   launchNewSession(for: focused, using: source, profile: profile)
                 }
+                if embeddedEnabled {
+                  let embedded = embeddedTerminalProfile()
+                  items.insert(
+                    .init(
+                      id: "\(key)-\(embedded.id)",
+                      kind: .action(
+                        title: embedded.displayTitle,
+                        systemImage: "macwindow",
+                        run: { launchNewSession(for: focused, using: source, profile: embedded) }
+                      )
+                    ),
+                    at: 0
+                  )
+                }
+                return items
               }
 
               func remoteSource(for base: ProjectSessionSource, host: String) -> SessionSource {
@@ -95,6 +112,22 @@ extension ContentView {
                 case .codex: return .codexRemote(host: host)
                 case .claude: return .claudeRemote(host: host)
                 case .gemini: return .geminiRemote(host: host)
+                }
+              }
+
+              func providerAssetIcon(_ source: ProjectSessionSource) -> String {
+                switch source {
+                case .codex: return "ChatGPTIcon"
+                case .claude: return "ClaudeIcon"
+                case .gemini: return "GeminiIcon"
+                }
+              }
+
+              func assetIconForSessionSource(_ source: SessionSource) -> String {
+                switch source.baseKind {
+                case .codex: return "ChatGPTIcon"
+                case .claude: return "ClaudeIcon"
+                case .gemini: return "GeminiIcon"
                 }
               }
 
@@ -107,18 +140,32 @@ extension ContentView {
                   for host in enabledRemoteHosts {
                     let remote = remoteSource(for: base, host: host)
                     providerItems.append(
-                      .init(kind: .submenu(title: host, items: launchItems(for: remote)))
+                      .init(kind: .submenu(title: host, systemImage: "network", items: launchItems(for: remote)))
                     )
                   }
                 }
-                menuItems.append(.init(kind: .submenu(title: base.displayName, items: providerItems)))
+                menuItems.append(
+                  .init(
+                    kind: .submenu(
+                      title: base.displayName,
+                      assetImage: providerAssetIcon(base),
+                      items: providerItems
+                    )
+                  )
+                )
               }
 
               if menuItems.isEmpty {
                 let fallbackSource = focused.source
                 menuItems.append(
-                  .init(kind: .submenu(title: fallbackSource.branding.displayName,
-                    items: launchItems(for: fallbackSource))))
+                  .init(
+                    kind: .submenu(
+                      title: fallbackSource.branding.displayName,
+                      assetImage: assetIconForSessionSource(fallbackSource),
+                      items: launchItems(for: fallbackSource)
+                    )
+                  )
+                )
               }
               return menuItems
             }()
@@ -141,6 +188,7 @@ extension ContentView {
             },
             items: {
               var items: [SplitMenuItem] = []
+              let embeddedEnabled = viewModel.preferences.isEmbeddedTerminalEnabled
               func sourceKey(_ source: SessionSource) -> String {
                 switch source {
                 case .codexLocal: return "codex-local"
@@ -150,6 +198,19 @@ extension ContentView {
                 case .geminiLocal: return "gemini-local"
                 case .geminiRemote(let host): return "gemini-\(host)"
                 }
+              }
+
+              if embeddedEnabled {
+                items.append(
+                  .init(
+                    id: "resume-embedded-\(focused.id)",
+                    kind: .action(
+                      title: "CodMate",
+                      systemImage: "macwindow",
+                      run: { startEmbedded(for: focused) }
+                    )
+                  )
+                )
               }
 
               items.append(
@@ -175,16 +236,6 @@ extension ContentView {
                       launchResume(for: focused, using: remoteSrc, profile: profile)
                     })
                 }
-              }
-              if !embeddedPreferred && viewModel.preferences.defaultResumeUseEmbeddedTerminal
-                && !AppSandbox.isEnabled
-              {
-                items.append(.init(kind: .separator))
-                items.append(
-                  .init(
-                    kind: .action(title: "Embedded") {
-                      startEmbedded(for: focused)
-                    }))
               }
               return items
             }()
@@ -450,6 +501,7 @@ private extension ContentView {
         id: "provider-codex",
         kind: .submenu(
           title: "Codex",
+          assetImage: "ChatGPTIcon",
           items: externalTerminalMenuItems(idPrefix: "project-codex", profiles: profiles) {
             profile in
             runCodex(for: profile)
@@ -462,6 +514,7 @@ private extension ContentView {
         id: "provider-claude",
         kind: .submenu(
           title: "Claude",
+          assetImage: "ClaudeIcon",
           items: externalTerminalMenuItems(idPrefix: "project-claude", profiles: profiles) {
             profile in
             runClaude(for: profile)
@@ -474,6 +527,7 @@ private extension ContentView {
         id: "provider-gemini",
         kind: .submenu(
           title: "Gemini",
+          assetImage: "GeminiIcon",
           items: externalTerminalMenuItems(idPrefix: "project-gemini", profiles: profiles) {
             profile in
             runGemini(for: profile)

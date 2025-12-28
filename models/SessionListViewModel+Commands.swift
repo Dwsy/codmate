@@ -393,16 +393,21 @@ extension SessionListViewModel {
     @discardableResult
     func copyNewSessionCommandsRespectingProject(
         session: SessionSummary,
-        destinationApp: ExternalTerminalProfile? = nil
+        destinationApp: ExternalTerminalProfile? = nil,
+        warpTitleOverride: String? = nil
     ) -> Bool {
         let project = projectIdForSession(session.id).flatMap { pid in
             projects.first(where: { $0.id == pid })
         }
         var warpHint: String? = nil
         if destinationApp?.usesWarpCommands == true {
-            let base = warpNewSessionTitleHint(for: session, project: project)
-            guard let resolved = resolveWarpTitleInput(defaultValue: base) else { return false }
-            warpHint = resolved
+            if let override = warpTitleOverride {
+                warpHint = warpSanitizedTitle(from: override) ?? override
+            } else {
+                let base = warpNewSessionTitleHint(for: session, project: project)
+                guard let resolved = resolveWarpTitleInput(defaultValue: base) else { return false }
+                warpHint = resolved
+            }
         }
 
         if session.source == .codexLocal,
@@ -433,33 +438,44 @@ extension SessionListViewModel {
     func copyNewSessionCommandsIfEnabled(
         session: SessionSummary,
         destinationApp: ExternalTerminalProfile? = nil,
-        initialPrompt: String? = nil
+        initialPrompt: String? = nil,
+        warpTitleOverride: String? = nil
     ) -> Bool {
         guard preferences.defaultResumeCopyToClipboard else { return true }
         if let initialPrompt {
             return copyNewSessionCommandsRespectingProject(
                 session: session,
                 destinationApp: destinationApp,
-                initialPrompt: initialPrompt
+                initialPrompt: initialPrompt,
+                warpTitleOverride: warpTitleOverride
             )
         }
-        return copyNewSessionCommandsRespectingProject(session: session, destinationApp: destinationApp)
+        return copyNewSessionCommandsRespectingProject(
+            session: session,
+            destinationApp: destinationApp,
+            warpTitleOverride: warpTitleOverride
+        )
     }
 
     @discardableResult
     func copyNewSessionCommandsRespectingProject(
         session: SessionSummary,
         destinationApp: ExternalTerminalProfile? = nil,
-        initialPrompt: String
+        initialPrompt: String,
+        warpTitleOverride: String? = nil
     ) -> Bool {
         let project = projectIdForSession(session.id).flatMap { pid in
             projects.first(where: { $0.id == pid })
         }
         var warpHint: String? = nil
         if destinationApp?.usesWarpCommands == true {
-            let base = warpNewSessionTitleHint(for: session, project: project)
-            guard let resolved = resolveWarpTitleInput(defaultValue: base) else { return false }
-            warpHint = resolved
+            if let override = warpTitleOverride {
+                warpHint = warpSanitizedTitle(from: override) ?? override
+            } else {
+                let base = warpNewSessionTitleHint(for: session, project: project)
+                guard let resolved = resolveWarpTitleInput(defaultValue: base) else { return false }
+                warpHint = resolved
+            }
         }
 
         if session.source == .codexLocal,
