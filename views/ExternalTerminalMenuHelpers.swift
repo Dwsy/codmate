@@ -21,6 +21,19 @@ func externalTerminalMenuProfiles() -> [ExternalTerminalProfile] {
   externalTerminalOrderedProfiles(includeNone: false)
 }
 
+func embeddedTerminalProfile() -> ExternalTerminalProfile {
+  ExternalTerminalProfile(
+    id: "codmate.embedded",
+    title: "CodMate",
+    bundleIdentifiers: [],
+    urlTemplate: nil,
+    supportsCommand: true,
+    supportsDirectory: true,
+    managedByCodMate: true,
+    commandStyle: .standard
+  )
+}
+
 func externalTerminalMenuItems(
   idPrefix: String,
   titlePrefix: String? = nil,
@@ -31,9 +44,10 @@ func externalTerminalMenuItems(
   let list = profiles ?? externalTerminalMenuProfiles()
   return list.map { profile in
     let title = (titlePrefix ?? "") + profile.displayTitle + (titleSuffix ?? "")
+    let icon = profile.id == "codmate.embedded" ? "macwindow" : "terminal"
     return SplitMenuItem(
       id: "\(idPrefix)-\(profile.id)",
-      kind: .action(title: title, run: { action(profile) })
+      kind: .action(title: title, systemImage: icon, run: { action(profile) })
     )
   }
 }

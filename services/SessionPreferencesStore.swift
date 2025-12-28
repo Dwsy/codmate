@@ -537,6 +537,10 @@ final class SessionPreferencesStore: ObservableObject {
     didSet { defaults.set(Array(enabledRemoteHosts), forKey: Keys.enabledRemoteHosts) }
   }
 
+  var isEmbeddedTerminalEnabled: Bool {
+    !AppSandbox.isEnabled && defaultResumeUseEmbeddedTerminal
+  }
+
   var resumeOptions: ResumeOptions {
     var opt = ResumeOptions(
       sandbox: defaultResumeSandboxMode,

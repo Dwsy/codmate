@@ -60,7 +60,7 @@ extension ContentView {
       isEnriching: viewModel.isEnriching,
       enrichmentProgress: viewModel.enrichmentProgress,
       enrichmentTotal: viewModel.enrichmentTotal,
-      onResume: resumeFromList,
+      onResume: { resumeFromList($0) },
       onReveal: { viewModel.reveal(session: $0) },
       onDeleteRequest: handleDeleteRequest,
       onExportMarkdown: exportMarkdownForSession,

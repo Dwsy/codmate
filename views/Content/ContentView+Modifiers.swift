@@ -294,8 +294,10 @@ extension ContentView {
     view
       .onReceive(NotificationCenter.default.publisher(for: .codMateResumeSession)) { note in
         guard let sessionId = note.userInfo?["sessionId"] as? String else { return }
+        let forceEmbedded = note.userInfo?["forceEmbedded"] as? Bool ?? false
+        let profileId = note.userInfo?["profileId"] as? String
         if let summary = summaryLookup[sessionId] ?? viewModel.sessionSummary(for: sessionId) {
-          resumeFromList(summary)
+          resumeFromList(summary, forceEmbedded: forceEmbedded, profileId: profileId)
         }
       }
       .onReceive(NotificationCenter.default.publisher(for: .codMateTerminalSessionsUpdated)) { _ in
