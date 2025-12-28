@@ -285,14 +285,9 @@ extension GitChangesPanel {
             }
         }
         .contextMenu {
-            Button("Open in Editor") {
-                let editor = preferences.defaultFileEditor
-                if EditorApp.installedEditors.contains(editor) {
-                    vm.openFile(path, using: editor)
-                } else {
-                    let full = vm.repoRoot?.appendingPathComponent(path).path ?? path
-                    NSWorkspace.shared.open(URL(fileURLWithPath: full))
-                }
+            let editors = EditorApp.installedEditors
+            openInEditorMenu(editors: editors) { editor in
+                vm.openFile(path, using: editor)
             }
 #if canImport(AppKit)
             Button("Reveal in Finder") {

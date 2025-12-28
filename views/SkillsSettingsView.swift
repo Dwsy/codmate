@@ -162,7 +162,11 @@ struct SkillsSettingsView: View {
             .tag(skill.id as String?)
             .contextMenu {
 #if canImport(AppKit)
-              Button("Reveal in Finder") { revealInFinder(skill) }
+
+              let editors = EditorApp.installedEditors
+              openInEditorMenu(editors: editors) { editor in
+                vm.openInEditor(skill, using: editor)
+              }
 #endif
               Button("Reinstall") { confirmReinstall(skill) }
               Button("Uninstall", role: .destructive) { confirmUninstall(skill) }

@@ -7,6 +7,7 @@ enum EditorApp: String, CaseIterable, Identifiable {
     case zed
 
     var id: String { rawValue }
+    private static let menuIconSize = NSSize(width: 14, height: 14)
 
     /// Editors that are currently available on this system.
     /// This is computed once per launch by probing the bundle id and CLI.
@@ -38,6 +39,16 @@ enum EditorApp: String, CaseIterable, Identifiable {
         }
     }
 
+    var appURL: URL? {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier)
+    }
+
+    var menuIcon: NSImage? {
+        guard let url = appURL else { return nil }
+        let image = NSWorkspace.shared.icon(forFile: url.path)
+        return resizedMenuIcon(image)
+    }
+
     /// Check if the editor is installed on the system
     var isInstalled: Bool {
         // Try to find the app via bundle identifier
@@ -59,5 +70,18 @@ enum EditorApp: String, CaseIterable, Identifiable {
         } catch {
             return false
         }
+    }
+
+    private func resizedMenuIcon(_ image: NSImage) -> NSImage {
+        let newImage = NSImage(size: Self.menuIconSize)
+        newImage.lockFocus()
+        image.draw(
+            in: NSRect(origin: .zero, size: Self.menuIconSize),
+            from: NSRect(origin: .zero, size: image.size),
+            operation: .copy,
+            fraction: 1.0
+        )
+        newImage.unlockFocus()
+        return newImage
     }
 }

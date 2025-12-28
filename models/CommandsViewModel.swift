@@ -163,6 +163,54 @@ class CommandsViewModel: ObservableObject {
     }
   }
 
+  // MARK: - Editor
+  func openInEditor(_ command: CommandRecord, using editor: EditorApp) {
+    let path = command.path.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !path.isEmpty else {
+      errorMessage = "Command path not available"
+      return
+    }
+
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+          !isDirectory.boolValue else {
+      errorMessage = "Command file does not exist: \(path)"
+      return
+    }
+
+    if let executablePath = findExecutableInPath(editor.cliCommand) {
+      let process = Process()
+      process.executableURL = URL(fileURLWithPath: executablePath)
+      process.arguments = [path]
+      process.standardOutput = Pipe()
+      process.standardError = Pipe()
+      do {
+        try process.run()
+        return
+      } catch {
+      }
+    }
+
+    if let appURL = editor.appURL {
+      let config = NSWorkspace.OpenConfiguration()
+      config.activates = true
+      NSWorkspace.shared.open(
+        [URL(fileURLWithPath: path)],
+        withApplicationAt: appURL,
+        configuration: config
+      ) { _, error in
+        if let error = error {
+          DispatchQueue.main.async {
+            self.errorMessage = "Failed to open \(editor.title): \(error.localizedDescription)"
+          }
+        }
+      }
+      return
+    }
+
+    errorMessage = "\(editor.title) is not installed. Please install it or try a different editor."
+  }
+
   // MARK: - Helpers
   func canDelete(id: String) -> Bool {
     // All commands can be deleted
@@ -187,5 +235,27 @@ class CommandsViewModel: ObservableObject {
     var updated = commands
     mutate(&updated[index])
     commands = updated
+  }
+
+  private func findExecutableInPath(_ name: String) -> String? {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/which")
+    process.arguments = [name]
+
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = Pipe()
+
+    do {
+      try process.run()
+      process.waitUntilExit()
+      guard process.terminationStatus == 0 else { return nil }
+      let data = pipe.fileHandleForReading.readDataToEndOfFile()
+      let path = String(data: data, encoding: .utf8)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      return path?.isEmpty == false ? path : nil
+    } catch {
+      return nil
+    }
   }
 }

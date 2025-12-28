@@ -493,20 +493,10 @@ private struct ProjectTreeNodeView: View {
     }
     Divider()
     let editors = EditorApp.installedEditors
-    if !editors.isEmpty {
-      Menu {
-        ForEach(editors) { editor in
-          Button {
-            onOpenInEditor(project, editor)
-          } label: {
-            Label(editor.title, systemImage: "chevron.left.forwardslash.chevron.right")
-          }
-        }
-      } label: {
-        Label("Open in", systemImage: "arrow.up.forward.app")
-      }
-      .disabled(project.directory == nil || project.directory?.isEmpty == true)
+    openInEditorMenu(editors: editors) { editor in
+      onOpenInEditor(project, editor)
     }
+    .disabled(project.directory == nil || project.directory?.isEmpty == true)
 
     Button {
       onReveal(project)

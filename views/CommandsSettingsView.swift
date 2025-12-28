@@ -170,11 +170,17 @@ struct CommandsSettingsView: View {
             .tag(command.id as String?)
             .contextMenu {
               Button("Edit") { vm.editingCommand = command }
-              Divider()
+              let editors = EditorApp.installedEditors
+              openInEditorMenu(editors: editors) { editor in
+                vm.openInEditor(command, using: editor)
+              }
+              .disabled(command.path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+              if !editors.isEmpty {
+                Divider()
+              }
               Button("Reveal in Finder") {
                 revealInFinder(path: command.path)
               }
-              Divider()
               Button("Delete", role: .destructive) { confirmDelete(command) }
             }
           }

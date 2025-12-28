@@ -248,13 +248,10 @@ extension GitChangesPanel {
                     let editors = EditorApp.installedEditors
                     if !editors.isEmpty {
                         Divider()
-                        ForEach(editors) { editor in
-                            Button("Open in \(editor.title)") {
-                                vm.openFile(path, using: editor)
-                            }
+                        openInEditorMenu(editors: editors) { editor in
+                            vm.openFile(path, using: editor)
                         }
                     }
-                    Button("Open with Default App") { NSWorkspace.shared.open(URL(fileURLWithPath: vm.repoRoot?.appendingPathComponent(path).path ?? path)) }
 #if canImport(AppKit)
                     Divider()
                     Button("Copy Path") { copyAbsolutePath(path) }
