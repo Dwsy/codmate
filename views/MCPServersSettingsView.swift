@@ -22,8 +22,12 @@ struct MCPServersSettingsPane: View {
                     .foregroundColor(.secondary)
             }
 
-            // List header with Add button (match Providers style)
-            HStack { Spacer(); Button { editorIsEditingExisting = false; vm.startNewForm(); showEditorSheet = true } label: { Label("Add", systemImage: "plus") } }
+            // List header with Add + Import button (match Providers style)
+            HStack {
+                Spacer()
+                Button { editorIsEditingExisting = false; vm.startNewForm(); showEditorSheet = true } label: { Label("Add", systemImage: "plus") }
+                Button { vm.beginImportFromHome() } label: { Label("Import", systemImage: "tray.and.arrow.down") }
+            }
 
             serversList
             Spacer(minLength: 0)
@@ -46,6 +50,18 @@ struct MCPServersSettingsPane: View {
         .sheet(isPresented: $showEditorSheet) {
             MCPServerEditorSheet(vm: vm, isEditing: editorIsEditingExisting, onClose: { showEditorSheet = false })
                 .frame(minWidth: 760, minHeight: 480)
+        }
+        .sheet(isPresented: $vm.showImportSheet) {
+            MCPImportSheet(
+                candidates: $vm.importCandidates,
+                isImporting: vm.isImporting,
+                statusMessage: vm.importStatusMessage,
+                title: "Import MCP Servers",
+                subtitle: "Scan Home for existing Codex/Claude/Gemini MCP servers and import into CodMate.",
+                onCancel: { vm.cancelImport() },
+                onImport: { Task { await vm.importSelectedServers() } }
+            )
+            .frame(minWidth: 760, minHeight: 480)
         }
     }
 

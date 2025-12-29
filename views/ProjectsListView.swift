@@ -923,6 +923,14 @@ struct ProjectEditorSheet: View {
           .frame(maxWidth: .infinity)
           Spacer(minLength: 8)
           Button {
+            extensionsVM.beginProjectMCPImport()
+          } label: {
+            Label("Import", systemImage: "tray.and.arrow.down")
+              .labelStyle(.titleAndIcon)
+          }
+          .buttonStyle(.borderless)
+          .help("Import MCP servers from this project")
+          Button {
             openExtensionsSettings(tab: .mcp)
           } label: {
             Image(systemName: "gearshape")
@@ -1026,6 +1034,14 @@ struct ProjectEditorSheet: View {
           )
           .frame(maxWidth: .infinity)
           Spacer(minLength: 8)
+          Button {
+            extensionsVM.beginProjectSkillsImport()
+          } label: {
+            Label("Import", systemImage: "tray.and.arrow.down")
+              .labelStyle(.titleAndIcon)
+          }
+          .buttonStyle(.borderless)
+          .help("Import skills from this project")
           Button {
             openExtensionsSettings(tab: .skills)
           } label: {
@@ -1213,6 +1229,30 @@ struct ProjectEditorSheet: View {
       Button("Discard", role: .destructive) { isPresented = false }
     } message: {
       Text("Your edits will be lost.")
+    }
+    .sheet(isPresented: $extensionsVM.showMCPImportSheet) {
+      MCPImportSheet(
+        candidates: $extensionsVM.mcpImportCandidates,
+        isImporting: extensionsVM.isImportingMCP,
+        statusMessage: extensionsVM.mcpImportStatusMessage,
+        title: "Import MCP Servers",
+        subtitle: "Scan this project for existing MCP servers and import into CodMate.",
+        onCancel: { extensionsVM.cancelProjectMCPImport() },
+        onImport: { Task { await extensionsVM.importProjectMCPSelections() } }
+      )
+      .frame(minWidth: 760, minHeight: 480)
+    }
+    .sheet(isPresented: $extensionsVM.showSkillsImportSheet) {
+      SkillsImportSheet(
+        candidates: $extensionsVM.skillsImportCandidates,
+        isImporting: extensionsVM.isImportingSkills,
+        statusMessage: extensionsVM.skillsImportStatusMessage,
+        title: "Import Skills",
+        subtitle: "Scan this project for existing skills and import into CodMate.",
+        onCancel: { extensionsVM.cancelProjectSkillsImport() },
+        onImport: { Task { await extensionsVM.importProjectSkillsSelections() } }
+      )
+      .frame(minWidth: 760, minHeight: 480)
     }
   }
 

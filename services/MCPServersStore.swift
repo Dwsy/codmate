@@ -128,16 +128,10 @@ actor MCPServersStore {
         let settingsData = try JSONSerialization.data(withJSONObject: existingConfig, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         try settingsData.write(to: claudeSettingsPath, options: .atomic)
 
-        // Step 6: Also write a CodMate-managed helper file that contains only the mcpServers object
-        // This is useful for launching Claude with --mcp-config explicitly from copied command examples.
-        // Ensure ~/.codmate exists first.
-        try fm.createDirectory(at: codmateDir, withIntermediateDirectories: true)
-        var helperObj: [String: Any] = [:]
-        if let servers = existingConfig["mcpServers"] {
-            helperObj["mcpServers"] = servers
+        // Legacy helper file (no longer used). Remove if present.
+        if fm.fileExists(atPath: helperPath.path) {
+            try? fm.removeItem(at: helperPath)
         }
-        let helperData = try JSONSerialization.data(withJSONObject: helperObj, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        try helperData.write(to: helperPath, options: .atomic)
     }
 
     func delete(name: String) throws {

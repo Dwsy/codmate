@@ -18,6 +18,10 @@ final class MCPServersViewModel: ObservableObject {
     @Published var testInProgress: Bool = false
     @Published var testMessage: String? = nil
     private var testTask: Task<Void, Never>? = nil
+    @Published var showImportSheet: Bool = false
+    @Published var importCandidates: [MCPImportCandidate] = []
+    @Published var isImporting: Bool = false
+    @Published var importStatusMessage: String? = nil
 
     // Editor/Form state
     @Published var isEditingExisting: Bool = false
@@ -69,6 +73,149 @@ final class MCPServersViewModel: ObservableObject {
             selectedServerName = list.first?.name
         } else if selectedServerName == nil {
             selectedServerName = list.first?.name
+        }
+    }
+
+    // MARK: - Import (Home)
+    func beginImportFromHome() {
+        showImportSheet = true
+        Task { await loadImportCandidatesFromHome() }
+    }
+
+    func loadImportCandidatesFromHome() async {
+        isImporting = true
+        importStatusMessage = "Scanning…"
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            let home = SessionPreferencesStore.getRealUserHomeURL()
+            AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
+                directory: home,
+                purpose: .generalAccess,
+                message: "Authorize your Home folder to import MCP servers"
+            )
+        }
+
+        let existing = await store.list()
+        let existingNames = Set(existing.map(\.name))
+        let managedSignatures = Set(existing.map { MCPImportService.signature(for: $0) })
+
+        let scanned = await Task.detached(priority: .userInitiated) {
+            MCPImportService.scan(scope: .home)
+        }.value
+
+        // CodMate store is the source of truth; provider configs can drift if edited by other tools.
+        let filtered = MCPImportService.filterManagedCandidates(scanned, managedSignatures: managedSignatures)
+        let candidates = filtered.map { item -> MCPImportCandidate in
+            var updated = item
+            if existingNames.contains(item.name) {
+                updated.hasConflict = true
+                updated.isSelected = false
+                updated.resolution = .skip
+                updated.renameName = item.name
+            }
+            return updated
+        }
+
+        if candidates.isEmpty {
+            importStatusMessage = "No MCP servers found."
+        } else {
+            importStatusMessage = nil
+        }
+
+        importCandidates = candidates
+        isImporting = false
+    }
+
+    func cancelImport() {
+        showImportSheet = false
+        importCandidates = []
+        importStatusMessage = nil
+    }
+
+    func importSelectedServers() async {
+        let selected = importCandidates.filter { $0.isSelected }
+        guard !selected.isEmpty else {
+            importStatusMessage = "No servers selected."
+            return
+        }
+
+        let resolvedNames = selected.compactMap { item -> String? in
+            let resolution = item.resolution
+            switch resolution {
+            case .skip:
+                return nil
+            case .overwrite:
+                return item.name
+            case .rename:
+                let trimmed = item.renameName.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
+        }
+        let duplicates = Dictionary(grouping: resolvedNames, by: { $0 }).filter { $1.count > 1 }.keys
+        if !duplicates.isEmpty {
+            importStatusMessage = "Resolve duplicate names before importing."
+            return
+        }
+
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            let home = SessionPreferencesStore.getRealUserHomeURL()
+            let codmate = home.appendingPathComponent(".codmate", isDirectory: true)
+            let codex = home.appendingPathComponent(".codex", isDirectory: true)
+            _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: codmate, purpose: .generalAccess, message: "Authorize ~/.codmate to save MCP servers")
+            _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: codex, purpose: .generalAccess, message: "Authorize ~/.codex to update Codex config")
+            _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: home, purpose: .generalAccess, message: "Authorize your Home folder to update Claude config")
+        }
+
+        var incoming: [MCPServer] = []
+        var importedCandidateIds: Set<UUID> = []
+        for item in selected {
+            let resolution = item.resolution
+            switch resolution {
+            case .skip:
+                continue
+            case .overwrite, .rename:
+                let finalName = (resolution == .rename ? item.renameName : item.name)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !finalName.isEmpty else { continue }
+                let meta = MCPServerMeta(description: item.description, version: nil, websiteUrl: nil, repositoryURL: nil)
+                let server = MCPServer(
+                    name: finalName,
+                    kind: item.kind,
+                    command: item.command,
+                    args: item.args,
+                    env: item.env,
+                    url: item.url,
+                    headers: item.headers,
+                    meta: meta,
+                    enabled: true,
+                    capabilities: [],
+                    targets: MCPServerTargets()
+                )
+                incoming.append(server)
+                importedCandidateIds.insert(item.id)
+            }
+        }
+
+        do {
+            try await store.upsertMany(incoming)
+            await loadServers()
+            await applyEnabledServersToAllProviders()
+            importStatusMessage = "Imported \(incoming.count) server(s)."
+            if !importedCandidateIds.isEmpty {
+                importCandidates.removeAll { importedCandidateIds.contains($0.id) }
+            }
+            if importCandidates.isEmpty {
+                closeImportSheetAfterDelay()
+            }
+        } catch {
+            importStatusMessage = "Import failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func closeImportSheetAfterDelay(_ delay: TimeInterval = 0.6) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            self.showImportSheet = false
+            self.importStatusMessage = nil
         }
     }
 
@@ -397,7 +544,25 @@ final class MCPServersViewModel: ObservableObject {
                 _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: codex, purpose: .generalAccess)
                 _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: home, purpose: .generalAccess)
             }
-            try await store.setEnabled(name: server.name, enabled: enabled)
+            if enabled {
+                var updated = server
+                var targets = updated.targets ?? MCPServerTargets()
+                targets.codex = true
+                targets.claude = true
+                targets.gemini = true
+                updated.targets = targets
+                updated.enabled = true
+                try await store.upsert(updated)
+            } else {
+                var updated = server
+                var targets = updated.targets ?? MCPServerTargets()
+                targets.codex = false
+                targets.claude = false
+                targets.gemini = false
+                updated.targets = targets
+                updated.enabled = false
+                try await store.upsert(updated)
+            }
             await loadServers()
             await applyEnabledServersToAllProviders()
         } catch {
@@ -440,8 +605,15 @@ final class MCPServersViewModel: ObservableObject {
             var updated = server.withTargets { targets in
                 targets.setEnabled(enabled, for: target)
             }
-            // Preserve existing capabilities/enabled flag
-            updated.enabled = server.enabled
+            // Preserve existing capabilities; auto-enable when user flips a provider on.
+            let hasAnyTarget = (updated.targets?.codex ?? false)
+                || (updated.targets?.claude ?? false)
+                || (updated.targets?.gemini ?? false)
+            if enabled {
+                updated.enabled = true
+            } else if !hasAnyTarget {
+                updated.enabled = false
+            }
             try await store.upsert(updated)
             await loadServers()
             await applyEnabledServersToAllProviders()

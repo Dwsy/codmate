@@ -11,6 +11,10 @@ class CommandsViewModel: ObservableObject {
   @Published var syncWarnings: [CommandSyncWarning] = []
   @Published var errorMessage: String? = nil
   @Published var isLoading = false
+  @Published var showImportSheet = false
+  @Published var importCandidates: [CommandImportCandidate] = []
+  @Published var isImporting = false
+  @Published var importStatusMessage: String? = nil
 
   private let store = CommandsStore()
   private let syncService = CommandsSyncService()
@@ -45,6 +49,110 @@ class CommandsViewModel: ObservableObject {
     commands = records
   }
 
+  // MARK: - Import (Home)
+  func beginImportFromHome() {
+    showImportSheet = true
+    Task { await loadImportCandidatesFromHome() }
+  }
+
+  func loadImportCandidatesFromHome() async {
+    isImporting = true
+    importStatusMessage = "Scanning…"
+    if SecurityScopedBookmarks.shared.isSandboxed {
+      let home = SessionPreferencesStore.getRealUserHomeURL()
+      AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
+        directory: home,
+        purpose: .generalAccess,
+        message: "Authorize your Home folder to import commands"
+      )
+    }
+    let existing = await store.listWithBuiltIns()
+    let existingIds = Set(existing.map(\.id))
+
+    let scanned = await Task.detached(priority: .userInitiated) {
+      CommandsImportService.scan(scope: .home)
+    }.value
+    // CodMate store is the source of truth; provider directories can drift if edited by other tools.
+    let candidates = scanned.filter { !existingIds.contains($0.id) }
+
+    await MainActor.run {
+      self.importCandidates = candidates
+      self.isImporting = false
+      self.importStatusMessage = candidates.isEmpty ? "No commands found." : nil
+    }
+  }
+
+  func cancelImport() {
+    showImportSheet = false
+    importCandidates = []
+    importStatusMessage = nil
+  }
+
+  func importSelectedCommands() async {
+    let selected = importCandidates.filter { $0.isSelected }
+    guard !selected.isEmpty else {
+      importStatusMessage = "No commands selected."
+      return
+    }
+
+    var importedCount = 0
+    var importedCandidateIds: Set<String> = []
+    for item in selected {
+      let resolution = item.hasConflict ? item.resolution : .overwrite
+      switch resolution {
+      case .skip:
+        continue
+      case .overwrite, .rename:
+        let finalId = resolution == .rename
+          ? item.renameId.trimmingCharacters(in: .whitespacesAndNewlines)
+          : item.id
+        guard !finalId.isEmpty else { continue }
+        var name = item.name
+        if name == item.id && finalId != item.id {
+          name = finalId
+        }
+        let targets = CommandTargets(
+          codex: item.sources.contains("Codex"),
+          claude: item.sources.contains("Claude"),
+          gemini: item.sources.contains("Gemini")
+        )
+        let record = CommandRecord(
+          id: finalId,
+          name: name,
+          description: item.description,
+          prompt: item.prompt,
+          metadata: item.metadata,
+          targets: targets,
+          isEnabled: true,
+          source: "import",
+          path: "",
+          installedAt: Date()
+        )
+        await store.upsert(record)
+        importedCount += 1
+        importedCandidateIds.insert(item.id)
+      }
+    }
+
+    await load()
+    await syncToProviders()
+    importStatusMessage = "Imported \(importedCount) command(s)."
+    if !importedCandidateIds.isEmpty {
+      importCandidates.removeAll { importedCandidateIds.contains($0.id) }
+    }
+    if importCandidates.isEmpty {
+      closeImportSheetAfterDelay()
+    }
+  }
+
+  private func closeImportSheetAfterDelay(_ delay: TimeInterval = 0.6) {
+    Task { @MainActor in
+      try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+      self.showImportSheet = false
+      self.importStatusMessage = nil
+    }
+  }
+
   // MARK: - CRUD Operations
   func addCommand(_ command: CommandRecord) async {
     await store.upsert(command)
@@ -71,10 +179,28 @@ class CommandsViewModel: ObservableObject {
   func updateCommandEnabled(id: String, value: Bool) {
     updateLocalCommand(id: id) { record in
       record.isEnabled = value
+      if !value {
+        record.targets.codex = false
+        record.targets.claude = false
+        record.targets.gemini = false
+      } else {
+        record.targets.codex = true
+        record.targets.claude = true
+        record.targets.gemini = true
+      }
     }
     Task {
       await store.update(id: id) { record in
         record.isEnabled = value
+        if !value {
+          record.targets.codex = false
+          record.targets.claude = false
+          record.targets.gemini = false
+        } else {
+          record.targets.codex = true
+          record.targets.claude = true
+          record.targets.gemini = true
+        }
       }
       await syncToProviders()
     }
@@ -90,6 +216,11 @@ class CommandsViewModel: ObservableObject {
       case .gemini:
         record.targets.gemini = value
       }
+      if value && !record.isEnabled {
+        record.isEnabled = true
+      } else if !record.targets.codex && !record.targets.claude && !record.targets.gemini {
+        record.isEnabled = false
+      }
     }
     Task {
       await store.update(id: id) { record in
@@ -100,6 +231,11 @@ class CommandsViewModel: ObservableObject {
           record.targets.claude = value
         case .gemini:
           record.targets.gemini = value
+        }
+        if value && !record.isEnabled {
+          record.isEnabled = true
+        } else if !record.targets.codex && !record.targets.claude && !record.targets.gemini {
+          record.isEnabled = false
         }
       }
       await syncToProviders()

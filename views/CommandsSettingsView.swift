@@ -23,6 +23,18 @@ struct CommandsSettingsView: View {
       )
       .frame(minWidth: 760, minHeight: 480)
     }
+    .sheet(isPresented: $vm.showImportSheet) {
+      CommandsImportSheet(
+        candidates: $vm.importCandidates,
+        isImporting: vm.isImporting,
+        statusMessage: vm.importStatusMessage,
+        title: "Import Commands",
+        subtitle: "Scan Home for existing Codex/Claude/Gemini commands and import into CodMate.",
+        onCancel: { vm.cancelImport() },
+        onImport: { Task { await vm.importSelectedCommands() } }
+      )
+      .frame(minWidth: 760, minHeight: 480)
+    }
     .sheet(item: $vm.editingCommand) { command in
       CommandEditSheet(
         command: command,
@@ -67,6 +79,11 @@ struct CommandsSettingsView: View {
         vm.showAddSheet = true
       } label: {
         Label("Add", systemImage: "plus")
+      }
+      Button {
+        vm.beginImportFromHome()
+      } label: {
+        Label("Import", systemImage: "tray.and.arrow.down")
       }
     }
   }

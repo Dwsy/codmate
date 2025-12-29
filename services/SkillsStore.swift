@@ -313,7 +313,7 @@ Assistant: [Expected behavior]
     return .installed(record)
   }
 
-  private struct ParsedMetadata {
+  struct ParsedMetadata {
     var name: String
     var description: String
     var summary: String
@@ -321,7 +321,7 @@ Assistant: [Expected behavior]
     var source: String
   }
 
-  private func parseSkillMetadata(at root: URL, sourceLabel: String) throws -> ParsedMetadata {
+  func parseSkillMetadata(at root: URL, sourceLabel: String) throws -> ParsedMetadata {
     let skillFile = root.appendingPathComponent("SKILL.md", isDirectory: false)
     let text = (try? String(contentsOf: skillFile, encoding: .utf8)) ?? ""
     let front = parseFrontMatter(text)
@@ -427,7 +427,7 @@ Assistant: [Expected behavior]
     return tempRoot
   }
 
-  private func suggestNewId(basedOn id: String) -> String {
+  func suggestNewId(basedOn id: String) -> String {
     let base = id.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !base.isEmpty else { return "skill" }
     var i = 2
@@ -450,7 +450,7 @@ Assistant: [Expected behavior]
     }
   }
 
-  private func writeMarker(to dir: URL, id: String, sourceType: String = "installed") throws {
+  func writeMarker(to dir: URL, id: String, sourceType: String = "installed") throws {
     let marker = dir.appendingPathComponent(".codmate.json", isDirectory: false)
     let obj: [String: Any] = [
       "managedByCodMate": true,
@@ -461,7 +461,7 @@ Assistant: [Expected behavior]
     try data.write(to: marker, options: .atomic)
   }
 
-  private func isCodMateManagedSkill(at dir: URL) -> Bool {
+  func isCodMateManagedSkill(at dir: URL) -> Bool {
     let marker = dir.appendingPathComponent(".codmate.json", isDirectory: false)
     guard fm.fileExists(atPath: marker.path),
           let data = try? Data(contentsOf: marker),
@@ -477,6 +477,28 @@ Assistant: [Expected behavior]
           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     else { return nil }
     return obj["sourceType"] as? String
+  }
+
+  func conflictInfo(forProposedId id: String) -> SkillInstallConflict? {
+    let dest = paths.libraryDir.appendingPathComponent(id, isDirectory: true)
+    guard fm.fileExists(atPath: dest.path) else { return nil }
+    let managed = isCodMateManagedSkill(at: dest)
+    let suggested = suggestNewId(basedOn: id)
+    return SkillInstallConflict(
+      proposedId: id,
+      destination: dest,
+      existingIsManaged: managed,
+      suggestedId: suggested
+    )
+  }
+
+  func markImported(id: String) {
+    var records = load()
+    guard let idx = records.firstIndex(where: { $0.id == id }) else { return }
+    records[idx].source = "Import"
+    save(records)
+    let dir = URL(fileURLWithPath: records[idx].path, isDirectory: true)
+    try? writeMarker(to: dir, id: id, sourceType: "import")
   }
 
   private struct FrontMatter {

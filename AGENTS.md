@@ -21,8 +21,10 @@ UI Rules (macOS specific)
   - Schema note: use a single provider-level `envKey` (preferred) for both Codex and Claude Code connectors. Connector-level `envKey` remains tolerated for backward compatibility but is considered deprecated and will be ignored at save time to avoid duplication.
 - Extensions page (aligned with Providers style):
   - Settings › Extensions replaces the old MCP Server page (icon: puzzlepiece.extension).
-  - Tab 1: MCP Servers (existing list/editor/Uni‑Import UI kept as-is inside the tab).
-  - Tab 2: Skills (left list + right details split; Add menu supports folder/zip/URL; auto‑sync on changes).
+  - Tab 1: MCP Servers (existing list/editor/Uni‑Import UI kept as-is inside the tab); add an Import button to scan Home MCP configs into CodMate.
+  - Tab 2: Skills (left list + right details split; Add menu supports folder/zip/URL; auto‑sync on changes); add an Import button to scan Home skills into CodMate.
+  - Commands tab includes Add and Import buttons (Import scans Home command folders into CodMate).
+  - Import sheets show a vertical list; each row has a right‑aligned strategy control (Skip/Overwrite/Rename) and a context menu “Open in…” to review source files.
   - MCP Servers tab keeps: enable toggle on left, edit on right, fixed "Add" button, Uni‑Import preview and confirmation.
   - Advanced capabilities (MCPMate download and instructions) remain as a footer/section in MCP Servers tab.
 - Search: prefer a toolbar `SearchField` in macOS, not `.searchable` when exact placement (far right) matters.
@@ -43,7 +45,7 @@ UI Rules (macOS specific)
   - Sticky action bar at top: Resume, Reveal in Finder, Delete, Export Markdown.
   - Add “New” button next to Resume to start a fresh Codex session using the current session’s working directory and model.
   - When an embedded terminal is running, show a “Prompts” button beside the folder (Reveal in Finder) icon. Clicking opens a searchable popover of preset command texts; selecting one inserts it into the embedded terminal input (does not auto-execute). User presses Return to run.
-  - Project-level Extensions are configured in **Edit Project**: tabs are General, Profile, MCP Servers, Skills (auto‑sync; Gemini project-level toggles disabled). Edit Project window should be resizable.
+  - Project-level Extensions are configured in **Edit Project**: tabs are General, Profile, MCP Servers, Skills (auto‑sync; Gemini project-level toggles disabled). MCP Servers/Skills tabs include Import buttons that scan the project directory. Edit Project window should be resizable.
   - Review mode: the list.bullet.rectangle button toggles a full-area Review view (third mode, alongside Conversation and Internal Terminal). In Review mode the detail area is fully occupied by a Git Changes surface. It:
     - Auto-detects the Git repo at the session’s working directory (uses `/usr/bin/env git` and a robust PATH).
     - Lists changed files with stage/unstage toggles and shows a unified diff or a raw file preview (updates on save). Preview is text-only in phase 1.

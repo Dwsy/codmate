@@ -42,6 +42,10 @@ final class SkillsLibraryViewModel: ObservableObject {
     @Published var newSkillName: String = ""
     @Published var newSkillDescription: String = ""
     @Published var createErrorMessage: String?
+    @Published var showImportSheet: Bool = false
+    @Published var importCandidates: [SkillImportCandidate] = []
+    @Published var isImporting: Bool = false
+    @Published var importStatusMessage: String?
 
     var filteredSkills: [SkillSummary] {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -94,6 +98,172 @@ final class SkillsLibraryViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Import (Home)
+    func beginImportFromHome() {
+        showImportSheet = true
+        Task { await loadImportCandidatesFromHome() }
+    }
+
+    func loadImportCandidatesFromHome() async {
+        isImporting = true
+        importStatusMessage = "Scanning…"
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            let home = SessionPreferencesStore.getRealUserHomeURL()
+            AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
+                directory: home,
+                purpose: .generalAccess,
+                message: "Authorize your Home folder to import skills"
+            )
+        }
+
+        let scanned = await Task.detached(priority: .userInitiated) {
+            await SkillsImportService.scan(scope: .home)
+        }.value
+        let existing = await store.list()
+        let managedIds = Set(existing.map(\.id))
+        // CodMate store is the source of truth; provider directories can drift if edited by other tools.
+        let filtered = scanned.filter { !managedIds.contains($0.id) }
+
+        var candidates: [SkillImportCandidate] = []
+        for item in filtered {
+            var updated = item
+            if let conflict = await store.conflictInfo(forProposedId: item.id) {
+                updated.hasConflict = true
+                updated.isSelected = false
+                updated.resolution = .skip
+                updated.renameId = conflict.suggestedId
+                updated.suggestedId = conflict.suggestedId
+                updated.conflictDetail = conflict.existingIsManaged
+                    ? "Existing CodMate-managed skill"
+                    : "Skill already exists"
+            }
+            candidates.append(updated)
+        }
+
+        importCandidates = candidates
+        isImporting = false
+        importStatusMessage = candidates.isEmpty ? "No skills found." : nil
+    }
+
+    func cancelImport() {
+        showImportSheet = false
+        importCandidates = []
+        importStatusMessage = nil
+    }
+
+    func importSelectedSkills() async {
+        let selected = importCandidates.filter { $0.isSelected }
+        guard !selected.isEmpty else {
+            importStatusMessage = "No skills selected."
+            return
+        }
+
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            let home = SessionPreferencesStore.getRealUserHomeURL()
+            let codmate = home.appendingPathComponent(".codmate", isDirectory: true)
+            AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
+                directory: codmate,
+                purpose: .generalAccess,
+                message: "Authorize ~/.codmate to import skills"
+            )
+        }
+
+        var importedCount = 0
+        var importedCandidateIds: Set<String> = []
+        var importedCandidates: [SkillImportCandidate] = []
+        for item in selected {
+            let resolution = item.hasConflict ? item.resolution : .overwrite
+            switch resolution {
+            case .skip:
+                continue
+            case .overwrite:
+                let req = SkillInstallRequest(mode: .folder, url: URL(fileURLWithPath: item.sourcePath), text: nil)
+                let outcome = await store.install(request: req, resolution: .overwrite)
+                if case .installed(let record) = outcome {
+                    await store.markImported(id: record.id)
+                    importedCount += 1
+                    importedCandidateIds.insert(item.id)
+                    importedCandidates.append(item)
+                }
+            case .rename:
+                let newId = item.renameId.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !newId.isEmpty else { continue }
+                let req = SkillInstallRequest(mode: .folder, url: URL(fileURLWithPath: item.sourcePath), text: nil)
+                let outcome = await store.install(request: req, resolution: .rename(newId))
+                if case .installed(let record) = outcome {
+                    await store.markImported(id: record.id)
+                    importedCount += 1
+                    importedCandidateIds.insert(item.id)
+                    importedCandidates.append(item)
+                }
+            }
+        }
+
+        if !importedCandidates.isEmpty {
+            removeImportedProviderCopies(importedCandidates)
+        }
+        await load()
+        await persistAndSync()
+        importStatusMessage = "Imported \(importedCount) skill(s)."
+        if !importedCandidateIds.isEmpty {
+            importCandidates.removeAll { importedCandidateIds.contains($0.id) }
+        }
+        if importCandidates.isEmpty {
+            closeImportSheetAfterDelay()
+        }
+    }
+
+    private func closeImportSheetAfterDelay(_ delay: TimeInterval = 0.6) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            self.showImportSheet = false
+            self.importStatusMessage = nil
+        }
+    }
+
+    private func removeImportedProviderCopies(_ items: [SkillImportCandidate]) {
+        let home = SessionPreferencesStore.getRealUserHomeURL()
+        let providerRoots: [String: URL] = [
+            "Codex": home.appendingPathComponent(".codex", isDirectory: true)
+                .appendingPathComponent("skills", isDirectory: true),
+            "Claude": home.appendingPathComponent(".claude", isDirectory: true)
+                .appendingPathComponent("skills", isDirectory: true)
+        ]
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
+                directory: home.appendingPathComponent(".codex", isDirectory: true),
+                purpose: .generalAccess,
+                message: "Authorize ~/.codex to adopt imported skills"
+            )
+            AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
+                directory: home.appendingPathComponent(".claude", isDirectory: true),
+                purpose: .generalAccess,
+                message: "Authorize ~/.claude to adopt imported skills"
+            )
+        }
+
+        let fm = FileManager.default
+        for item in items {
+            if item.sourcePaths.isEmpty {
+                for source in item.sources {
+                    guard let root = providerRoots[source] else { continue }
+                    let dir = URL(fileURLWithPath: item.sourcePath, isDirectory: true)
+                    if dir.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path) {
+                        try? fm.removeItem(at: dir)
+                    }
+                }
+                continue
+            }
+            for (source, path) in item.sourcePaths {
+                guard let root = providerRoots[source] else { continue }
+                let dir = URL(fileURLWithPath: path).deletingLastPathComponent()
+                if dir.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path) {
+                    try? fm.removeItem(at: dir)
+                }
+            }
+        }
+    }
+
     func prepareInstall(mode: SkillInstallMode, url: URL? = nil, text: String? = nil) {
         installMode = mode
         pendingInstallURL = url
@@ -136,6 +306,11 @@ final class SkillsLibraryViewModel: ObservableObject {
         guard let idx = skills.firstIndex(where: { $0.id == id }) else { return }
         var updated = skills[idx]
         updated.targets.setEnabled(value, for: target)
+        if value && !updated.isSelected {
+            updated.isSelected = true
+        } else if !updated.targets.codex && !updated.targets.claude && !updated.targets.gemini {
+            updated.isSelected = false
+        }
         skills[idx] = updated
         Task { await persistAndSync() }
     }
@@ -143,6 +318,15 @@ final class SkillsLibraryViewModel: ObservableObject {
     func updateSkillSelection(id: String, value: Bool) {
         guard let idx = skills.firstIndex(where: { $0.id == id }) else { return }
         skills[idx].isSelected = value
+        if !value {
+            skills[idx].targets.codex = false
+            skills[idx].targets.claude = false
+            skills[idx].targets.gemini = false
+        } else {
+            skills[idx].targets.codex = true
+            skills[idx].targets.claude = true
+            skills[idx].targets.gemini = true
+        }
         Task { await persistAndSync() }
     }
 

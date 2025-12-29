@@ -364,15 +364,6 @@ struct ClaudeCodeSettingsView: View {
             example.append("--fallback-model \(fallbackModel)")
         }
         
-        // MCP config path
-        let mcpPath = SessionPreferencesStore.getRealUserHomeURL()
-            .appendingPathComponent(".codmate", isDirectory: true)
-            .appendingPathComponent("mcp-enabled-claude.json").path
-        
-        if FileManager.default.fileExists(atPath: mcpPath) {
-            example.append("--mcp-config \(mcpPath)")
-        }
-        
         return example.joined(separator: " ")
     }
 
@@ -543,13 +534,6 @@ extension ClaudeCodeVM {
             if !aliasHaiku.trimmingCharacters(in: .whitespaces).isEmpty {
                 lines.append("export ANTHROPIC_SMALL_FAST_MODEL=\(aliasHaiku)")
             }
-        }
-        // MCP config path preview (used via --mcp-config when launching)
-        let mcpPath = SessionPreferencesStore.getRealUserHomeURL()
-            .appendingPathComponent(".codmate", isDirectory: true)
-            .appendingPathComponent("mcp-enabled-claude.json").path
-        if FileManager.default.fileExists(atPath: mcpPath) {
-            lines.append("# MCP config: \(mcpPath)")
         }
         return lines
     }

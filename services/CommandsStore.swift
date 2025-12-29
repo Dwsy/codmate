@@ -169,7 +169,7 @@ actor CommandsStore {
   }
 
   /// Parse Markdown content with YAML frontmatter
-  private static func parseMarkdownContent(_ content: String, id: String, source: String, isEnabled: Bool, installedAt: String, path: String) -> CommandRecord? {
+  static func parseMarkdownContent(_ content: String, id: String, source: String, isEnabled: Bool, installedAt: String, path: String) -> CommandRecord? {
     let lines = content.components(separatedBy: .newlines)
     guard lines.first?.trimmingCharacters(in: .whitespaces) == "---" else { return nil }
 
@@ -281,6 +281,20 @@ actor CommandsStore {
       source: source,
       path: path,
       installedAt: date
+    )
+  }
+
+  static func parseMarkdownFile(at url: URL, id: String, source: String) -> CommandRecord? {
+    guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+    let dateFormatter = ISO8601DateFormatter()
+    let installedAt = dateFormatter.string(from: Date())
+    return parseMarkdownContent(
+      content,
+      id: id,
+      source: source,
+      isEnabled: true,
+      installedAt: installedAt,
+      path: url.path
     )
   }
 

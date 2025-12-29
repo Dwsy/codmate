@@ -24,6 +24,18 @@ struct SkillsSettingsView: View {
     .sheet(isPresented: $vm.showCreateSheet) {
       SkillCreateSheet(vm: vm)
     }
+    .sheet(isPresented: $vm.showImportSheet) {
+      SkillsImportSheet(
+        candidates: $vm.importCandidates,
+        isImporting: vm.isImporting,
+        statusMessage: vm.importStatusMessage,
+        title: "Import Skills",
+        subtitle: "Scan Home for existing Codex/Claude skills and import into CodMate.",
+        onCancel: { vm.cancelImport() },
+        onImport: { Task { await vm.importSelectedSkills() } }
+      )
+      .frame(minWidth: 760, minHeight: 480)
+    }
     .sheet(item: $vm.installConflict) { conflict in
       SkillConflictResolutionSheet(conflict: conflict, onResolve: { resolution in
         vm.resolveInstallConflict(resolution)
@@ -59,6 +71,11 @@ struct SkillsSettingsView: View {
         vm.prepareInstall(mode: vm.installMode)
       } label: {
         Label("Add", systemImage: "plus")
+      }
+      Button {
+        vm.beginImportFromHome()
+      } label: {
+        Label("Import", systemImage: "tray.and.arrow.down")
       }
     }
   }
