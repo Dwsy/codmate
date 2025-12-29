@@ -153,9 +153,11 @@ extension GitChangesPanel {
                         )
                         .frame(height: 22)
                         .contextMenu {
-                            Button("Unstage All") {
+                            Button {
                                 let paths = allPaths(in: .staged)
                                 Task { await vm.unstage(paths: paths) }
+                            } label: {
+                                Label("Unstage All", systemImage: "minus.circle")
                             }
                         }
                         if !stagedCollapsed {
@@ -186,9 +188,11 @@ extension GitChangesPanel {
                         )
                         .frame(height: 22)
                         .contextMenu {
-                            Button("Stage All") {
+                            Button {
                                 let paths = allPaths(in: .unstaged)
                                 Task { await vm.stage(paths: paths) }
+                            } label: {
+                                Label("Stage All", systemImage: "plus.circle")
                             }
                         }
                         if !unstagedCollapsed {
@@ -201,13 +205,17 @@ extension GitChangesPanel {
             }
             // Provide a generic context menu on empty area as well
             .contextMenu {
-                Button("Stage All") {
+                Button {
                     let paths = allPaths(in: .unstaged)
                     Task { await vm.stage(paths: paths) }
+                } label: {
+                    Label("Stage All", systemImage: "plus.circle")
                 }
-                Button("Unstage All") {
+                Button {
                     let paths = allPaths(in: .staged)
                     Task { await vm.unstage(paths: paths) }
+                } label: {
+                    Label("Unstage All", systemImage: "minus.circle")
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -68,13 +68,17 @@ struct ProjectsListView: View {
     .environment(\.defaultMinListRowHeight, 16)
     .environment(\.controlSize, .small)
     .contextMenu {
-      Button("New Project…") {
+      Button {
         newParentProject = nil
         showNewProject = true
+      } label: {
+        Label("New Project…", systemImage: "square.grid.2x2")
       }
       if viewModel.selectedProjectIDs.contains(SessionListViewModel.otherProjectId) {
-        Button("Auto assign to ...") {
+        Button {
           showAutoAssignSheet = true
+        } label: {
+          Label("Auto assign to ...", systemImage: "wand.and.stars")
         }
       }
     }
@@ -519,8 +523,10 @@ private struct ProjectTreeNodeView: View {
 
     if project.id == SessionListViewModel.otherProjectId {
       Divider()
-      Button("Auto assign to ...") {
+      Button {
         onAutoAssign()
+      } label: {
+        Label("Auto assign to ...", systemImage: "wand.and.stars")
       }
     }
   }

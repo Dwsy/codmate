@@ -97,24 +97,36 @@ extension GitChangesPanel {
                     if let dir = node.dirPath {
                         let allPaths = filePaths(under: dir)
                     if scope == .staged {
-                        Button("Unstage Folder") { Task { await vm.unstage(paths: allPaths) } }
+                        Button { Task { await vm.unstage(paths: allPaths) } } label: {
+                            Label("Unstage Folder", systemImage: "minus.circle")
+                        }
                     } else {
-                        Button("Stage Folder") { Task { await vm.stage(paths: allPaths) } }
+                        Button { Task { await vm.stage(paths: allPaths) } } label: {
+                            Label("Stage Folder", systemImage: "plus.circle")
+                        }
                     }
 #if canImport(AppKit)
                     Divider()
-                    Button("Copy Path") { copyAbsolutePath(dir) }
-                    Button("Copy Relative Path") { copyRelativePath(dir) }
-                    Button("Reveal in Finder") {
+                    Button { copyAbsolutePath(dir) } label: {
+                        Label("Copy Path", systemImage: "doc.on.doc")
+                    }
+                    Button { copyRelativePath(dir) } label: {
+                        Label("Copy Relative Path", systemImage: "doc.on.doc")
+                    }
+                    Button {
                         revealInFinder(path: dir, isDirectory: true)
+                    } label: {
+                        Label("Reveal in Finder", systemImage: "finder")
                     }
 #endif
                     if scope == .unstaged {
                         Divider()
-                        Button("Discard Folder Changes…", role: .destructive) {
+                        Button(role: .destructive) {
                             pendingDiscardPaths = allPaths
                                 pendingDiscardIncludesStaged = false
                                 showDiscardAlert = true
+                            } label: {
+                                Label("Discard Folder Changes…", systemImage: "trash")
                             }
                         }
                     }
@@ -241,9 +253,13 @@ extension GitChangesPanel {
                 }
                 .contextMenu {
                     if scope == .staged {
-                        Button("Unstage") { Task { await vm.unstage(paths: [path]) } }
+                        Button { Task { await vm.unstage(paths: [path]) } } label: {
+                            Label("Unstage", systemImage: "minus.circle")
+                        }
                     } else {
-                        Button("Stage") { Task { await vm.stage(paths: [path]) } }
+                        Button { Task { await vm.stage(paths: [path]) } } label: {
+                            Label("Stage", systemImage: "plus.circle")
+                        }
                     }
                     let editors = EditorApp.installedEditors
                     if !editors.isEmpty {
@@ -254,16 +270,24 @@ extension GitChangesPanel {
                     }
 #if canImport(AppKit)
                     Divider()
-                    Button("Copy Path") { copyAbsolutePath(path) }
-                    Button("Copy Relative Path") { copyRelativePath(path) }
-                    Button("Reveal in Finder") { revealInFinder(path: path, isDirectory: false) }
+                    Button { copyAbsolutePath(path) } label: {
+                        Label("Copy Path", systemImage: "doc.on.doc")
+                    }
+                    Button { copyRelativePath(path) } label: {
+                        Label("Copy Relative Path", systemImage: "doc.on.doc")
+                    }
+                    Button { revealInFinder(path: path, isDirectory: false) } label: {
+                        Label("Reveal in Finder", systemImage: "finder")
+                    }
 #endif
                     if scope == .unstaged {
                         Divider()
-                        Button("Discard Changes…", role: .destructive) {
+                        Button(role: .destructive) {
                             pendingDiscardPaths = [path]
                             pendingDiscardIncludesStaged = false
                             showDiscardAlert = true
+                        } label: {
+                            Label("Discard Changes…", systemImage: "trash")
                         }
                     }
                 }

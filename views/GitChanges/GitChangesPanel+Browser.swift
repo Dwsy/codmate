@@ -136,21 +136,29 @@ extension GitChangesPanel {
             }
         }
         .contextMenu {
-            Button(isExpanded ? "Collapse" : "Expand") {
+            Button {
                 toggleBrowserDirectory(key)
+            } label: {
+                Label(isExpanded ? "Collapse" : "Expand", systemImage: isExpanded ? "chevron.down" : "chevron.right")
             }
             let paths = filePaths(under: key)
             if repoAvailable, !paths.isEmpty {
-                Button("Stage Folder") {
+                Button {
                     Task { await vm.stage(paths: paths) }
+                } label: {
+                    Label("Stage Folder", systemImage: "plus.circle")
                 }
-                Button("Unstage Folder") {
+                Button {
                     Task { await vm.unstage(paths: paths) }
+                } label: {
+                    Label("Unstage Folder", systemImage: "minus.circle")
                 }
             }
 #if canImport(AppKit)
-            Button("Reveal in Finder") {
+            Button {
                 revealBrowserItem(path: key, isDirectory: true)
+            } label: {
+                Label("Reveal in Finder", systemImage: "finder")
             }
 #endif
         }
@@ -290,23 +298,31 @@ extension GitChangesPanel {
                 vm.openFile(path, using: editor)
             }
 #if canImport(AppKit)
-            Button("Reveal in Finder") {
+            Button {
                 revealBrowserItem(path: path, isDirectory: false)
+            } label: {
+                Label("Reveal in Finder", systemImage: "finder")
             }
 #endif
             if repoAvailable, let change {
                 if change.staged != nil {
-                    Button("Unstage File") {
+                    Button {
                         Task { await vm.unstage(paths: [path]) }
+                    } label: {
+                        Label("Unstage File", systemImage: "minus.circle")
                     }
                 } else {
-                    Button("Stage File") {
+                    Button {
                         Task { await vm.stage(paths: [path]) }
+                    } label: {
+                        Label("Stage File", systemImage: "plus.circle")
                     }
                 }
             } else if repoAvailable {
-                Button("Stage File") {
+                Button {
                     Task { await vm.stage(paths: [path]) }
+                } label: {
+                    Label("Stage File", systemImage: "plus.circle")
                 }
             }
         }
