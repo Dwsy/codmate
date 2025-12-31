@@ -142,6 +142,7 @@ struct SessionListRowView: View {
         Text(summary.effectiveTitle)
           .font(.headline)
           .lineLimit(1)
+          .truncationMode(.tail)
         if let remoteHost = summary.remoteHost {
           Text(remoteHost)
             .font(.caption2)
@@ -186,6 +187,7 @@ struct SessionListRowView: View {
         .foregroundStyle(.secondary)
       }
       .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+      .padding(.trailing, 32)
 
       Spacer(minLength: 0)
     }
@@ -245,6 +247,7 @@ struct SessionListRowView: View {
             .help(projectTip ?? "Project")
         }
       }
+      .padding(.leading, 8)
       .padding(.trailing, 8)
       .padding(.top, 8)
       .allowsHitTesting(false)
