@@ -185,6 +185,10 @@ if [[ -d "$ROOT_DIR/payload/commands" ]]; then
   mkdir -p "$RESOURCES_DIR/payload"
   cp -R "$ROOT_DIR/payload/commands" "$RESOURCES_DIR/payload/commands"
 fi
+if [[ -d "$ROOT_DIR/payload/prompts" ]]; then
+  mkdir -p "$RESOURCES_DIR/payload"
+  cp -R "$ROOT_DIR/payload/prompts" "$RESOURCES_DIR/payload/prompts"
+fi
 if [[ -f "$ROOT_DIR/PrivacyInfo.xcprivacy" ]]; then
   cp -f "$ROOT_DIR/PrivacyInfo.xcprivacy" "$RESOURCES_DIR/PrivacyInfo.xcprivacy"
 fi

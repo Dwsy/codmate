@@ -512,7 +512,14 @@ final class GitChangesViewModel: ObservableObject {
             Self.log.info("Start generation providerId=\(providerId ?? "(auto)", privacy: .public) bytes=\(truncated.utf8.count)")
             do {
                 // Allow a slightly longer timeout for commit generation to reduce provider-specific timeouts
-                let res = try await llm.generateText(prompt: prompt, options: .init(preferred: .auto, model: modelId, timeout: 45, providerId: providerId))
+                var options = LLMHTTPService.Options()
+                options.preferred = .auto
+                options.model = modelId
+                options.timeout = 45
+                options.providerId = providerId
+                options.maxTokens = 800
+                options.systemPrompt = "Return only the commit message text. No labels, explanations, or extra commentary."
+                let res = try await llm.generateText(prompt: prompt, options: options)
                 let raw = res.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 let cleaned = Self.cleanCommitMessage(from: raw)
                 let finalMessage = cleaned.isEmpty ? raw : cleaned
@@ -575,21 +582,32 @@ final class GitChangesViewModel: ObservableObject {
         // Allow user override via Settings › Git Review template stored in preferences.
         // The template acts as a preamble; we always append the diff after it.
         let key = "git.review.commitPromptTemplate"
+        let outputPrefix = "Output only the commit message. Do not add any extra text."
+        let basePrompt: String
         if let tpl = UserDefaults.standard.string(forKey: key), !tpl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return tpl + "\n\nDiff:\n" + diff
+            basePrompt = tpl
+        } else if let payload = Self.payloadCommitPrompt {
+            basePrompt = payload
+        } else {
+            basePrompt = [
+                "Write a Conventional Commit in imperative mood.",
+                "Include a concise subject line (type: scope? subject).",
+                "Optionally add a brief body (2-4 lines) explaining motivation and key changes.",
+                "Constraints: subject <= 80 chars; wrap body lines <= 72 chars; no trailing period in subject."
+            ].joined(separator: "\n")
         }
-        var body: [String] = []
-        body.append("You are a helpful assistant that writes Conventional Commits in imperative mood.")
-        body.append("Task: produce a high‑quality commit message with:")
-        body.append("1) A concise subject line (type: scope? subject)")
-        body.append("2) A brief body (2–4 lines or bullets) explaining motivation and key changes")
-        body.append("Constraints: subject <= 80 chars; wrap body lines <= 72 chars; no trailing period in subject.")
-        body.append("")
-        body.append("Consider the staged diff below (may be truncated):")
-        body.append("Diff:")
-        body.append(diff)
-        return body.joined(separator: "\n")
+        return [outputPrefix, "", basePrompt, "", "Diff:", diff].joined(separator: "\n")
     }
+
+    private static let payloadCommitPrompt: String? = {
+        let bundle = Bundle.main
+        guard let url = bundle.url(forResource: "commit-message", withExtension: "md", subdirectory: "payload/prompts") else {
+            return nil
+        }
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }()
 
     private static func cleanCommitMessage(from raw: String) -> String {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)

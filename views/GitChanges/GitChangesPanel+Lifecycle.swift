@@ -136,7 +136,13 @@ extension GitChangesPanel {
                 vm.selectedSide = stagedSide ? .staged : .unstaged
             }
             vm.showPreviewInsteadOfDiff = initial.showPreview
-            vm.commitMessage = initial.commitMessage
+            let savedMessage = initial.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+            let liveMessage = vm.commitMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !liveMessage.isEmpty && liveMessage != savedMessage {
+                savedState.commitMessage = vm.commitMessage
+            } else {
+                vm.commitMessage = initial.commitMessage
+            }
         }
     }
 }
