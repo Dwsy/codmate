@@ -42,10 +42,12 @@ struct ClaudeUsageAPIClient {
         struct OAuth: Decodable {
             let accessToken: String
             let expiresAt: TimeInterval?
+            let rateLimitTier: String?
 
             enum CodingKeys: String, CodingKey {
                 case accessToken
                 case expiresAt
+                case rateLimitTier = "rate_limit_tier"
             }
         }
 
@@ -132,7 +134,14 @@ struct ClaudeUsageAPIClient {
         }
 
         // Try to detect plan type from OAuth token (best effort)
-        let planType = await detectPlanTypeViaOAuth(token: token)
+        var planType = await detectPlanTypeViaOAuth(token: token)
+
+        if planType == nil, let tier = credential.claudeAiOauth.rateLimitTier {
+            planType = mapRateLimitTierToPlan(tier)
+            if planType != nil {
+                NSLog("[ClaudeUsage] Detected plan type from credential: \(tier) -> \(planType!)")
+            }
+        }
 
         let status = ClaudeUsageStatus(
             updatedAt: now,
@@ -337,6 +346,15 @@ struct ClaudeUsageAPIClient {
     }
 
     // MARK: - Plan Type Detection (Best Effort)
+
+    private func mapRateLimitTierToPlan(_ tier: String) -> String? {
+        let lower = tier.lowercased()
+        if lower.contains("max") { return "Max" }
+        if lower.contains("pro") { return "Pro" }
+        if lower.contains("team") { return "Team" }
+        if lower.contains("enterprise") { return "Enterprise" }
+        return nil
+    }
 
     /// Attempts to detect plan type using OAuth token to access claude.ai Web API.
     /// This is a best-effort approach - OAuth tokens may not work with claude.ai Web API.

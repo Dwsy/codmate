@@ -363,6 +363,10 @@ enum ClaudeWebAPIClient {
       NSLog("[ClaudeWebAPI] Matched: Pro (via stripe+claude)")
       return "Pro"
     }
+    if billing.contains("apple") {
+      NSLog("[ClaudeWebAPI] Matched: Pro (via apple)")
+      return "Pro"
+    }
 
     NSLog("[ClaudeWebAPI] No plan matched")
     return nil
