@@ -249,6 +249,8 @@ final class SessionListViewModel: ObservableObject {
   @Published var editingSession: SessionSummary? = nil
   @Published var editTitle: String = ""
   @Published var editComment: String = ""
+  @Published var isGeneratingTitleComment: Bool = false
+  @Published var generatingSessionId: String? = nil
   @Published var globalSessionCount: Int = 0
   @Published private(set) var pathTreeRootPublished: PathTreeNode?
   private var monthCountsCache: [String: [Int: Int]] = [:]  // key: "dim|yyyy-MM" (not @Published to avoid updates during view reads)
