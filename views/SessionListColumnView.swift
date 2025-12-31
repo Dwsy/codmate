@@ -345,6 +345,13 @@ struct SessionListColumnView: View {
     } label: {
       Label("Edit Title & Comment", systemImage: "pencil")
     }
+    Button {
+      Task { @MainActor in
+        await viewModel.generateTitleAndComment(for: session, force: false)
+      }
+    } label: {
+      Label("Generate Title & Comment", systemImage: "sparkles")
+    }
 
     if let project, project.id != SessionListViewModel.otherProjectId {
       let newItems = buildNewMenuItems(anchor: session)

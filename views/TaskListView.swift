@@ -668,6 +668,19 @@ struct TaskListView: View {
         }
       }
       Divider()
+      Button {
+        Task { await viewModel.beginEditing(session: session) }
+      } label: {
+        Label("Edit Title & Comment", systemImage: "pencil")
+      }
+      Button {
+        Task { @MainActor in
+          await viewModel.generateTitleAndComment(for: session, force: false)
+        }
+      } label: {
+        Label("Generate Title & Comment", systemImage: "sparkles")
+      }
+      Divider()
       Button { copyAbsolutePath(session) } label: { Label("Copy Absolute Path", systemImage: "doc.on.doc") }
       Button { onExportMarkdown(session) } label: { Label("Export as Markdown", systemImage: "square.and.arrow.up") }
       Divider()
