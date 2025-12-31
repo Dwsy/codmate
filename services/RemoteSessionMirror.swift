@@ -329,7 +329,8 @@ actor RemoteSessionMirror {
         let quotedBase = doubleQuoted(base)
         let pathArgs = searchPaths.map { doubleQuoted($0) }.joined(separator: " ")
         // Use /bin/sh -c to ensure POSIX shell execution regardless of remote login shell (e.g., fish)
-        let innerCommand = "cd \(quotedBase) && { find \(pathArgs) -type f -name '*.jsonl' -printf '%p|%s|%T@\\n' 2>/dev/null || true; }"
+        // Use double quotes for find arguments to avoid nested single-quote escaping complexity
+        let innerCommand = "cd \(quotedBase) && { find \(pathArgs) -type f -name \"*.jsonl\" -printf \"%p|%s|%T@\\n\" 2>/dev/null || true; }"
         return "/bin/sh -c '\(innerCommand.replacingOccurrences(of: "'", with: "'\\''"))'"
     }
 
