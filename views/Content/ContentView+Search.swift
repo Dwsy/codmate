@@ -81,12 +81,19 @@ extension ContentView {
       highlightProject(project)
     case .note:
       guard let note = result.note else { return }
-      guard let summary = viewModel.sessionSummary(withId: note.id) else {
+
+      // Try to find the session in current view, or by file URL
+      let summary = viewModel.sessionSummary(withId: note.id)
+        ?? viewModel.sessionSummary(forFileURL: result.fileURL)
+
+      guard let summary else {
+        // If session not found, just highlight the project
         if let pid = note.projectId, let project = viewModel.projects.first(where: { $0.id == pid }) {
           highlightProject(project)
         }
         return
       }
+
       focusOnSession(
         summary,
         explicitProjectId: note.projectId,
@@ -102,6 +109,9 @@ extension ContentView {
         searchTerm: trimmedTerm.isEmpty ? nil : trimmedTerm,
         filterConversation: true
       )
+    case .task:
+      guard let task = result.task else { return }
+      focusOnTask(task)
     }
   }
 
@@ -110,6 +120,30 @@ extension ContentView {
     viewModel.setSelectedProject(project.id)
     viewModel.requestProjectExpansion(for: project.id)
     isListHidden = false
+  }
+
+  private func focusOnTask(_ task: CodMateTask) {
+    viewModel.clearScopeFilters()
+    viewModel.setSelectedProject(task.projectId)
+    viewModel.requestProjectExpansion(for: task.projectId)
+    if viewModel.projectWorkspaceMode != .tasks {
+      viewModel.projectWorkspaceMode = .tasks
+    }
+
+    // Set calendar to task's updated date
+    let referenceDate = task.updatedAt
+    let day = Calendar.current.startOfDay(for: referenceDate)
+    viewModel.selectedDay = day
+    viewModel.selectedDays = Set([day])
+
+    // Select first session in the task to auto-expand it
+    if let firstSessionId = task.sessionIds.first {
+      pendingSelectionID = firstSessionId
+      applyPendingSelectionIfNeeded()
+    }
+
+    isListHidden = false
+    selectedDetailTab = .timeline
   }
 
   func focusOnSession(

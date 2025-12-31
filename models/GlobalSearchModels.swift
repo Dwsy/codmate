@@ -32,6 +32,7 @@ enum GlobalSearchResultKind: String, CaseIterable, Identifiable, Sendable {
   case session
   case note
   case project
+  case task
 
   var id: String { rawValue }
 
@@ -40,6 +41,7 @@ enum GlobalSearchResultKind: String, CaseIterable, Identifiable, Sendable {
     case .session: return "Sessions"
     case .note: return "Notes"
     case .project: return "Projects"
+    case .task: return "Tasks"
     }
   }
 
@@ -48,6 +50,7 @@ enum GlobalSearchResultKind: String, CaseIterable, Identifiable, Sendable {
     case .session: return "terminal"
     case .note: return "note.text"
     case .project: return "square.grid.2x2"
+    case .task: return "checklist"
     }
   }
 }
@@ -58,22 +61,28 @@ struct GlobalSearchScope: OptionSet, Sendable {
   static let sessions = GlobalSearchScope(rawValue: 1 << 0)
   static let notes = GlobalSearchScope(rawValue: 1 << 1)
   static let projects = GlobalSearchScope(rawValue: 1 << 2)
+  static let tasks = GlobalSearchScope(rawValue: 1 << 3)
 
-  static let all: GlobalSearchScope = [.sessions, .notes, .projects]
+  static let all: GlobalSearchScope = [.sessions, .notes, .projects, .tasks]
 }
 
 struct GlobalSearchPaths: Sendable {
   var sessionRoots: [URL]
   var notesRoot: URL?
   var projectsRoot: URL?
+  var tasksRoot: URL?
   var projectMetadataRoot: URL? {
     projectsRoot?.appendingPathComponent("metadata", isDirectory: true)
   }
+  var taskMetadataRoot: URL? {
+    tasksRoot?.appendingPathComponent("metadata", isDirectory: true)
+  }
 
-  init(sessionRoots: [URL], notesRoot: URL?, projectsRoot: URL?) {
+  init(sessionRoots: [URL], notesRoot: URL?, projectsRoot: URL?, tasksRoot: URL?) {
     self.sessionRoots = sessionRoots
     self.notesRoot = notesRoot
     self.projectsRoot = projectsRoot
+    self.tasksRoot = tasksRoot
   }
 }
 
@@ -85,6 +94,7 @@ struct GlobalSearchHit: Identifiable, Hashable, Sendable {
   let fallbackTitle: String
   let note: SessionNote?
   let project: Project?
+  let task: CodMateTask?
   let metadataDate: Date?
   let score: Double
 
@@ -96,6 +106,7 @@ struct GlobalSearchHit: Identifiable, Hashable, Sendable {
     fallbackTitle: String,
     note: SessionNote? = nil,
     project: Project? = nil,
+    task: CodMateTask? = nil,
     metadataDate: Date? = nil,
     score: Double = 0
   ) {
@@ -106,6 +117,7 @@ struct GlobalSearchHit: Identifiable, Hashable, Sendable {
     self.fallbackTitle = fallbackTitle
     self.note = note
     self.project = project
+    self.task = task
     self.metadataDate = metadataDate
     self.score = score
   }
@@ -120,6 +132,7 @@ struct GlobalSearchResult: Identifiable, Hashable, Sendable {
   var sessionSummary: SessionSummary?
   var note: SessionNote?
   var project: Project?
+  var task: CodMateTask?
   var metadataDate: Date?
   var score: Double
 
@@ -132,6 +145,7 @@ struct GlobalSearchResult: Identifiable, Hashable, Sendable {
     self.sessionSummary = sessionSummary
     self.note = hit.note
     self.project = hit.project
+    self.task = hit.task
     self.metadataDate = hit.metadataDate
     self.score = hit.score
   }
@@ -145,6 +159,7 @@ struct GlobalSearchResult: Identifiable, Hashable, Sendable {
     sessionSummary: SessionSummary?,
     note: SessionNote?,
     project: Project?,
+    task: CodMateTask?,
     metadataDate: Date?,
     score: Double
   ) {
@@ -156,6 +171,7 @@ struct GlobalSearchResult: Identifiable, Hashable, Sendable {
     self.sessionSummary = sessionSummary
     self.note = note
     self.project = project
+    self.task = task
     self.metadataDate = metadataDate
     self.score = score
   }
@@ -172,6 +188,8 @@ struct GlobalSearchResult: Identifiable, Hashable, Sendable {
       let trimmed = project?.name.trimmingCharacters(in: .whitespacesAndNewlines)
       if let trimmed, !trimmed.isEmpty { return trimmed }
       return fallbackTitle
+    case .task:
+      return task?.effectiveTitle ?? fallbackTitle
     }
   }
 
@@ -194,6 +212,13 @@ struct GlobalSearchResult: Identifiable, Hashable, Sendable {
     case .project:
       if let dir = project?.directory { return dir }
       return "Project"
+    case .task:
+      if let taskData = task {
+        let formatter = RelativeDateTimeFormatter()
+        let rel = formatter.localizedString(for: taskData.updatedAt, relativeTo: Date())
+        return "Task · \(taskData.status.displayName) · \(rel)"
+      }
+      return "Task"
     }
   }
 }
@@ -203,8 +228,9 @@ enum GlobalSearchFilter: Hashable, CaseIterable, Identifiable {
   case notes
   case projects
   case sessions
+  case tasks
 
-  static var allCases: [GlobalSearchFilter] { [.all, .notes, .projects, .sessions] }
+  static var allCases: [GlobalSearchFilter] { [.all, .projects, .tasks, .notes, .sessions] }
 
   var id: String { title }
 
@@ -214,6 +240,7 @@ enum GlobalSearchFilter: Hashable, CaseIterable, Identifiable {
     case .sessions: return "Sessions"
     case .notes: return "Notes"
     case .projects: return "Projects"
+    case .tasks: return "Tasks"
     }
   }
 
@@ -223,6 +250,7 @@ enum GlobalSearchFilter: Hashable, CaseIterable, Identifiable {
     case .sessions: return [.sessions]
     case .notes: return [.notes]
     case .projects: return [.projects]
+    case .tasks: return [.tasks]
     }
   }
 }
@@ -248,6 +276,7 @@ extension GlobalSearchFilter {
     case .sessions: return .session
     case .notes: return .note
     case .projects: return .project
+    case .tasks: return .task
     }
   }
 }

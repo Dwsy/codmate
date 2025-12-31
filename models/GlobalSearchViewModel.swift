@@ -313,7 +313,8 @@ final class GlobalSearchViewModel: ObservableObject {
     return GlobalSearchPaths(
       sessionRoots: sessionRoots,
       notesRoot: preferences.notesRoot,
-      projectsRoot: preferences.projectsRoot
+      projectsRoot: preferences.projectsRoot,
+      tasksRoot: Self.defaultTasksRoot()
     )
   }
 
@@ -358,6 +359,26 @@ final class GlobalSearchViewModel: ObservableObject {
     let fallback = FileManager.default.homeDirectoryForCurrentUser
       .appendingPathComponent(".gemini", isDirectory: true)
       .appendingPathComponent("tmp", isDirectory: true)
+    return fallback
+  }
+
+  private static func defaultTasksRoot() -> URL? {
+    #if canImport(Darwin)
+      if let pwDir = getpwuid(getuid())?.pointee.pw_dir {
+        let path = String(cString: pwDir)
+        return URL(fileURLWithPath: path, isDirectory: true)
+          .appendingPathComponent(".codmate", isDirectory: true)
+          .appendingPathComponent("tasks", isDirectory: true)
+      }
+    #endif
+    if let home = ProcessInfo.processInfo.environment["HOME"] {
+      return URL(fileURLWithPath: home, isDirectory: true)
+        .appendingPathComponent(".codmate", isDirectory: true)
+        .appendingPathComponent("tasks", isDirectory: true)
+    }
+    let fallback = FileManager.default.homeDirectoryForCurrentUser
+      .appendingPathComponent(".codmate", isDirectory: true)
+      .appendingPathComponent("tasks", isDirectory: true)
     return fallback
   }
 }

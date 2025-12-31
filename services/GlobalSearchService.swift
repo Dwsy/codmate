@@ -169,11 +169,13 @@ actor GlobalSearchService {
     var sessionRoots: [URL]
     var noteRoot: URL?
     var projectMetadataRoot: URL?
+    var taskMetadataRoot: URL?
 
     var allPaths: [URL] {
       var paths = sessionRoots
       if let noteRoot { paths.append(noteRoot) }
       if let projectMetadataRoot { paths.append(projectMetadataRoot) }
+      if let taskMetadataRoot { paths.append(taskMetadataRoot) }
       return paths
     }
   }
@@ -200,8 +202,16 @@ actor GlobalSearchService {
       projectRoot = candidate
     }
 
+    var taskRoot: URL? = nil
+    if request.scope.contains(.tasks),
+      let candidate = request.paths.taskMetadataRoot?.resolvingSymlinksInPath(),
+      directoryAccessible(candidate)
+    {
+      taskRoot = candidate
+    }
+
     return SearchTargets(
-      sessionRoots: sessions, noteRoot: noteRoot, projectMetadataRoot: projectRoot)
+      sessionRoots: sessions, noteRoot: noteRoot, projectMetadataRoot: projectRoot, taskMetadataRoot: taskRoot)
   }
 
   private func runRipgrep(
@@ -439,6 +449,24 @@ actor GlobalSearchService {
           score: matchScore
         )
         return .match(hit)
+      case .task:
+        guard let taskInfo = loadTask(at: fileURL) else { return nil }
+        let matchScore = Self.combinedScore(
+          for: snippet.text,
+          pattern: pattern,
+          metadataDate: taskInfo.updatedAt
+        )
+        let hit = GlobalSearchHit(
+          id: fileURL.path,
+          kind: .task,
+          fileURL: fileURL,
+          snippet: snippet,
+          fallbackTitle: taskInfo.title,
+          task: taskInfo,
+          metadataDate: taskInfo.updatedAt,
+          score: matchScore
+        )
+        return .match(hit)
       }
     case "end":
       return .fileEnd
@@ -459,6 +487,11 @@ actor GlobalSearchService {
       path.hasPrefix(projectRoot)
     {
       return request.scope.contains(.projects) ? .project : nil
+    }
+    if let taskRoot = targets.taskMetadataRoot?.path.normalizedDirectoryPath,
+      path.hasPrefix(taskRoot)
+    {
+      return request.scope.contains(.tasks) ? .task : nil
     }
     return request.scope.contains(.sessions) ? .session : nil
   }
@@ -491,6 +524,8 @@ actor GlobalSearchService {
             return Self.scanNote(url: url, pattern: pattern)
           case .project(let url):
             return Self.scanProject(url: url, pattern: pattern)
+          case .task(let url):
+            return Self.scanTask(url: url, pattern: pattern)
           }
         }
       }
@@ -521,6 +556,7 @@ actor GlobalSearchService {
     case session(URL)
     case note(URL)
     case project(URL)
+    case task(URL)
   }
 
   private func fallbackWorkItems(for request: Request, targets: SearchTargets) -> [WorkItem] {
@@ -579,6 +615,22 @@ actor GlobalSearchService {
       }
     }
 
+    if request.scope.contains(.tasks), let metaRoot = targets.taskMetadataRoot,
+      let enumerator = fm.enumerator(
+        at: metaRoot,
+        includingPropertiesForKeys: [.isRegularFileKey],
+        options: [.skipsHiddenFiles]
+      )
+    {
+      for case let url as URL in enumerator {
+        if url.pathExtension.lowercased() != "json" { continue }
+        let path = url.path
+        if seen.contains(path) { continue }
+        seen.insert(path)
+        items.append(.task(url))
+      }
+    }
+
     return items
   }
 
@@ -604,6 +656,13 @@ actor GlobalSearchService {
     decoder.dateDecodingStrategy = .iso8601
     guard let meta = try? decoder.decode(ProjectMeta.self, from: data) else { return nil }
     return (meta.asProject(), meta.updatedAt)
+  }
+
+  private func loadTask(at url: URL) -> CodMateTask? {
+    guard let data = try? Data(contentsOf: url) else { return nil }
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return try? decoder.decode(CodMateTask.self, from: data)
   }
 
   nonisolated private static func scanSession(
@@ -726,6 +785,34 @@ actor GlobalSearchService {
       )
     ]
   }
+
+  nonisolated private static func scanTask(url: URL, pattern: SearchPattern) -> [GlobalSearchHit] {
+    guard let data = try? Data(contentsOf: url) else { return [] }
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    guard let task = try? decoder.decode(CodMateTask.self, from: data) else { return [] }
+    let fields = [task.title, task.description, task.tags.joined(separator: " "), task.agentsConfig]
+      .compactMap { $0 }
+      .joined(separator: "\n")
+    guard let range = findMatchRange(in: fields, pattern: pattern) else { return [] }
+    let snippet = GlobalSearchSnippetFactory.snippet(in: fields, matchRange: range)
+    return [
+      GlobalSearchHit(
+        id: url.path,
+        kind: .task,
+        fileURL: url,
+        snippet: snippet,
+        fallbackTitle: task.title,
+        task: task,
+        metadataDate: task.updatedAt,
+        score: Self.combinedScore(
+          for: snippet.text,
+          pattern: pattern,
+          metadataDate: task.updatedAt
+        )
+      )
+    ]
+  }
 }
 
 extension GlobalSearchScope {
@@ -734,6 +821,7 @@ extension GlobalSearchScope {
     case .session: return contains(.sessions)
     case .note: return contains(.notes)
     case .project: return contains(.projects)
+    case .task: return contains(.tasks)
     }
   }
 }
