@@ -1,4 +1,4 @@
-.PHONY: help build release test app dmg zip clean run notices
+.PHONY: help build release test app dmg zip clean run debug debug-logs debug-app notices
 
 APP_NAME := CodMate
 VER ?= 0.1.0
@@ -42,6 +42,40 @@ run: ## Build and launch CodMate.app (native arch, inferred version)
 	SIGN_ADHOC=1 \
 	./scripts/create-app-bundle.sh; \
 	open "$(APP_DIR)"
+
+debug: ## Build and run with terminal output (prints to stdout/stderr)
+	@echo "Building CodMate.app for debug..."
+	@VER_RUN=$${VER:-$$(git describe --tags --abbrev=0 2>/dev/null || echo 0.0.0)}; \
+	ARCH_NATIVE=$$(uname -m); \
+	VER="$$VER_RUN" BUILD_NUMBER_STRATEGY=$(BUILD_NUMBER_STRATEGY) \
+	ARCH_MATRIX="$$ARCH_NATIVE" APP_DIR=$(APP_DIR) STRIP=0 SWIFT_CONFIG=debug \
+	SIGN_ADHOC=1 \
+	./scripts/create-app-bundle.sh
+	@echo ""
+	@echo "Starting CodMate with terminal output..."
+	@echo "Press Ctrl+C to stop"
+	@echo "========================================"
+	@"$(APP_DIR)/Contents/MacOS/CodMate"
+
+debug-logs: ## Stream live logs from running CodMate app (use with 'make run' in another terminal)
+	@echo "Streaming logs from CodMate (Ctrl+C to stop)..."
+	@echo "========================================"
+	@log stream --predicate 'processImagePath CONTAINS "CodMate"' --style compact
+
+debug-app: ## Build, launch app in background, and stream logs in foreground
+	@echo "Building and launching CodMate.app..."
+	@VER_RUN=$${VER:-$$(git describe --tags --abbrev=0 2>/dev/null || echo 0.0.0)}; \
+	ARCH_NATIVE=$$(uname -m); \
+	VER="$$VER_RUN" BUILD_NUMBER_STRATEGY=$(BUILD_NUMBER_STRATEGY) \
+	ARCH_MATRIX="$$ARCH_NATIVE" APP_DIR=$(APP_DIR) STRIP=0 SWIFT_CONFIG=debug \
+	SIGN_ADHOC=1 \
+	./scripts/create-app-bundle.sh
+	@open "$(APP_DIR)"
+	@sleep 1
+	@echo ""
+	@echo "Streaming logs from CodMate (Ctrl+C to stop)..."
+	@echo "========================================"
+	@log stream --predicate 'processImagePath CONTAINS "CodMate"' --style compact
 
 dmg: ## Build Developer ID DMG (ARCH=arm64|x86_64|"arm64 x86_64")
 	@if [ -z "$(VER)" ]; then echo "error: VER is required (e.g., VER=1.2.3)"; exit 1; fi
