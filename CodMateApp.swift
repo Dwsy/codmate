@@ -34,6 +34,10 @@ struct CodMateApp: App {
     Task { @MainActor in
       SandboxPermissionsManager.shared.restoreAccess()
     }
+    // Sync launch at login state with system
+    Task { @MainActor in
+      LaunchAtLoginService.shared.syncWithPreferences(prefs)
+    }
   }
 
   var bodyCommands: some Commands {
@@ -67,6 +71,13 @@ struct CodMateApp: App {
           NotificationCenter.default.post(name: .codMateToggleList, object: nil)
         }
         .keyboardShortcut("2", modifiers: [.command])
+      }
+      // Override Cmd+Q to use smart quit behavior
+      CommandGroup(replacing: .appTermination) {
+        Button("Quit CodMate") {
+          MenuBarController.shared.handleQuit()
+        }
+        .keyboardShortcut("q", modifiers: [.command])
       }
     }
   }
@@ -162,6 +173,11 @@ private struct SettingsWindowContainer: View {
   final class AppDelegate: NSObject, NSApplicationDelegate {
     private var suppressNextReopenActivation = false
     private var suppressResetTask: Task<Void, Never>? = nil
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+      // Hide from Dock to make CodMate a pure menu bar app
+      NSApp.setActivationPolicy(.accessory)
+    }
 
     func application(_ application: NSApplication, open urls: [URL]) {
       print("🔗 [AppDelegate] Received URLs: \(urls)")

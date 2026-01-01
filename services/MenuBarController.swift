@@ -253,16 +253,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   private func updateActivationPolicy(for visibility: SystemMenuVisibility) {
     #if os(macOS)
       let app = NSApplication.shared
-      switch visibility {
-      case .menuOnly:
-        guard MainWindowCoordinator.shared.hasAttachedWindow else {
-          app.setActivationPolicy(.regular)
-          return
-        }
-        app.setActivationPolicy(.accessory)
-      case .hidden, .visible:
-        app.setActivationPolicy(.regular)
-      }
+      // Always use .accessory to hide Dock icon (makes CodMate a pure menu bar app)
+      // Temporarily switch to .regular only when showing windows (handled in activateApp)
+      app.setActivationPolicy(.accessory)
     #endif
   }
 
@@ -1246,7 +1239,45 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     )
   }
 
-  @objc private func handleQuit() {
+  @objc func handleQuit() {
+    guard let preferences else {
+      NSApp.terminate(nil)
+      return
+    }
+
+    // Check if any app windows are visible (main or settings)
+    let visibleWindows = NSApp.windows.filter { window in
+      window.isVisible &&
+      (window.identifier == NSUserInterfaceItemIdentifier("CodMateMainWindow") ||
+       window.identifier == NSUserInterfaceItemIdentifier("CodMateSettingsWindow"))
+    }
+
+    // If windows are open, just close them instead of quitting
+    if !visibleWindows.isEmpty {
+      for window in visibleWindows {
+        window.close()
+      }
+      // Hide Dock icon after closing windows
+      NSApp.setActivationPolicy(.accessory)
+      return
+    }
+
+    // No windows open - proceed with quit confirmation
+    if preferences.confirmBeforeQuit {
+      let alert = NSAlert()
+      alert.messageText = "Are you sure you want to quit CodMate?"
+      alert.informativeText = "CodMate will hide in the menu bar. You can access it anytime."
+      alert.alertStyle = .warning
+      alert.addButton(withTitle: "Quit")
+      alert.addButton(withTitle: "Cancel")
+
+      let response = alert.runModal()
+      if response == .alertSecondButtonReturn {
+        // User clicked Cancel
+        return
+      }
+    }
+
     NSApp.terminate(nil)
   }
 

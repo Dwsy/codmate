@@ -29,6 +29,7 @@ struct SettingsView: View {
       WindowConfigurator { window in
         window.isMovableByWindowBackground = false
         window.identifier = NSUserInterfaceItemIdentifier("CodMateSettingsWindow")
+        window.delegate = SettingsWindowDelegate.shared
         if window.toolbar == nil {
           let toolbar = NSToolbar(identifier: "CodMateSettingsToolbar")
           SettingsToolbarCoordinator.shared.configure(toolbar: toolbar)
@@ -85,6 +86,25 @@ struct SettingsView: View {
       .codmateToolbarRemovingSidebarToggleIfAvailable()
     }
     .frame(minWidth: 900, minHeight: 520)
+  }
+
+  private final class SettingsWindowDelegate: NSObject, NSWindowDelegate {
+    static let shared = SettingsWindowDelegate()
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+      // Check if main window is still visible
+      let mainWindowId = NSUserInterfaceItemIdentifier("CodMateMainWindow")
+      let mainWindowVisible = NSApplication.shared.windows.contains { window in
+        window.identifier == mainWindowId && window.isVisible
+      }
+
+      // Only hide Dock icon if no other app windows are visible
+      if !mainWindowVisible {
+        NSApplication.shared.setActivationPolicy(.accessory)
+      }
+
+      return true
+    }
   }
 
   private final class SettingsToolbarCoordinator: NSObject, NSToolbarDelegate {
@@ -163,6 +183,45 @@ struct SettingsView: View {
           Text("Configure basic application settings")
             .font(.subheadline)
             .foregroundColor(.secondary)
+        }
+
+        VStack(alignment: .leading, spacing: 10) {
+          Text("App Behavior").font(.headline).fontWeight(.semibold)
+          settingsCard {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+              GridRow {
+                VStack(alignment: .leading, spacing: 0) {
+                  Text("Confirm before quit")
+                    .font(.subheadline).fontWeight(.medium)
+                  Text("Show confirmation dialog when quitting the app")
+                    .font(.caption).foregroundColor(.secondary)
+                }
+                Toggle("", isOn: $preferences.confirmBeforeQuit)
+                  .labelsHidden()
+                  .toggleStyle(.switch)
+                  .controlSize(.small)
+                  .frame(maxWidth: .infinity, alignment: .trailing)
+                  .gridColumnAlignment(.trailing)
+              }
+
+              gridDivider
+
+              GridRow {
+                VStack(alignment: .leading, spacing: 0) {
+                  Text("Launch at login")
+                    .font(.subheadline).fontWeight(.medium)
+                  Text("Automatically start CodMate when you log in")
+                    .font(.caption).foregroundColor(.secondary)
+                }
+                Toggle("", isOn: $preferences.launchAtLogin)
+                  .labelsHidden()
+                  .toggleStyle(.switch)
+                  .controlSize(.small)
+                  .frame(maxWidth: .infinity, alignment: .trailing)
+                  .gridColumnAlignment(.trailing)
+              }
+            }
+          }
         }
 
         VStack(alignment: .leading, spacing: 10) {

@@ -54,6 +54,8 @@ final class SessionPreferencesStore: ObservableObject {
     static let enabledRemoteHosts = "codex.remote.enabledHosts"
     static let searchPanelStyle = "codmate.search.panelStyle"
     static let systemMenuVisibility = "codmate.systemMenu.visibility"
+    static let confirmBeforeQuit = "codmate.app.confirmBeforeQuit"
+    static let launchAtLogin = "codmate.app.launchAtLogin"
     // Claude advanced
     static let claudeDebug = "claude.debug"
     static let claudeDebugFilter = "claude.debug.filter"
@@ -290,6 +292,9 @@ final class SessionPreferencesStore: ObservableObject {
     } else {
       self.systemMenuVisibility = .visible
     }
+    // App behavior defaults
+    self.confirmBeforeQuit = defaults.object(forKey: Keys.confirmBeforeQuit) as? Bool ?? true
+    self.launchAtLogin = defaults.object(forKey: Keys.launchAtLogin) as? Bool ?? false
     // Claude advanced defaults
     self.claudeDebug = defaults.object(forKey: Keys.claudeDebug) as? Bool ?? false
     self.claudeDebugFilter = defaults.string(forKey: Keys.claudeDebugFilter) ?? ""
@@ -538,6 +543,17 @@ final class SessionPreferencesStore: ObservableObject {
 
   @Published var systemMenuVisibility: SystemMenuVisibility {
     didSet { defaults.set(systemMenuVisibility.rawValue, forKey: Keys.systemMenuVisibility) }
+  }
+
+  @Published var confirmBeforeQuit: Bool {
+    didSet { defaults.set(confirmBeforeQuit, forKey: Keys.confirmBeforeQuit) }
+  }
+
+  @Published var launchAtLogin: Bool {
+    didSet {
+      defaults.set(launchAtLogin, forKey: Keys.launchAtLogin)
+      LaunchAtLoginService.shared.setLaunchAtLogin(enabled: launchAtLogin)
+    }
   }
 
   @Published var enabledRemoteHosts: Set<String> = [] {

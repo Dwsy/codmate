@@ -18,10 +18,18 @@ final class MainWindowCoordinator: NSObject, NSWindowDelegate {
 
   func windowShouldClose(_ sender: NSWindow) -> Bool {
     sender.orderOut(nil)
-    // If in menuOnly mode, switch back to .accessory after hiding window
-    if visibility == .menuOnly {
+
+    // Check if settings window is still visible
+    let settingsWindowId = NSUserInterfaceItemIdentifier("CodMateSettingsWindow")
+    let settingsWindowVisible = NSApplication.shared.windows.contains { window in
+      window.identifier == settingsWindowId && window.isVisible
+    }
+
+    // Only hide Dock icon if no other app windows are visible
+    if !settingsWindowVisible {
       NSApplication.shared.setActivationPolicy(.accessory)
     }
+
     return false
   }
 
