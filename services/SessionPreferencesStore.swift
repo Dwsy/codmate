@@ -84,6 +84,14 @@ final class SessionPreferencesStore: ObservableObject {
     static let terminalFontSize = "terminal.fontSize"
     static let terminalCursorStyle = "terminal.cursorStyle"
     static let warpPromptEnabled = "codmate.warp.promptTitle"
+    // Local AI Server (formerly CLI Proxy)
+    static let localServerEnabled = "codmate.localserver.enabled"         // Public server switch
+    static let localServerReroute = "codmate.localserver.reroute"         // ReRoute built-ins
+    static let localServerAutoStart = "codmate.localserver.autostart"     // On-demand/Auto logic
+    static let localServerPort = "codmate.localserver.port"
+    // Legacy keys for migration
+    static let legacyUseCLIProxy = "codmate.cliproxy.useForInternal"
+    static let legacyCLIProxyPort = "codmate.cliproxy.port"
   }
 
   init(
@@ -320,6 +328,16 @@ final class SessionPreferencesStore: ObservableObject {
 
     self.promptForWarpTitle = defaults.object(forKey: Keys.warpPromptEnabled) as? Bool ?? false
     
+    // Local Server Defaults & Migration
+    let legacyPort = defaults.object(forKey: Keys.legacyCLIProxyPort) as? Int
+    let legacyUse = defaults.object(forKey: Keys.legacyUseCLIProxy) as? Bool ?? false
+    
+    self.localServerPort = defaults.object(forKey: Keys.localServerPort) as? Int ?? legacyPort ?? 8080
+    self.localServerEnabled = defaults.object(forKey: Keys.localServerEnabled) as? Bool ?? false
+    self.localServerReroute = defaults.object(forKey: Keys.localServerReroute) as? Bool ?? legacyUse
+    // Default auto-start to true if public server is enabled, or if reroute is on (on-demand implied)
+    self.localServerAutoStart = defaults.object(forKey: Keys.localServerAutoStart) as? Bool ?? true
+    
     // Now that all properties are initialized, ensure directories exist
     ensureDirectoryExists(sessionsRoot)
     ensureDirectoryExists(notesRoot)
@@ -499,6 +517,20 @@ final class SessionPreferencesStore: ObservableObject {
   }
   @Published var promptForWarpTitle: Bool {
     didSet { defaults.set(promptForWarpTitle, forKey: Keys.warpPromptEnabled) }
+  }
+
+  // MARK: - Local AI Server
+  @Published var localServerEnabled: Bool {
+    didSet { defaults.set(localServerEnabled, forKey: Keys.localServerEnabled) }
+  }
+  @Published var localServerReroute: Bool {
+    didSet { defaults.set(localServerReroute, forKey: Keys.localServerReroute) }
+  }
+  @Published var localServerAutoStart: Bool {
+    didSet { defaults.set(localServerAutoStart, forKey: Keys.localServerAutoStart) }
+  }
+  @Published var localServerPort: Int {
+    didSet { defaults.set(localServerPort, forKey: Keys.localServerPort) }
   }
 
   @Published var defaultResumeSandboxMode: SandboxMode {

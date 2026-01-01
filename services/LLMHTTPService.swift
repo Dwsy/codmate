@@ -114,6 +114,28 @@ actor LLMHTTPService {
         preferred: PreferredEngine,
         providerId: String?
     ) -> (provider: ProvidersRegistryService.Provider, connector: ProvidersRegistryService.Connector, baseURL: String, headers: [String:String], consumerKey: String)? {
+        
+        // If local proxy is enabled for internal AI, override selection
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: "codmate.localserver.reroute") {
+            let port = defaults.integer(forKey: "codmate.localserver.port")
+            let pPort = port > 0 ? port : 8080
+            
+            // Create a virtual provider/connector for the local proxy
+            let vConnector = ProvidersRegistryService.Connector(
+                baseURL: "http://127.0.0.1:\(pPort)/v1",
+                wireAPI: "chat"
+            )
+            let vProvider = ProvidersRegistryService.Provider(
+                id: "local-proxy",
+                name: "Local AI Server",
+                class: "openai-compatible",
+                managedByCodMate: true,
+                connectors: ["internal": vConnector]
+            )
+            return (vProvider, vConnector, vConnector.baseURL!, [:], "internal")
+        }
+
         func resolve(_ consumer: ProvidersRegistryService.Consumer, scopedProvider: ProvidersRegistryService.Provider? = nil) -> (ProvidersRegistryService.Provider, ProvidersRegistryService.Connector, String, [String:String], String)? {
             let key = consumer.rawValue
             let p: ProvidersRegistryService.Provider?

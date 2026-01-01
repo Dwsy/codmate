@@ -162,6 +162,8 @@ struct SettingsView: View {
       RemoteHostsSettingsPane(preferences: preferences)
     case .gitReview:
       gitReviewSettings
+    case .localServer:
+      LocalServerSettingsView(preferences: preferences)
     case .claudeCode:
       claudeCodeSettings
     case .advanced:

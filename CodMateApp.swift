@@ -177,6 +177,13 @@ private struct SettingsWindowContainer: View {
     func applicationDidFinishLaunching(_ notification: Notification) {
       // Hide from Dock to make CodMate a pure menu bar app
       NSApp.setActivationPolicy(.accessory)
+      
+      // Start CLI Proxy Service if available
+      Task { @MainActor in
+        if CLIProxyService.shared.isBinaryInstalled {
+            try? await CLIProxyService.shared.start()
+        }
+      }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -227,6 +234,9 @@ private struct SettingsWindowContainer: View {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+      // Stop CLI Proxy Service
+      CLIProxyService.shared.stop()
+
       #if canImport(SwiftTerm) && !APPSTORE
         // Synchronously stop all terminal sessions to ensure clean exit
         // This prevents orphaned codex/claude processes when app quits
