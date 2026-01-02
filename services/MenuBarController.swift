@@ -30,7 +30,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   private var preferencesCancellable: AnyCancellable?
   private var usageCancellable: AnyCancellable?
   private var isShowingDynamicIcon = false
-  private var appearanceObserver: NSKeyValueObservation?
   private var isMenuOpen = false
 
   private let relativeFormatter: RelativeDateTimeFormatter = {
@@ -77,7 +76,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     applySystemMenuVisibility(preferences.systemMenuVisibility)
     refreshMenuData()
-    observeAppearanceChanges()
   }
 
   func menuWillOpen(_ menu: NSMenu) {
@@ -139,10 +137,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     let referenceDate = Date()
-    // Adapt color based on menu bar button's actual appearance (considers wallpaper tinting)
-    let buttonAppearance = button.effectiveAppearance
-    let isDark = buttonAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    let menuBarColor = isDark ? Color.white : Color.black
+    // Use fixed black color for template image generation
+    // System automatically handles coloring (white/black) based on menu bar context
+    let menuBarColor = Color.black
     let outerState = ringState(for: .gemini, relativeTo: referenceDate, snapshots: snapshots, colorOverride: menuBarColor)
     let middleState = ringState(for: .claude, relativeTo: referenceDate, snapshots: snapshots, colorOverride: menuBarColor)
     let innerState = ringState(for: .codex, relativeTo: referenceDate, snapshots: snapshots, colorOverride: menuBarColor)
@@ -161,7 +158,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     renderer.scale = backingScale * 2.0  // 4x for 2x display, 6x for 3x display
 
     if let nsImage = renderer.nsImage {
-        nsImage.isTemplate = false // Use adaptive colors (white/black based on appearance)
+        nsImage.isTemplate = true // Use system template mode (ignore colors, use alpha)
         button.image = nsImage
         isShowingDynamicIcon = true
     }
@@ -1122,22 +1119,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       return appearance == .darkAqua
     }
     return false
-  }
-
-  private func observeAppearanceChanges() {
-    appearanceObserver?.invalidate()
-    // Observe menu bar button's effectiveAppearance instead of app-wide appearance
-    // This responds to wallpaper-based menu bar tinting, not just system theme
-    guard let button = statusItem?.button else { return }
-    appearanceObserver = button.observe(\.effectiveAppearance, options: [.new]) { [weak self] (button: NSStatusBarButton, change: NSKeyValueObservedChange<NSAppearance>) in
-      guard let self else { return }
-      Task { @MainActor in
-        // Regenerate menu bar icon with new appearance
-        if let snapshots = self.viewModel?.usageSnapshots {
-          self.updateStatusItemIcon(with: snapshots)
-        }
-      }
-    }
   }
 
   private func invertedImage(_ image: NSImage) -> NSImage? {
