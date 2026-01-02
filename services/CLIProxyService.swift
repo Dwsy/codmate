@@ -18,7 +18,7 @@ final class CLIProxyService: ObservableObject {
 
     struct LoginPrompt: Identifiable, Equatable {
         let id = UUID()
-        let provider: UsageProviderKind
+        let provider: LocalAuthProvider
         let message: String
     }
 
@@ -29,6 +29,8 @@ final class CLIProxyService: ObservableObject {
     struct LocalModel: Decodable, Hashable {
         let id: String
         let owned_by: String?
+        let provider: String?
+        let source: String?
     }
     
     // Log streaming
@@ -44,8 +46,9 @@ final class CLIProxyService: ObservableObject {
     private var process: Process?
     private var loginProcess: Process?
     private var loginInputPipe: Pipe?
-    private var loginProvider: UsageProviderKind?
+    private var loginProvider: LocalAuthProvider?
     private var loginCancellationRequested = false
+    private var openedLoginURL: URL?
     private let proxyBridge = CLIProxyBridge()
     
     // Paths
@@ -246,6 +249,10 @@ final class CLIProxyService: ObservableObject {
         FileManager.default.fileExists(atPath: binaryPath)
     }
     
+    var binaryFilePath: String {
+        binaryPath
+    }
+    
     func install() async throws {
         isInstalling = true
         installProgress = 0
@@ -270,21 +277,37 @@ final class CLIProxyService: ObservableObject {
         }
     }
 
-    func login(provider: UsageProviderKind) async throws {
+    func login(provider: LocalAuthProvider) async throws {
         guard isBinaryInstalled else {
             appendLog("Binary not found. Please install it first.\n", isError: true)
             throw ServiceError.binaryNotFound
         }
 
-        let flag: String
-        switch provider {
-        case .gemini:
-            flag = "--login"
-        case .codex:
-            flag = "--codex-login"
-        case .claude:
-            flag = "--claude-login"
+        openedLoginURL = nil
+
+        if provider == .qwen {
+            appendLog("Starting \(provider.displayName) login...\n")
+            do {
+                try await withTaskCancellationHandler {
+                    try await runCLI(arguments: ["-config", configPath, provider.loginFlag, "--no-browser"], loginProvider: provider)
+                } onCancel: {
+                    Task { @MainActor in
+                        self.cancelLogin()
+                    }
+                }
+                appendLog("\(provider.displayName) login finished.\n")
+                return
+            } catch is CancellationError {
+                appendLog("\(provider.displayName) login cancelled.\n")
+                throw CancellationError()
+            } catch {
+                appendLog("\(provider.displayName) CLI login failed. Trying management login...\n", isError: true)
+                try await loginViaManagement(provider: provider)
+                return
+            }
         }
+
+        let flag = provider.loginFlag
 
         appendLog("Starting \(provider.displayName) login...\n")
         do {
@@ -308,24 +331,24 @@ final class CLIProxyService: ObservableObject {
             process.terminate()
         }
         loginPrompt = nil
+        openedLoginURL = nil
     }
 
-    func logout(provider: UsageProviderKind) {
+    func logout(provider: LocalAuthProvider) {
         let fm = FileManager.default
         guard let items = try? fm.contentsOfDirectory(atPath: authDir) else { return }
-        let key = provider.rawValue.lowercased()
-        let extra: [String] = (provider == .codex) ? ["openai"] : []
+        let aliases = provider.authAliases.map { $0.lowercased() }
         var removed = 0
         for name in items {
             let lower = name.lowercased()
             guard lower.hasSuffix(".json") else { continue }
             let path = (authDir as NSString).appendingPathComponent(name)
-            if lower.contains(key) || extra.contains(where: { lower.contains($0) }) {
+            if aliases.contains(where: { lower.contains($0) }) {
                 try? fm.removeItem(atPath: path)
                 removed += 1
                 continue
             }
-            if fileContainsProviderType(path: path, provider: key) {
+            if fileContainsProviderType(path: path, providers: aliases) {
                 try? fm.removeItem(atPath: path)
                 removed += 1
             }
@@ -335,36 +358,39 @@ final class CLIProxyService: ObservableObject {
         }
     }
 
-    func hasAuthToken(for provider: UsageProviderKind) -> Bool {
+    func hasAuthToken(for provider: LocalAuthProvider) -> Bool {
         let fm = FileManager.default
         guard let items = try? fm.contentsOfDirectory(atPath: authDir) else { return false }
         let normalized = items.map { $0.lowercased() }
-        let key = provider.rawValue.lowercased()
-        let extra: [String] = (provider == .codex) ? ["openai"] : []
+        let aliases = provider.authAliases.map { $0.lowercased() }
         for (idx, name) in normalized.enumerated() {
             guard name.hasSuffix(".json") else { continue }
-            if name.contains(key) { return true }
-            if extra.contains(where: { name.contains($0) }) { return true }
+            if aliases.contains(where: { name.contains($0) }) { return true }
             let original = items[idx]
             let path = (authDir as NSString).appendingPathComponent(original)
-            if fileContainsProviderType(path: path, provider: key) {
+            if fileContainsProviderType(path: path, providers: aliases) {
                 return true
             }
         }
         return false
     }
 
-    private func fileContainsProviderType(path: String, provider: String) -> Bool {
+    private func fileContainsProviderType(path: String, providers: [String]) -> Bool {
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return false }
         guard let text = String(data: data, encoding: .utf8) else { return false }
         let lower = text.lowercased()
-        let patterns = [
-            "\"type\":\"\(provider)\"",
-            "\"type\": \"\(provider)\"",
-            "\"provider\":\"\(provider)\"",
-            "\"provider\": \"\(provider)\""
-        ]
-        return patterns.contains(where: { lower.contains($0) })
+        for provider in providers {
+            let patterns = [
+                "\"type\":\"\(provider)\"",
+                "\"type\": \"\(provider)\"",
+                "\"provider\":\"\(provider)\"",
+                "\"provider\": \"\(provider)\""
+            ]
+            if patterns.contains(where: { lower.contains($0) }) {
+                return true
+            }
+        }
+        return false
     }
 
     func submitLoginInput(_ input: String) {
@@ -505,7 +531,7 @@ final class CLIProxyService: ObservableObject {
     
     private func ensureConfigExists() {
         guard !FileManager.default.fileExists(atPath: configPath) else { return }
-        
+
         let config = """
 host: \"127.0.0.1\"
 port: \(internalPort)
@@ -516,7 +542,7 @@ api-keys:
 
 remote-management:
   allow-remote: false
-  secret-key: \"\(managementKey)\" 
+  secret-key: \"\(managementKey)\"
 
 debug: false
 logging-to-file: false
@@ -525,8 +551,92 @@ usage-statistics-enabled: true
 routing:
   strategy: \"round-robin\"
 """
-        
+
         try? config.write(toFile: configPath, atomically: true, encoding: .utf8)
+    }
+
+    func syncThirdPartyProviders() async {
+        let registry = ProvidersRegistryService()
+        let providers = await registry.listProviders()
+
+        var config = """
+host: \"127.0.0.1\"
+port: \(internalPort)
+auth-dir: \"\(authDir)\"
+
+api-keys:
+  - \"codmate-local-\(UUID().uuidString.prefix(8))\"
+
+remote-management:
+  allow-remote: false
+  secret-key: \"\(managementKey)\"
+
+debug: false
+logging-to-file: false
+usage-statistics-enabled: true
+
+routing:
+  strategy: \"round-robin\"
+
+"""
+
+        // Append third-party providers configuration
+        var sections: [String] = []
+
+        for provider in providers {
+            // Check for OpenAI-compatible providers (Codex connector)
+            if let codexConnector = provider.connectors[ProvidersRegistryService.Consumer.codex.rawValue],
+               let baseURL = codexConnector.baseURL,
+               !baseURL.isEmpty {
+
+                let envKey = provider.envKey ?? codexConnector.envKey ?? "OPENAI_API_KEY"
+                if let apiKey = ProcessInfo.processInfo.environment[envKey], !apiKey.isEmpty {
+                    let providerName = provider.name ?? provider.id
+                    let section = """
+# Third-party provider: \(providerName)
+openai:
+  - name: "\(providerName)"
+    base-url: "\(baseURL)"
+    api-key: "\(apiKey)"
+"""
+                    sections.append(section)
+                }
+            }
+
+            // Check for Claude-compatible providers
+            if let claudeConnector = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue],
+               let baseURL = claudeConnector.baseURL,
+               !baseURL.isEmpty {
+
+                let envKey = provider.envKey ?? claudeConnector.envKey ?? "ANTHROPIC_API_KEY"
+                if let apiKey = ProcessInfo.processInfo.environment[envKey], !apiKey.isEmpty {
+                    let providerName = provider.name ?? provider.id
+                    let section = """
+# Third-party provider: \(providerName)
+claude:
+  - name: "\(providerName)"
+    base-url: "\(baseURL)"
+    api-key: "\(apiKey)"
+"""
+                    sections.append(section)
+                }
+            }
+        }
+
+        if !sections.isEmpty {
+            config += sections.joined(separator: "\n\n")
+        }
+
+        try? config.write(toFile: configPath, atomically: true, encoding: .utf8)
+        appendLog("Synced \(sections.count) third-party provider(s) to config.\n")
+
+        // Restart service if running to apply new config
+        if isRunning {
+            appendLog("Restarting service to apply configuration changes...\n")
+            stop()
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await start()
+        }
     }
     
     private func updateConfigPort(_ newPort: UInt16) {
@@ -641,7 +751,7 @@ routing:
         }
     }
 
-    private func runCLI(arguments: [String], loginProvider: UsageProviderKind? = nil) async throws {
+    private func runCLI(arguments: [String], loginProvider: LocalAuthProvider? = nil) async throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binaryPath)
         process.arguments = arguments
@@ -666,7 +776,10 @@ routing:
             if let str = String(data: data, encoding: .utf8), !str.isEmpty {
                 Task { @MainActor [weak self] in
                     self?.appendLog(str)
-                    self?.detectLoginPrompt(in: str)
+                    if let provider = self?.loginProvider {
+                        self?.detectLoginURL(in: str, provider: provider)
+                        self?.detectLoginPrompt(in: str)
+                    }
                 }
             }
         }
@@ -675,7 +788,10 @@ routing:
             if let str = String(data: data, encoding: .utf8), !str.isEmpty {
                 Task { @MainActor [weak self] in
                     self?.appendLog(str, isError: true)
-                    self?.detectLoginPrompt(in: str)
+                    if let provider = self?.loginProvider {
+                        self?.detectLoginURL(in: str, provider: provider)
+                        self?.detectLoginPrompt(in: str)
+                    }
                 }
             }
         }
@@ -692,6 +808,7 @@ routing:
                 self.loginProcess = nil
                 self.loginInputPipe = nil
                 self.loginPrompt = nil
+                self.openedLoginURL = nil
             }
         }
 
@@ -743,6 +860,40 @@ routing:
                 return
             }
             prompt = "Enter project ID or ALL"
+        } else if lower.contains("device code")
+                    || lower.contains("verification code")
+                    || lower.contains("enter code")
+                    || lower.contains("input code")
+                    || lower.contains("paste code")
+                    || lower.contains("设备码")
+                    || lower.contains("验证码")
+                    || lower.contains("输入验证码")
+                    || lower.contains("输入代码")
+                    || lower.contains("输入设备码") {
+            prompt = "Enter device or verification code"
+        } else if lower.contains("enter email")
+                    || lower.contains("enter your email")
+                    || lower.contains("enter nickname")
+                    || lower.contains("enter a nickname")
+                    || lower.contains("enter name")
+                    || lower.contains("enter username")
+                    || lower.contains("enter alias")
+                    || lower.contains("enter account")
+                    || lower.contains("enter label")
+                    || lower.contains("enter display name")
+                    || lower.contains("输入邮箱")
+                    || lower.contains("输入昵称")
+                    || lower.contains("输入名字")
+                    || lower.contains("输入名称")
+                    || lower.contains("输入用户名")
+                    || lower.contains("输入别名")
+                    || lower.contains("输入账号")
+                    || lower.contains("输入账户")
+                    || lower.contains("输入账号名称")
+                    || lower.contains("输入账户名称")
+                    || lower.contains("输入账号别名")
+                    || lower.contains("输入账户别名") {
+            prompt = "Enter email or nickname"
         } else {
             prompt = nil
         }
@@ -752,6 +903,133 @@ routing:
             return
         }
         loginPrompt = LoginPrompt(provider: provider, message: message)
+    }
+
+    private func detectLoginURL(in text: String, provider: LocalAuthProvider) {
+        guard provider == .qwen else { return }
+        guard openedLoginURL == nil else { return }
+        guard text.contains("http") else { return }
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        for match in detector.matches(in: text, options: [], range: range) {
+            guard let url = match.url else { continue }
+            openedLoginURL = url
+            appendLog("Opening \(provider.displayName) login URL...\n")
+            NSWorkspace.shared.open(url)
+            break
+        }
+    }
+
+    private struct ManagementAuthURLResponse: Decodable {
+        let status: String?
+        let url: String?
+        let state: String?
+        let error: String?
+    }
+
+    private struct ManagementAuthStatusResponse: Decodable {
+        let status: String?
+        let error: String?
+    }
+
+    private func loginViaManagement(provider: LocalAuthProvider) async throws {
+        let shouldStopAfter = !isRunning
+        if shouldStopAfter {
+            appendLog("Starting local server for \(provider.displayName) login...\n")
+            try await start()
+        }
+        defer {
+            if shouldStopAfter {
+                stop()
+            }
+        }
+
+        let (authURL, state) = try await fetchManagementAuthURL(for: provider)
+        appendLog("Opening browser for \(provider.displayName) login...\n")
+        NSWorkspace.shared.open(authURL)
+
+        guard let state, !state.isEmpty else {
+            appendLog("Missing auth state for \(provider.displayName) login.\n", isError: true)
+            throw ServiceError.loginFailed
+        }
+
+        try await waitForAuthCompletion(state: state, provider: provider)
+        appendLog("\(provider.displayName) login finished.\n")
+    }
+
+    private func fetchManagementAuthURL(for provider: LocalAuthProvider) async throws -> (URL, String?) {
+        guard let endpoint = managementAuthEndpoint(for: provider),
+              let request = managementRequest(path: endpoint) else {
+            throw ServiceError.networkError
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw ServiceError.networkError
+        }
+        let payload = try JSONDecoder().decode(ManagementAuthURLResponse.self, from: data)
+        guard payload.status?.lowercased() == "ok",
+              let urlText = payload.url,
+              let url = URL(string: urlText) else {
+            throw ServiceError.loginFailed
+        }
+        return (url, payload.state)
+    }
+
+    private func waitForAuthCompletion(state: String, provider: LocalAuthProvider) async throws {
+        let timeoutSeconds: TimeInterval = 180
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while Date() < deadline {
+            try Task.checkCancellation()
+            let status = try await fetchAuthStatus(state: state)
+            switch status {
+            case "ok":
+                return
+            case "error":
+                appendLog("\(provider.displayName) login failed.\n", isError: true)
+                throw ServiceError.loginFailed
+            default:
+                break
+            }
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        appendLog("\(provider.displayName) login timed out.\n", isError: true)
+        throw ServiceError.loginFailed
+    }
+
+    private func fetchAuthStatus(state: String) async throws -> String {
+        let query = [URLQueryItem(name: "state", value: state)]
+        guard let request = managementRequest(path: "get-auth-status", queryItems: query) else {
+            throw ServiceError.networkError
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw ServiceError.networkError
+        }
+        let payload = try JSONDecoder().decode(ManagementAuthStatusResponse.self, from: data)
+        return payload.status?.lowercased() ?? "error"
+    }
+
+    private func managementAuthEndpoint(for provider: LocalAuthProvider) -> String? {
+        switch provider {
+        case .codex: return "codex-auth-url"
+        case .claude: return "anthropic-auth-url"
+        case .gemini: return "gemini-cli-auth-url"
+        case .antigravity: return "antigravity-auth-url"
+        case .qwen: return "qwen-auth-url"
+        }
+    }
+
+    private func managementRequest(path: String, queryItems: [URLQueryItem]? = nil) -> URLRequest? {
+        guard var components = URLComponents(string: "http://127.0.0.1:\(internalPort)/v0/management/\(path)") else {
+            return nil
+        }
+        if let queryItems, !queryItems.isEmpty {
+            components.queryItems = queryItems
+        }
+        guard let url = components.url else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(managementKey)", forHTTPHeaderField: "Authorization")
+        return request
     }
     
     private func search(_ dir: URL) -> URL? {

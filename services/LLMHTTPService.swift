@@ -6,6 +6,8 @@ import Foundation
 actor LLMHTTPService {
     enum PreferredEngine { case auto, codex, claudeCode }
 
+    private static let localReroutePrefix = "local-reroute:"
+
     struct Options: Sendable {
         var preferred: PreferredEngine = .auto
         var model: String? = nil
@@ -114,7 +116,42 @@ actor LLMHTTPService {
         preferred: PreferredEngine,
         providerId: String?
     ) -> (provider: ProvidersRegistryService.Provider, connector: ProvidersRegistryService.Connector, baseURL: String, headers: [String:String], consumerKey: String)? {
-        if let builtin = LocalServerBuiltInProvider.from(providerId: providerId) {
+        let defaults = UserDefaults.standard
+        let rerouteBuiltIn = defaults.bool(forKey: "codmate.localserver.reroute")
+        let reroute3P = defaults.bool(forKey: "codmate.localserver.reroute3p")
+
+        var effectiveProviderId = providerId
+        if let pid = providerId, LocalServerBuiltInProvider.from(providerId: pid) != nil, !rerouteBuiltIn {
+            effectiveProviderId = nil
+        }
+        if let pid = providerId, Self.rerouteProviderName(from: pid) != nil, !reroute3P {
+            effectiveProviderId = nil
+        }
+
+        // Handle CLI Proxy reroute providers selection
+        if let pid = effectiveProviderId, let name = Self.rerouteProviderName(from: pid) {
+            let port = Self.localServerPort()
+            let base = "http://127.0.0.1:\(port)/v1"
+            let vConnector = ProvidersRegistryService.Connector(
+                baseURL: base,
+                wireAPI: "chat"
+            )
+            let vProvider = ProvidersRegistryService.Provider(
+                id: pid,
+                name: name,
+                class: "openai-compatible",
+                managedByCodMate: true,
+                connectors: ["internal": vConnector]
+            )
+            var headers: [String:String] = [:]
+            if let key = Self.loadLocalServerAPIKey(), !key.isEmpty {
+                headers["Authorization"] = key.hasPrefix("Bearer ") ? key : "Bearer \(key)"
+            }
+            return (vProvider, vConnector, base, headers, "internal")
+        }
+
+        // Handle built-in providers selection (explicitly chosen via providerId)
+        if let builtin = LocalServerBuiltInProvider.from(providerId: effectiveProviderId) {
             let port = Self.localServerPort()
             let base = "http://127.0.0.1:\(port)/v1"
             let vConnector = ProvidersRegistryService.Connector(
@@ -135,25 +172,32 @@ actor LLMHTTPService {
             return (vProvider, vConnector, base, headers, "internal")
         }
 
-        // If local proxy is enabled for internal AI, override selection
-        let defaults = UserDefaults.standard
-        if defaults.bool(forKey: "codmate.localserver.reroute") {
+        // Check if providerId refers to a user-added 3P provider
+        let is3PProvider = effectiveProviderId != nil && reg.providers.contains(where: { $0.id == effectiveProviderId })
+
+        // If local proxy is enabled for built-in providers AND no specific 3P provider is selected
+        // (i.e., this is for internal AI features using built-in capabilities)
+        if rerouteBuiltIn && !is3PProvider {
             let port = defaults.integer(forKey: "codmate.localserver.port")
             let pPort = port > 0 ? port : 8080
-            
+
             // Create a virtual provider/connector for the local proxy
             let vConnector = ProvidersRegistryService.Connector(
                 baseURL: "http://127.0.0.1:\(pPort)/v1",
                 wireAPI: "chat"
             )
             let vProvider = ProvidersRegistryService.Provider(
-                id: "local-proxy",
-                name: "Local AI Server",
+                id: "local-proxy-builtin",
+                name: "Local AI Server (Built-in)",
                 class: "openai-compatible",
                 managedByCodMate: true,
                 connectors: ["internal": vConnector]
             )
-            return (vProvider, vConnector, vConnector.baseURL!, [:], "internal")
+            var headers: [String:String] = [:]
+            if let key = Self.loadLocalServerAPIKey(), !key.isEmpty {
+                headers["Authorization"] = key.hasPrefix("Bearer ") ? key : "Bearer \(key)"
+            }
+            return (vProvider, vConnector, vConnector.baseURL!, headers, "internal")
         }
 
         func resolve(_ consumer: ProvidersRegistryService.Consumer, scopedProvider: ProvidersRegistryService.Provider? = nil) -> (ProvidersRegistryService.Provider, ProvidersRegistryService.Connector, String, [String:String], String)? {
@@ -183,23 +227,62 @@ actor LLMHTTPService {
             return (provider, connector, base, headers, key)
         }
 
+        // Resolve the actual provider first
+        var result: (ProvidersRegistryService.Provider, ProvidersRegistryService.Connector, String, [String:String], String)?
+
         // If providerId is specified, pick its connector (prefer codex, else claudeCode)
-        if let pid = providerId, let p = reg.providers.first(where: { $0.id == pid }) {
-            return resolve(.codex, scopedProvider: p) ?? resolve(.claudeCode, scopedProvider: p)
+        if let pid = effectiveProviderId, let p = reg.providers.first(where: { $0.id == pid }) {
+            result = resolve(.codex, scopedProvider: p) ?? resolve(.claudeCode, scopedProvider: p)
+        } else {
+            switch preferred {
+            case .codex:
+                result = resolve(.codex) ?? resolve(.claudeCode)
+            case .claudeCode:
+                result = resolve(.claudeCode) ?? resolve(.codex)
+            case .auto:
+                result = resolve(.codex) ?? resolve(.claudeCode)
+            }
         }
-        switch preferred {
-        case .codex:
-            return resolve(.codex) ?? resolve(.claudeCode)
-        case .claudeCode:
-            return resolve(.claudeCode) ?? resolve(.codex)
-        case .auto:
-            return resolve(.codex) ?? resolve(.claudeCode)
+
+        guard let resolved = result else { return nil }
+
+        // Check if we need to reroute 3P providers through local proxy
+        let (provider, _, _, _, _) = resolved
+
+        if reroute3P && provider.managedByCodMate == true {
+            // This is a third-party provider managed by CodMate, reroute through local proxy
+            let port = defaults.integer(forKey: "codmate.localserver.port")
+            let pPort = port > 0 ? port : 8080
+
+            let vConnector = ProvidersRegistryService.Connector(
+                baseURL: "http://127.0.0.1:\(pPort)/v1",
+                wireAPI: "chat"
+            )
+            // Keep original provider info for model selection
+            var reroutedProvider = provider
+            reroutedProvider.connectors = ["internal": vConnector]
+
+            var proxyHeaders: [String:String] = [:]
+            if let key = Self.loadLocalServerAPIKey(), !key.isEmpty {
+                proxyHeaders["Authorization"] = key.hasPrefix("Bearer ") ? key : "Bearer \(key)"
+            }
+
+            return (reroutedProvider, vConnector, vConnector.baseURL!, proxyHeaders, "internal")
         }
+
+        return resolved
     }
 
     private static func localServerPort() -> Int {
         let port = UserDefaults.standard.integer(forKey: "codmate.localserver.port")
         return port > 0 ? port : 8080
+    }
+
+    private static func rerouteProviderName(from providerId: String) -> String? {
+        guard providerId.hasPrefix(localReroutePrefix) else { return nil }
+        let name = String(providerId.dropFirst(localReroutePrefix.count))
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private static func localServerConfigPath() -> String {

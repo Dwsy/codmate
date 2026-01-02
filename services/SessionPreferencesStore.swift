@@ -87,8 +87,10 @@ final class SessionPreferencesStore: ObservableObject {
     // Local AI Server (formerly CLI Proxy)
     static let localServerEnabled = "codmate.localserver.enabled"         // Public server switch
     static let localServerReroute = "codmate.localserver.reroute"         // ReRoute built-ins
+    static let localServerReroute3P = "codmate.localserver.reroute3p"     // ReRoute 3P providers
     static let localServerAutoStart = "codmate.localserver.autostart"     // On-demand/Auto logic
     static let localServerPort = "codmate.localserver.port"
+    static let oauthProvidersEnabled = "codmate.providers.oauth.enabled"
     // Legacy keys for migration
     static let legacyUseCLIProxy = "codmate.cliproxy.useForInternal"
     static let legacyCLIProxyPort = "codmate.cliproxy.port"
@@ -335,8 +337,12 @@ final class SessionPreferencesStore: ObservableObject {
     self.localServerPort = defaults.object(forKey: Keys.localServerPort) as? Int ?? legacyPort ?? 8080
     self.localServerEnabled = defaults.object(forKey: Keys.localServerEnabled) as? Bool ?? false
     self.localServerReroute = defaults.object(forKey: Keys.localServerReroute) as? Bool ?? legacyUse
+    self.localServerReroute3P = defaults.object(forKey: Keys.localServerReroute3P) as? Bool ?? false
     // Default auto-start to true if public server is enabled, or if reroute is on (on-demand implied)
     self.localServerAutoStart = defaults.object(forKey: Keys.localServerAutoStart) as? Bool ?? true
+
+    let oauthEnabled = defaults.array(forKey: Keys.oauthProvidersEnabled) as? [String] ?? []
+    self.oauthProvidersEnabled = Set(oauthEnabled)
     
     // Now that all properties are initialized, ensure directories exist
     ensureDirectoryExists(sessionsRoot)
@@ -526,11 +532,17 @@ final class SessionPreferencesStore: ObservableObject {
   @Published var localServerReroute: Bool {
     didSet { defaults.set(localServerReroute, forKey: Keys.localServerReroute) }
   }
+  @Published var localServerReroute3P: Bool {
+    didSet { defaults.set(localServerReroute3P, forKey: Keys.localServerReroute3P) }
+  }
   @Published var localServerAutoStart: Bool {
     didSet { defaults.set(localServerAutoStart, forKey: Keys.localServerAutoStart) }
   }
   @Published var localServerPort: Int {
     didSet { defaults.set(localServerPort, forKey: Keys.localServerPort) }
+  }
+  @Published var oauthProvidersEnabled: Set<String> {
+    didSet { defaults.set(Array(oauthProvidersEnabled), forKey: Keys.oauthProvidersEnabled) }
   }
 
   @Published var defaultResumeSandboxMode: SandboxMode {
