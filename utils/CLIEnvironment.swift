@@ -1,5 +1,9 @@
 import Foundation
 
+#if canImport(Darwin)
+import Darwin
+#endif
+
 /// Unified CLI environment configuration for embedded terminals and external shells
 enum CLIEnvironment {
     static let defaultExecutableNames = ["codex", "claude", "gemini"]
@@ -93,51 +97,63 @@ enum CLIEnvironment {
         let isSandboxed = sandboxed ?? (ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil)
         let base = buildBasePATH()
         if isSandboxed { return base }
+
+        var paths: [String] = [base]
         if let shellPath = detectLoginShellPATH(), !shellPath.isEmpty {
-            return shellPath
+            paths.append(shellPath)
         }
         let current = ProcessInfo.processInfo.environment["PATH"] ?? ""
-        if current.isEmpty { return base }
-        return base + ":" + current
+        if !current.isEmpty {
+            paths.append(current)
+        }
+        return mergePATHStrings(paths)
     }
 
     static func resolveExecutablePath(_ name: String, path: String) -> String? {
-        if let resolved = which(name, path: path) { return resolved }
-        if let resolved = shellWhich(name) { return resolved }
+        if let resolved = which(name, path: path),
+           let sanitized = sanitizeExecutablePath(resolved) {
+            return sanitized
+        }
+        if let resolved = shellWhich(name),
+           let sanitized = sanitizeExecutablePath(resolved) {
+            return sanitized
+        }
         return manualResolve(name, path: path)
     }
 
     static func version(of name: String, path: String) -> String? {
         let candidates: [[String]] = [["--version"], ["version"], ["-V"], ["-v"]]
         for args in candidates {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            proc.arguments = [name] + args
-            let outPipe = Pipe()
-            let errPipe = Pipe()
-            proc.standardOutput = outPipe
-            proc.standardError = errPipe
             var env = ProcessInfo.processInfo.environment
             env["PATH"] = path
             env["NO_COLOR"] = "1"
-            proc.environment = env
-            do {
-                try proc.run()
-                proc.waitUntilExit()
-            } catch { continue }
-
-            let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-            var out = (String(data: outData, encoding: .utf8) ?? "")
-            let err = (String(data: errData, encoding: .utf8) ?? "")
-            if out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                out = err
+            guard let result = runProcess(
+                executable: "/usr/bin/env",
+                arguments: [name] + args,
+                environment: env,
+                timeout: 1.5
+            ) else { continue }
+            if result.timedOut {
+                NSLog("[CLIEnvironment] version probe timed out: %@ %@", name, args.joined(separator: " "))
+                return nil
             }
-            out = out.trimmingCharacters(in: .whitespacesAndNewlines)
-            if out.isEmpty { continue }
-            if let firstLine = out.split(separator: "\n").first { out = String(firstLine) }
-            if let ver = firstVersionToken(in: out) { return ver }
-            return String(out.prefix(48))
+            let out = result.stdout
+            let err = result.stderr
+            if out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                var fallback = err
+                fallback = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+                if fallback.isEmpty { continue }
+                if let firstLine = fallback.split(separator: "\n").first {
+                    fallback = String(firstLine)
+                }
+                if let ver = firstVersionToken(in: fallback) { return ver }
+                return String(fallback.prefix(48))
+            }
+            var cleaned = out.trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleaned.isEmpty { continue }
+            if let firstLine = cleaned.split(separator: "\n").first { cleaned = String(firstLine) }
+            if let ver = firstVersionToken(in: cleaned) { return ver }
+            return String(cleaned.prefix(48))
         }
         return nil
     }
@@ -145,34 +161,36 @@ enum CLIEnvironment {
     static func version(atExecutablePath executablePath: String, path: String) -> String? {
         let candidates: [[String]] = [["--version"], ["version"], ["-V"], ["-v"]]
         for args in candidates {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: executablePath)
-            proc.arguments = args
-            let outPipe = Pipe()
-            let errPipe = Pipe()
-            proc.standardOutput = outPipe
-            proc.standardError = errPipe
             var env = ProcessInfo.processInfo.environment
             env["PATH"] = path
             env["NO_COLOR"] = "1"
-            proc.environment = env
-            do {
-                try proc.run()
-                proc.waitUntilExit()
-            } catch { continue }
-
-            let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-            let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-            var out = (String(data: outData, encoding: .utf8) ?? "")
-            let err = (String(data: errData, encoding: .utf8) ?? "")
-            if out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                out = err
+            guard let result = runProcess(
+                executable: executablePath,
+                arguments: args,
+                environment: env,
+                timeout: 1.5
+            ) else { continue }
+            if result.timedOut {
+                NSLog("[CLIEnvironment] version probe timed out: %@ %@", executablePath, args.joined(separator: " "))
+                return nil
             }
-            out = out.trimmingCharacters(in: .whitespacesAndNewlines)
-            if out.isEmpty { continue }
-            if let firstLine = out.split(separator: "\n").first { out = String(firstLine) }
-            if let ver = firstVersionToken(in: out) { return ver }
-            return String(out.prefix(48))
+            let out = result.stdout
+            let err = result.stderr
+            if out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                var fallback = err
+                fallback = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+                if fallback.isEmpty { continue }
+                if let firstLine = fallback.split(separator: "\n").first {
+                    fallback = String(firstLine)
+                }
+                if let ver = firstVersionToken(in: fallback) { return ver }
+                return String(fallback.prefix(48))
+            }
+            var cleaned = out.trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleaned.isEmpty { continue }
+            if let firstLine = cleaned.split(separator: "\n").first { cleaned = String(firstLine) }
+            if let ver = firstVersionToken(in: cleaned) { return ver }
+            return String(cleaned.prefix(48))
         }
         return nil
     }
@@ -331,64 +349,55 @@ enum CLIEnvironment {
     }
 
     private static func detectLoginShellPATH() -> String? {
-        let env = ProcessInfo.processInfo.environment
-        let shell = env["SHELL"] ?? "/bin/zsh"
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: shell)
-        proc.arguments = ["-lic", "printf %s \"$PATH\""]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = Pipe()
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-        } catch { return nil }
-        guard proc.terminationStatus == 0 else { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let str = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (str?.isEmpty == false) ? str : nil
+        let shell = resolvedShellExecutable()
+        let shellName = URL(fileURLWithPath: shell).lastPathComponent.lowercased()
+        let command: String = shellName == "fish" ? "string join : $PATH" : "printf %s \"$PATH\""
+        guard let result = runProcess(
+            executable: shell,
+            arguments: ["-lic", command],
+            timeout: 1.0
+        ) else { return nil }
+        if result.timedOut {
+            NSLog("[CLIEnvironment] login shell PATH probe timed out (%@)", shell)
+            return nil
+        }
+        guard result.exitCode == 0 else { return nil }
+        let str = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return str.isEmpty ? nil : str
     }
 
     private static func shellWhich(_ name: String) -> String? {
-        let env = ProcessInfo.processInfo.environment
-        let shell = env["SHELL"] ?? "/bin/zsh"
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: shell)
-        proc.arguments = ["-lic", "command -v \(name) || which \(name)"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = Pipe()
-        do {
-            try proc.run()
-            proc.waitUntilExit()
-        } catch { return nil }
-        guard proc.terminationStatus == 0 else { return nil }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let str = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (str?.isEmpty == false) ? str : nil
+        let shell = resolvedShellExecutable()
+        guard let result = runProcess(
+            executable: shell,
+            arguments: ["-lic", "command -v \(name) || which \(name)"],
+            timeout: 1.0
+        ) else { return nil }
+        if result.timedOut {
+            NSLog("[CLIEnvironment] shell which timed out (%@, %@)", shell, name)
+            return nil
+        }
+        guard result.exitCode == 0 else { return nil }
+        let str = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return str.isEmpty ? nil : str
     }
 
     private static func which(_ name: String, path: String) -> String? {
-        do {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            proc.arguments = ["which", name]
-            let pipe = Pipe()
-            proc.standardOutput = pipe
-            proc.standardError = Pipe()
-            var env = ProcessInfo.processInfo.environment
-            env["PATH"] = path
-            proc.environment = env
-            try proc.run()
-            proc.waitUntilExit()
-            if proc.terminationStatus == 0 {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                if let str = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !str.isEmpty {
-                    return str
-                }
-            }
-        } catch { /* continue */ }
+        var env = ProcessInfo.processInfo.environment
+        env["PATH"] = path
+        guard let result = runProcess(
+            executable: "/usr/bin/env",
+            arguments: ["which", name],
+            environment: env,
+            timeout: 1.0
+        ) else { return nil }
+        if result.timedOut {
+            NSLog("[CLIEnvironment] which timed out (%@)", name)
+            return nil
+        }
+        guard result.exitCode == 0 else { return nil }
+        let str = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !str.isEmpty { return str }
         return nil
     }
 
@@ -402,6 +411,98 @@ enum CLIEnvironment {
             if fm.isExecutableFile(atPath: candidate) { return candidate }
         }
         return nil
+    }
+
+    private static func mergePATHStrings(_ paths: [String]) -> String {
+        var components: [String] = []
+        for raw in paths {
+            guard !raw.isEmpty else { continue }
+            let parts = raw.split(separator: ":").map { String($0) }
+            components.append(contentsOf: parts)
+        }
+        let expanded = components.map { expandHomePath($0) }
+        let filtered = expanded.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return dedupePreservingOrder(filtered).joined(separator: ":")
+    }
+
+    private static func sanitizeExecutablePath(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.contains("/") else { return nil }
+        let expanded = expandHomePath(trimmed)
+        return FileManager.default.isExecutableFile(atPath: expanded) ? expanded : nil
+    }
+
+    private struct ProcessResult {
+        let exitCode: Int32
+        let stdout: String
+        let stderr: String
+        let timedOut: Bool
+    }
+
+    private static func runProcess(
+        executable: String,
+        arguments: [String],
+        environment: [String: String]? = nil,
+        timeout: TimeInterval
+    ) -> ProcessResult? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        if let environment {
+            var env = ProcessInfo.processInfo.environment
+            for (key, value) in environment {
+                env[key] = value
+            }
+            process.environment = env
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in
+            semaphore.signal()
+        }
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        let finished = semaphore.wait(timeout: .now() + timeout) == .success
+        if !finished {
+            process.terminate()
+            _ = semaphore.wait(timeout: .now() + 0.2)
+            if process.isRunning {
+                #if canImport(Darwin)
+                _ = kill(process.processIdentifier, SIGKILL)
+                #endif
+            }
+        }
+
+        process.waitUntilExit()
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+        return ProcessResult(
+            exitCode: process.terminationStatus,
+            stdout: stdout,
+            stderr: stderr,
+            timedOut: !finished
+        )
+    }
+
+    private static func resolvedShellExecutable() -> String {
+        let envShell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let candidate = expandHomePath(envShell)
+        if FileManager.default.isExecutableFile(atPath: candidate) {
+            return candidate
+        }
+        return "/bin/zsh"
     }
 
     private static func firstVersionToken(in line: String) -> String? {
