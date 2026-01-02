@@ -16,7 +16,9 @@ UI Rules (macOS specific)
 - Use macOS SwiftUI and AppKit bridges; do NOT use iOS‑only placements such as `.navigationBarTrailing`.
 - Settings uses macOS 15's new TabView API (`Tab("…", systemImage: "…")`) when available; provide a macOS 13.5/14 fallback with `tabItem` + `tag`. Container padding is unified (horizontal 16pt, top 16pt).
   - Tab content uniformly uses `SettingsTabContent` container (top-aligned, overall 8pt padding) to ensure consistent layout and spacing across pages.
-- Providers has been separated from the Codex tab into a top-level Settings page: Settings › Providers manages global providers and Codex/Claude bindings; Settings › Codex only retains Runtime/Notifications/Privacy/Raw Config (no longer includes Providers).
+- Providers has been separated from the Codex tab into a top-level Settings page: Settings › Providers manages API key providers, OAuth providers, and Codex/Claude bindings; Settings › Codex only retains Runtime/Notifications/Privacy/Raw Config (no longer includes Providers).
+  - OAuth providers (Codex/Claude/Gemini/Antigravity/Qwen) are added from the Providers “Add” menu and appear under an OAuth list section with login status and info actions.
+  - CLI Proxy API status, reroute, and public access live under Providers as shared capabilities; deep diagnostics and installation details live under Settings › Advanced › CLI Proxy API.
   - Built-in providers are auto-loaded from an app-bundled `payload/providers.json` (managedByCodMate=true). This avoids hardcoding and lets users simply provide API keys; base URLs/models come pre-filled. The list merges bundled entries with `~/.codmate/providers.json` (user overrides win).
   - Schema note: use a single provider-level `envKey` (preferred) for both Codex and Claude Code connectors. Connector-level `envKey` remains tolerated for backward compatibility but is considered deprecated and will be ignored at save time to avoid duplication.
 - Extensions page (aligned with Providers style):
@@ -91,7 +93,7 @@ CLI Integration (codex)
 
 Codex Settings
 - Settings › Codex only manages Codex CLI runtime-related configuration (Model & Reasoning, Sandbox & Approvals, Notifications, Privacy, Raw Config).
-- Providers page is independent: Settings › Providers (cross-application shared, for Codex and Claude Code selection/configuration).
+- Providers page is independent: Settings › Providers (cross-application shared, for Codex and Claude Code selection/configuration, including OAuth).
 - Notifications: TUI notifications toggle; system notifications bridge via the bundled Swift `codmate-notify` helper (installed to `~/Library/Application Support/CodMate/bin/`).
 - Privacy: expose `shell_environment_policy`, reasoning visibility, OTEL exporter; do not surface history persistence in phase 1.
 - Projects auto‑create a same‑id Profile on creation; renaming a project synchronizes the profile name. Conflict prompts are required.
@@ -134,10 +136,13 @@ File/Folder Layout
 - docs/               – design notes and investigation docs
 
 Advanced Page
-- Settings › Advanced (between MCP Server and About) uses a TabView with Path and Dialectics tabs.
+- Settings › Advanced (between MCP Server and About) uses a TabView with Path, CLI Proxy API, and Dialectics tabs.
 - Path tab:
   - File paths (Projects/Notes) and CLI command path overrides (codex/claude/gemini)
   - CLI environment snapshot (auto-detected paths + PATH)
+- CLI Proxy API tab:
+  - Binary location + install/reinstall
+  - Config/Auth/Logs paths (reveal in Finder)
 - Dialectics tab aggregates diagnostics:
   - Codex sessions root probe (current vs default), counts and sample files, enumerator errors
   - Claude sessions directory probe (default path), counts and samples

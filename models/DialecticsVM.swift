@@ -17,6 +17,18 @@ final class DialecticsVM: ObservableObject {
     private let sessionsSvc = SessionsDiagnosticsService()
 
     func runAll(preferences: SessionPreferencesStore) async {
+        struct Snapshot {
+            let sessions: SessionsDiagnostics?
+            let codexPresent: Bool
+            let codexVersion: String?
+            let claudePresent: Bool
+            let claudeVersion: String?
+            let geminiPresent: Bool
+            let geminiVersion: String?
+            let pathEnv: String
+            let sandboxOn: Bool
+        }
+
         let home = FileManager.default.homeDirectoryForCurrentUser
         let defRoot = SessionPreferencesStore.defaultSessionsRoot(for: home)
         let notesDefault = SessionPreferencesStore.defaultNotesRoot(for: defRoot)
@@ -25,43 +37,61 @@ final class DialecticsVM: ObservableObject {
         let claudeCurrent: URL? = FileManager.default.fileExists(atPath: claudeDefault.path) ? claudeDefault : nil
         let geminiDefault = home.appendingPathComponent(".gemini", isDirectory: true).appendingPathComponent("tmp", isDirectory: true)
         let geminiCurrent: URL? = FileManager.default.fileExists(atPath: geminiDefault.path) ? geminiDefault : nil
-        let s = await sessionsSvc.run(
-            currentRoot: preferences.sessionsRoot,
-            defaultRoot: defRoot,
-            notesCurrentRoot: preferences.notesRoot,
-            notesDefaultRoot: notesDefault,
-            projectsCurrentRoot: preferences.projectsRoot,
-            projectsDefaultRoot: projectsDefault,
-            claudeCurrentRoot: claudeCurrent,
-            claudeDefaultRoot: claudeDefault,
-            geminiCurrentRoot: geminiCurrent,
-            geminiDefaultRoot: geminiDefault
-        )
+        let sessionsRoot = preferences.sessionsRoot
+        let notesRoot = preferences.notesRoot
+        let projectsRoot = preferences.projectsRoot
+
         let sandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
-        // Prefer a robust PATH in sandboxed mode; shell-derived PATH can be restricted
-        var mergedPATH: String
         if sandboxed {
-            // Attempt to start access for common binary folders if already authorized dynamically
             let brew = URL(fileURLWithPath: "/opt/homebrew/bin", isDirectory: true)
             let usrLocal = URL(fileURLWithPath: "/usr/local/bin", isDirectory: true)
             _ = SecurityScopedBookmarks.shared.startAccessDynamic(for: brew)
             _ = SecurityScopedBookmarks.shared.startAccessDynamic(for: usrLocal)
-            mergedPATH = CLIEnvironment.resolvedPATHForCLI(sandboxed: true)
-        } else {
-            mergedPATH = CLIEnvironment.resolvedPATHForCLI(sandboxed: false)
         }
-        let resolved = CLIEnvironment.resolveExecutablePath("codex", path: mergedPATH)
-        let resolvedClaude = CLIEnvironment.resolveExecutablePath("claude", path: mergedPATH)
-        let resolvedGemini = CLIEnvironment.resolveExecutablePath("gemini", path: mergedPATH)
-        self.sessions = s
-        self.codexPresent = (resolved != nil)
-        self.claudePresent = (resolvedClaude != nil)
-        self.geminiPresent = (resolvedGemini != nil)
-        self.codexVersion = resolved.flatMap { CLIEnvironment.version(atExecutablePath: $0, path: mergedPATH) }
-        self.claudeVersion = resolvedClaude.flatMap { CLIEnvironment.version(atExecutablePath: $0, path: mergedPATH) }
-        self.geminiVersion = resolvedGemini.flatMap { CLIEnvironment.version(atExecutablePath: $0, path: mergedPATH) }
-        self.pathEnv = mergedPATH
-        self.sandboxOn = sandboxed
+
+        let snapshot = await Task.detached(priority: .userInitiated) {
+            let svc = SessionsDiagnosticsService()
+            let s = await svc.run(
+                currentRoot: sessionsRoot,
+                defaultRoot: defRoot,
+                notesCurrentRoot: notesRoot,
+                notesDefaultRoot: notesDefault,
+                projectsCurrentRoot: projectsRoot,
+                projectsDefaultRoot: projectsDefault,
+                claudeCurrentRoot: claudeCurrent,
+                claudeDefaultRoot: claudeDefault,
+                geminiCurrentRoot: geminiCurrent,
+                geminiDefaultRoot: geminiDefault
+            )
+            let mergedPATH = CLIEnvironment.resolvedPATHForCLI(sandboxed: sandboxed)
+            let resolved = CLIEnvironment.resolveExecutablePath("codex", path: mergedPATH)
+            let resolvedClaude = CLIEnvironment.resolveExecutablePath("claude", path: mergedPATH)
+            let resolvedGemini = CLIEnvironment.resolveExecutablePath("gemini", path: mergedPATH)
+            let codexVersion = resolved.flatMap { CLIEnvironment.version(atExecutablePath: $0, path: mergedPATH) }
+            let claudeVersion = resolvedClaude.flatMap { CLIEnvironment.version(atExecutablePath: $0, path: mergedPATH) }
+            let geminiVersion = resolvedGemini.flatMap { CLIEnvironment.version(atExecutablePath: $0, path: mergedPATH) }
+            return Snapshot(
+                sessions: s,
+                codexPresent: resolved != nil,
+                codexVersion: codexVersion,
+                claudePresent: resolvedClaude != nil,
+                claudeVersion: claudeVersion,
+                geminiPresent: resolvedGemini != nil,
+                geminiVersion: geminiVersion,
+                pathEnv: mergedPATH,
+                sandboxOn: sandboxed
+            )
+        }.value
+
+        self.sessions = snapshot.sessions
+        self.codexPresent = snapshot.codexPresent
+        self.claudePresent = snapshot.claudePresent
+        self.geminiPresent = snapshot.geminiPresent
+        self.codexVersion = snapshot.codexVersion
+        self.claudeVersion = snapshot.claudeVersion
+        self.geminiVersion = snapshot.geminiVersion
+        self.pathEnv = snapshot.pathEnv
+        self.sandboxOn = snapshot.sandboxOn
     }
 
     var appVersion: String {
