@@ -52,12 +52,15 @@ struct ClaudeCodeSettingsView: View {
 
     // MARK: - Provider
     private var providerPane: some View {
-        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 14) {
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                 GridRow {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("Active Provider").font(.subheadline).fontWeight(.medium)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Active Provider", systemImage: "server.rack")
+                            .font(.subheadline).fontWeight(.medium)
                         Text("Anthropic-compatible endpoint configured in Providers.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Picker("", selection: $vm.activeProviderId) {
                         Text("(Built-in)").tag(String?.none)
@@ -73,10 +76,13 @@ struct ClaudeCodeSettingsView: View {
                 if vm.activeProviderId != nil {
                     gridDivider
                     GridRow {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("Default Model").font(.subheadline).fontWeight(.medium)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Default Model", systemImage: "cpu")
+                                .font(.subheadline).fontWeight(.medium)
                             Text("Used by Claude Code when starting a session.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         let modelIds = vm.availableModels()
                         if modelIds.isEmpty {
@@ -96,10 +102,13 @@ struct ClaudeCodeSettingsView: View {
                     gridDivider
                     // Alias rows (like Default Model style)
                     GridRow {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("Haiku Alias").font(.subheadline).fontWeight(.medium)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Haiku Alias", systemImage: "bolt")
+                                .font(.subheadline).fontWeight(.medium)
                             Text("Optional; leave as Default to inherit.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         let options = vm.availableModels()
                         Picker("", selection: $vm.aliasHaiku) {
@@ -110,11 +119,15 @@ struct ClaudeCodeSettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .onChange(of: vm.aliasHaiku) { _ in vm.scheduleSaveDebounced() }
                     }
+                    gridDivider
                     GridRow {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("Sonnet Alias").font(.subheadline).fontWeight(.medium)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Sonnet Alias", systemImage: "sparkles")
+                                .font(.subheadline).fontWeight(.medium)
                             Text("Optional; leave as Default to inherit.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         let options = vm.availableModels()
                         Picker("", selection: $vm.aliasSonnet) {
@@ -125,11 +138,15 @@ struct ClaudeCodeSettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .onChange(of: vm.aliasSonnet) { _ in vm.scheduleSaveDebounced() }
                     }
+                    gridDivider
                     GridRow {
-                        VStack(alignment: .leading, spacing: 0) {
-                            Text("Opus Alias").font(.subheadline).fontWeight(.medium)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Opus Alias", systemImage: "star")
+                                .font(.subheadline).fontWeight(.medium)
                             Text("Optional; leave as Default to inherit.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         let options = vm.availableModels()
                         Picker("", selection: $vm.aliasOpus) {
@@ -144,10 +161,13 @@ struct ClaudeCodeSettingsView: View {
                 if vm.activeProviderId == nil {
                 gridDivider
                 GridRow {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("Login Method").font(.subheadline).fontWeight(.medium)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Login Method", systemImage: "person.crop.circle")
+                            .font(.subheadline).fontWeight(.medium)
                         Text("Use API Key for third-party endpoints; Claude Subscription uses 'claude login'.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     HStack {
                         Picker("", selection: $vm.loginMethod) {
@@ -185,12 +205,15 @@ struct ClaudeCodeSettingsView: View {
 
     // MARK: - Raw Config (read-only; toolbar mirrors Codex)
     private var notificationsPane: some View {
-        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
             GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("macOS Notifications").font(.subheadline).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("macOS Notifications", systemImage: "bell")
+                        .font(.subheadline).fontWeight(.medium)
                     Text("Forward Claude Code permission and completion hooks to macOS via codmate://notify.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Toggle("", isOn: $vm.notificationsEnabled)
                     .labelsHidden()
@@ -203,8 +226,9 @@ struct ClaudeCodeSettingsView: View {
             }
             gridDivider
             GridRow {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Hook Commands").font(.subheadline).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Hook Commands", systemImage: "link")
+                        .font(.subheadline).fontWeight(.medium)
                     Text("/usr/bin/open -g codmate://notify?source=claude&event=permission&title64=…&body64=…")
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
@@ -214,14 +238,18 @@ struct ClaudeCodeSettingsView: View {
                     Text("Titles/bodies are base64-encoded to avoid shell escaping issues.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             gridDivider
             GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Self-test").font(.subheadline).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Self-test", systemImage: "checkmark.seal")
+                        .font(.subheadline).fontWeight(.medium)
                     Text("Sends a codmate:// test URL to verify notification routing.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(spacing: 8) {
                     if vm.notificationBridgeHealthy {
@@ -376,13 +404,16 @@ struct ClaudeCodeSettingsView: View {
     }
     
     private var runtimePaneGrid: some View {
-        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 14) {
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
             // Claude-native permission mode
             GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Permission Mode").font(.subheadline).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Permission Mode", systemImage: "hand.raised")
+                        .font(.subheadline).fontWeight(.medium)
                     Text("Affects edit confirmations and planning.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Picker("", selection: $preferences.claudePermissionMode) {
                     ForEach(ClaudePermissionMode.allCases) { Text($0.rawValue).tag($0) }
@@ -393,19 +424,26 @@ struct ClaudeCodeSettingsView: View {
             gridDivider
             // Dangerous permission skips (explicit)
             GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Skip Permissions (Dangerous)").font(.subheadline).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Skip Permissions (Dangerous)", systemImage: "exclamationmark.triangle")
+                        .font(.subheadline).fontWeight(.medium)
                     Text("Bypass permission prompts; use with caution.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Toggle("Enable", isOn: $preferences.claudeSkipPermissions)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
+            gridDivider
             GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Allow Skip Permissions").font(.subheadline).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Allow Skip Permissions", systemImage: "checkmark.shield")
+                        .font(.subheadline).fontWeight(.medium)
                     Text("Permit using the dangerous skip flag.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Toggle("Enable", isOn: $preferences.claudeAllowSkipPermissions)
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -413,10 +451,13 @@ struct ClaudeCodeSettingsView: View {
             // Removed: Unsandboxed commands toggle (no official CLI/setting key)
             gridDivider
             GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Debug").font(.subheadline).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Debug", systemImage: "ladybug")
+                        .font(.subheadline).fontWeight(.medium)
                     Text("Enable debug output; optional category filter.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(spacing: 8) {
                     Toggle("Enable", isOn: $preferences.claudeDebug)
@@ -427,35 +468,52 @@ struct ClaudeCodeSettingsView: View {
             }
             gridDivider
             GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Verbose Output").font(.subheadline).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Verbose Output", systemImage: "text.alignleft")
+                        .font(.subheadline).fontWeight(.medium)
                     Text("Override verbose mode from config.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Toggle("Enable", isOn: $preferences.claudeVerbose)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             gridDivider
             GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Allowed Tools").font(.subheadline).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Allowed Tools", systemImage: "checkmark.circle")
+                        .font(.subheadline).fontWeight(.medium)
                     Text("Comma or space-separated tool names.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 TextField("Bash(git:*), Edit", text: $preferences.claudeAllowedTools)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
+            gridDivider
             GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Disallowed Tools").font(.subheadline).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Disallowed Tools", systemImage: "xmark.circle")
+                        .font(.subheadline).fontWeight(.medium)
+                    Text("Comma or space-separated tool names to block.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 TextField("Bash(rm:*), Edit", text: $preferences.claudeDisallowedTools)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
             gridDivider
             GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Other").font(.subheadline).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Other", systemImage: "ellipsis.circle")
+                        .font(.subheadline).fontWeight(.medium)
+                    Text("Additional runtime options.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack(spacing: 16) {
                     Toggle("IDE auto-connect", isOn: $preferences.claudeIDE)
@@ -465,10 +523,13 @@ struct ClaudeCodeSettingsView: View {
             }
             gridDivider
             GridRow {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("Fallback Model").font(.subheadline).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Fallback Model", systemImage: "arrow.down.circle")
+                        .font(.subheadline).fontWeight(.medium)
                     Text("Optional model when default is overloaded (print mode).")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 TextField("haiku", text: $preferences.claudeFallbackModel)
                     .frame(maxWidth: .infinity, alignment: .trailing)

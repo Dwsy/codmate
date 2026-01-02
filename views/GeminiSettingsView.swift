@@ -60,9 +60,16 @@ struct GeminiSettingsView: View {
 
   private var generalTab: some View {
     SettingsTabContent {
-      Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
+      Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
         GridRow {
-          settingLabel(title: "Preview Features", details: "Enable experimental features like preview models.")
+          VStack(alignment: .leading, spacing: 2) {
+            Label("Preview Features", systemImage: "wand.and.stars")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Enable experimental features like preview models.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           Toggle("", isOn: $vm.previewFeatures)
             .labelsHidden()
             .toggleStyle(.switch)
@@ -72,7 +79,14 @@ struct GeminiSettingsView: View {
         }
         dividerRow
         GridRow {
-          settingLabel(title: "Prompt Completion", details: "Show inline command suggestions while typing.")
+          VStack(alignment: .leading, spacing: 2) {
+            Label("Prompt Completion", systemImage: "text.cursor")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Show inline command suggestions while typing.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           Toggle("", isOn: $vm.enablePromptCompletion)
             .labelsHidden()
             .toggleStyle(.switch)
@@ -82,7 +96,14 @@ struct GeminiSettingsView: View {
         }
         dividerRow
         GridRow {
-          settingLabel(title: "Vim Mode", details: "Use Vim keybindings inside Gemini CLI.")
+          VStack(alignment: .leading, spacing: 2) {
+            Label("Vim Mode", systemImage: "keyboard")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Use Vim keybindings inside Gemini CLI.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           Toggle("", isOn: $vm.vimMode)
             .labelsHidden()
             .toggleStyle(.switch)
@@ -92,7 +113,14 @@ struct GeminiSettingsView: View {
         }
         dividerRow
         GridRow {
-          settingLabel(title: "Disable Auto Update", details: "Prevent Gemini CLI from auto-updating itself.")
+          VStack(alignment: .leading, spacing: 2) {
+            Label("Disable Auto Update", systemImage: "stop.circle")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Prevent Gemini CLI from auto-updating itself.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           Toggle("", isOn: $vm.disableAutoUpdate)
             .labelsHidden()
             .toggleStyle(.switch)
@@ -102,7 +130,14 @@ struct GeminiSettingsView: View {
         }
         dividerRow
         GridRow {
-          settingLabel(title: "Session Retention", details: "Automatically clean up old sessions when enabled.")
+          VStack(alignment: .leading, spacing: 2) {
+            Label("Session Retention", systemImage: "trash")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Automatically clean up old sessions when enabled.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           Toggle("", isOn: $vm.sessionRetentionEnabled)
             .labelsHidden()
             .toggleStyle(.switch)
@@ -126,9 +161,16 @@ struct GeminiSettingsView: View {
 
   private var runtimeTab: some View {
     SettingsTabContent {
-      Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
+      Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
         GridRow {
-          settingLabel(title: "Sandbox Mode", details: "Controls Gemini CLI sandbox defaults for new sessions.")
+          VStack(alignment: .leading, spacing: 2) {
+            Label("Sandbox Mode", systemImage: "lock.shield")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Controls Gemini CLI sandbox defaults for new sessions.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           Picker("", selection: $preferences.defaultResumeSandboxMode) {
             ForEach(SandboxMode.allCases) { Text($0.title).tag($0) }
           }
@@ -137,7 +179,14 @@ struct GeminiSettingsView: View {
         }
         dividerRow
         GridRow {
-          settingLabel(title: "Approval Policy", details: "Set the default automation level when launching Gemini CLI.")
+          VStack(alignment: .leading, spacing: 2) {
+            Label("Approval Policy", systemImage: "hand.raised")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Set the default automation level when launching Gemini CLI.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           Picker("", selection: $preferences.defaultResumeApprovalPolicy) {
             ForEach(ApprovalPolicy.allCases) { Text($0.title).tag($0) }
           }
@@ -150,9 +199,16 @@ struct GeminiSettingsView: View {
 
   private var modelTab: some View {
     SettingsTabContent {
-      Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 16) {
+      Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
         GridRow {
-          settingLabel(title: "Model", details: "Choose the model alias to use when launching Gemini CLI.")
+          VStack(alignment: .leading, spacing: 2) {
+            Label("Model", systemImage: "cpu")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Choose the model alias to use when launching Gemini CLI.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           Picker("", selection: $vm.selectedModelId) {
             ForEach(vm.modelOptions) { option in
               Text(option.title).tag(option.value)
@@ -183,7 +239,14 @@ struct GeminiSettingsView: View {
         }
         dividerRow
         GridRow {
-          settingLabel(title: "Max Session Turns", details: "Number of turns kept in memory (-1 keeps everything).")
+          VStack(alignment: .leading, spacing: 2) {
+            Label("Max Session Turns", systemImage: "arrow.counterclockwise")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Number of turns kept in memory (-1 keeps everything).")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           Stepper(value: $vm.maxSessionTurns, in: -1...10_000, step: 1) {
             Text(vm.maxSessionTurns < 0 ? "Unlimited (-1)" : "\(vm.maxSessionTurns)")
           }
@@ -192,7 +255,14 @@ struct GeminiSettingsView: View {
         }
         dividerRow
         GridRow {
-          settingLabel(title: "Compression Threshold", details: "Fraction of context usage that triggers compression.")
+          VStack(alignment: .leading, spacing: 2) {
+            Label("Compression Threshold", systemImage: "arrow.down.circle")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Fraction of context usage that triggers compression.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           VStack(alignment: .trailing, spacing: 6) {
             Slider(value: $vm.compressionThreshold, in: 0...1, step: 0.05)
               .frame(maxWidth: 240)
@@ -205,7 +275,14 @@ struct GeminiSettingsView: View {
         }
         dividerRow
         GridRow {
-          settingLabel(title: "Skip Next Speaker Check", details: "Bypass the next speaker role verification step.")
+          VStack(alignment: .leading, spacing: 2) {
+            Label("Skip Next Speaker Check", systemImage: "checkmark.circle.badge.xmark")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Bypass the next speaker role verification step.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           Toggle("", isOn: $vm.skipNextSpeakerCheck)
             .labelsHidden()
             .toggleStyle(.switch)
@@ -229,12 +306,16 @@ struct GeminiSettingsView: View {
 
   private var notificationsTab: some View {
     SettingsTabContent {
-      Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+      Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
         GridRow {
-          settingLabel(
-            title: "System Notifications",
-            details: "Forward Gemini permission prompts to macOS via codmate://notify."
-          )
+          VStack(alignment: .leading, spacing: 2) {
+            Label("System Notifications", systemImage: "bell")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Forward Gemini permission prompts to macOS via codmate://notify.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           Toggle("", isOn: $vm.notificationsEnabled)
             .labelsHidden()
             .toggleStyle(.switch)
@@ -244,7 +325,14 @@ struct GeminiSettingsView: View {
         }
         dividerRow
         GridRow {
-          settingLabel(title: "Self-test", details: "Send a sample event through the notify bridge.")
+          VStack(alignment: .leading, spacing: 2) {
+            Label("Self-test", systemImage: "checkmark.seal")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Send a sample event through the notify bridge.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .fixedSize(horizontal: false, vertical: true)
+          }
           HStack(spacing: 8) {
             if vm.notificationBridgeHealthy {
               Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
@@ -289,17 +377,6 @@ struct GeminiSettingsView: View {
           .buttonStyle(.borderless)
         }
       }
-    }
-  }
-
-  private func settingLabel(title: String, details: String) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(title)
-        .font(.subheadline)
-        .fontWeight(.medium)
-      Text(details)
-        .font(.caption)
-        .foregroundStyle(.secondary)
     }
   }
 

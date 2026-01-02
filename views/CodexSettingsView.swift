@@ -3,6 +3,8 @@ import SwiftUI
 struct CodexSettingsView: View {
     @ObservedObject var codexVM: CodexVM
     @ObservedObject var preferences: SessionPreferencesStore
+    @FocusState private var isEnvSetPairsFocused: Bool
+    @State private var envSetPairsLastValue = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -64,12 +66,15 @@ struct CodexSettingsView: View {
     // MARK: - Provider Pane
     private var providerPane: some View {
         SettingsTabContent {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 14) {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                 GridRow {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("Active Provider").font(.subheadline).fontWeight(.medium)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Active Provider", systemImage: "server.rack")
+                            .font(.subheadline).fontWeight(.medium)
                         Text("Choose built-in or a configured provider")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Picker("", selection: $codexVM.registryActiveProviderId) {
                         Text("(Built-in)").tag(String?.none)
@@ -86,10 +91,13 @@ struct CodexSettingsView: View {
                 }
                 gridDivider
                 GridRow {
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("Model").font(.subheadline).fontWeight(.medium)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Model", systemImage: "cpu")
+                            .font(.subheadline).fontWeight(.medium)
                         Text("Default model used by Codex CLI.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     if codexVM.registryActiveProviderId == nil {
                         Picker("", selection: $codexVM.model) {
@@ -128,12 +136,15 @@ struct CodexSettingsView: View {
     // MARK: - Runtime Pane
     private var runtimePane: some View {
         SettingsTabContent {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                         GridRow {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("Reasoning Effort").font(.subheadline).fontWeight(.medium)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("Reasoning Effort", systemImage: "brain")
+                                    .font(.subheadline).fontWeight(.medium)
                                 Text("Controls depth of reasoning for supported models.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             Picker("", selection: $codexVM.reasoningEffort) {
                                 ForEach(CodexVM.ReasoningEffort.allCases) { Text($0.rawValue).tag($0) }
@@ -144,10 +155,13 @@ struct CodexSettingsView: View {
                         }
                         gridDivider
                         GridRow {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("Reasoning Summary").font(.subheadline).fontWeight(.medium)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("Reasoning Summary", systemImage: "text.bubble")
+                                    .font(.subheadline).fontWeight(.medium)
                                 Text("Summary verbosity for reasoning-capable models.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             Picker("", selection: $codexVM.reasoningSummary) {
                                 ForEach(CodexVM.ReasoningSummary.allCases) { Text($0.rawValue).tag($0) }
@@ -158,10 +172,13 @@ struct CodexSettingsView: View {
                         }
                         gridDivider
                         GridRow {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("Verbosity").font(.subheadline).fontWeight(.medium)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("Verbosity", systemImage: "text.alignleft")
+                                    .font(.subheadline).fontWeight(.medium)
                                 Text("Text output verbosity for GPT‑5 family (Responses API).")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             Picker("", selection: $codexVM.modelVerbosity) {
                                 ForEach(CodexVM.ModelVerbosity.allCases) { Text($0.rawValue).tag($0) }
@@ -172,10 +189,13 @@ struct CodexSettingsView: View {
                         }
                         gridDivider
                         GridRow {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("Sandbox").font(.subheadline).fontWeight(.medium)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("Sandbox", systemImage: "lock.shield")
+                                    .font(.subheadline).fontWeight(.medium)
                                 Text("Default sandbox for sessions launched from CodMate only.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             Picker("", selection: $codexVM.sandboxMode) {
                                 ForEach(SandboxMode.allCases) { Text($0.title).tag($0) }
@@ -189,10 +209,13 @@ struct CodexSettingsView: View {
                         }
                         gridDivider
                         GridRow {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("Approval Policy").font(.subheadline).fontWeight(.medium)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("Approval Policy", systemImage: "hand.raised")
+                                    .font(.subheadline).fontWeight(.medium)
                                 Text("Default approval prompts for sessions launched from CodMate only.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             Picker("", selection: $codexVM.approvalPolicy) {
                                 ForEach(ApprovalPolicy.allCases) { Text($0.title).tag($0) }
@@ -206,13 +229,16 @@ struct CodexSettingsView: View {
                         }
                         gridDivider
                         GridRow {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("Auto-assign new sessions to same project").font(.subheadline)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("Auto-assign new sessions to same project", systemImage: "folder.badge.plus")
+                                    .font(.subheadline)
                                     .fontWeight(.medium)
                                 Text(
                                     "When starting New from detail, auto-assign the created session to that project."
                                 )
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                             }
                                 Toggle("", isOn: $preferences.autoAssignNewToSameProject)
                                     .labelsHidden()
@@ -230,9 +256,12 @@ struct CodexSettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Feature Flags").font(.subheadline).fontWeight(.medium)
+                        Label("Feature Flags", systemImage: "wand.and.stars")
+                            .font(.subheadline).fontWeight(.medium)
                         Text("Inspect codex CLI features and override individual flags.")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Spacer(minLength: 8)
                     HStack(spacing: 8) {
@@ -306,14 +335,17 @@ struct CodexSettingsView: View {
     // MARK: - Notifications Pane
     private var notificationsPane: some View {
         SettingsTabContent {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                         GridRow {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("TUI Notifications").font(.subheadline).fontWeight(.medium)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("TUI Notifications", systemImage: "terminal")
+                                    .font(.subheadline).fontWeight(.medium)
                                 Text(
                                     "Show in-terminal notifications during TUI sessions (supported terminals only)."
                                 )
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                             }
                                 Toggle("", isOn: $codexVM.tuiNotifications)
                                     .labelsHidden()
@@ -324,12 +356,15 @@ struct CodexSettingsView: View {
                         }
                         gridDivider
                         GridRow {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("System Notifications").font(.subheadline).fontWeight(.medium)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("System Notifications", systemImage: "bell")
+                                    .font(.subheadline).fontWeight(.medium)
                                 Text(
                                     "Forward Codex turn-complete events to macOS notifications via notify."
                                 )
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                             }
                                 Toggle("", isOn: $codexVM.systemNotifications)
                                     .labelsHidden()
@@ -341,20 +376,25 @@ struct CodexSettingsView: View {
                         if let path = codexVM.notifyBridgePath {
                             gridDivider
                             GridRow {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    Text("Notify bridge: \(path)").font(.caption).foregroundStyle(
-                                        .secondary
-                                    )
-                                    .frame(alignment: .leading)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Label("Notify bridge", systemImage: "link")
+                                        .font(.subheadline).fontWeight(.medium)
+                                    Text(path)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
                         }
                         gridDivider
                         GridRow {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text("Self-test").font(.subheadline).fontWeight(.medium)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("Self-test", systemImage: "checkmark.seal")
+                                    .font(.subheadline).fontWeight(.medium)
                                 Text("Send a sample event through the notify bridge.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             HStack(spacing: 8) {
                                 if codexVM.notifyBridgeHealthy {
@@ -378,12 +418,15 @@ struct CodexSettingsView: View {
     private var privacyPane: some View {
         SettingsTabContent {
             VStack(alignment: .leading, spacing: 16) {
-                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                     GridRow {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Inherit").font(.subheadline).fontWeight(.medium)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Inherit", systemImage: "arrow.down.circle")
+                                .font(.subheadline).fontWeight(.medium)
                             Text("Start from full, core, or empty environment.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Picker("", selection: $codexVM.envInherit) {
                             ForEach(["all", "core", "none"], id: \.self) { Text($0).tag($0) }
@@ -391,80 +434,115 @@ struct CodexSettingsView: View {
                         .labelsHidden()
                         .frame(maxWidth: .infinity, alignment: .trailing)
                     }
+                    gridDivider
                     GridRow {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Ignore default excludes").font(.subheadline).fontWeight(.medium)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Ignore default excludes", systemImage: "eye.slash")
+                                .font(.subheadline).fontWeight(.medium)
                             Text("Keep vars containing KEY/SECRET/TOKEN unless unchecked.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Toggle("", isOn: $codexVM.envIgnoreDefaults)
                             .labelsHidden()
                             .frame(maxWidth: .infinity, alignment: .trailing)
                     }
+                    gridDivider
                     GridRow {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Include Only").font(.subheadline).fontWeight(.medium)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Include Only", systemImage: "checklist")
+                                .font(.subheadline).fontWeight(.medium)
                             Text("Whitelist patterns (comma separated). Example: PATH, HOME")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         TextField("PATH, HOME", text: $codexVM.envIncludeOnly)
                             .frame(maxWidth: .infinity, alignment: .trailing)
                     }
+                    gridDivider
                     GridRow {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Exclude").font(.subheadline).fontWeight(.medium)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Exclude", systemImage: "xmark.circle")
+                                .font(.subheadline).fontWeight(.medium)
                             Text("Blacklist patterns (comma separated). Example: AWS_*, AZURE_*")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         TextField("AWS_*, AZURE_*", text: $codexVM.envExclude)
                             .frame(maxWidth: .infinity, alignment: .trailing)
                     }
+                    gridDivider
                     GridRow {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Set Variables").font(.subheadline).fontWeight(.medium)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Set Variables", systemImage: "key")
+                                .font(.subheadline).fontWeight(.medium)
                             Text("KEY=VALUE per line. These override inherited values.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        TextEditor(text: $codexVM.envSetPairs)
-                            .font(.system(.body, design: .monospaced))
-                            .frame(minHeight: 90)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                    GridRow {
-                        Text("")
-                        HStack {
-                            Button("Save Environment Policy") {
-                                Task { await codexVM.applyEnvPolicy() }
-                            }
-                            if codexVM.lastError != nil {
-                                Text(codexVM.lastError!).foregroundStyle(.red).font(.caption)
+                        ZStack(alignment: .bottomTrailing) {
+                            TextEditor(text: $codexVM.envSetPairs)
+                                .font(.system(.body, design: .monospaced))
+                                .frame(minHeight: 90)
+                                .focused($isEnvSetPairsFocused)
+                            if isEnvSetPairsFocused {
+                                HStack(spacing: 8) {
+                                    if codexVM.lastError != nil {
+                                        Text(codexVM.lastError!)
+                                            .foregroundStyle(.red)
+                                            .font(.caption)
+                                    }
+                                    Button("Save Environment Policy") {
+                                        envSetPairsLastValue = codexVM.envSetPairs
+                                        isEnvSetPairsFocused = false
+                                        Task { await codexVM.applyEnvPolicy() }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(.primary)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .trailing)
+                        .onAppear {
+                            envSetPairsLastValue = codexVM.envSetPairs
+                        }
                     }
                 }
 
                 Divider()
 
-                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+                Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                     GridRow {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Hide Agent Reasoning").font(.subheadline).fontWeight(.medium)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Hide Agent Reasoning", systemImage: "eye.slash")
+                                .font(.subheadline).fontWeight(.medium)
                             Text("Suppress reasoning events in TUI and exec outputs.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Toggle("", isOn: $codexVM.hideAgentReasoning)
                             .labelsHidden()
                             .onChange(of: codexVM.hideAgentReasoning) { _ in codexVM.scheduleApplyHideReasoningDebounced() }
                             .frame(maxWidth: .infinity, alignment: .trailing)
                     }
+                    gridDivider
                     GridRow {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Show Raw Reasoning").font(.subheadline).fontWeight(.medium)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Show Raw Reasoning", systemImage: "eye")
+                                .font(.subheadline).fontWeight(.medium)
                             Text(
                                 "Expose raw chain-of-thought when provider supports it (use with caution)."
                             )
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                         }
                         Toggle("", isOn: $codexVM.showRawAgentReasoning)
                             .labelsHidden()
