@@ -38,6 +38,11 @@ struct CodMateApp: App {
     Task { @MainActor in
       LaunchAtLoginService.shared.syncWithPreferences(prefs)
     }
+    // Log startup info to Status Bar
+    Task { @MainActor in
+      let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+      AppLogger.shared.info("CodMate v\(version) started", source: "App")
+    }
   }
 
   var bodyCommands: some Commands {
@@ -57,20 +62,45 @@ struct CodMateApp: App {
       }
       // Integrate actions into the system View menu
       CommandGroup(after: .sidebar) {
-        Button("Refresh") {
+        Button(action: {
           NotificationCenter.default.post(name: .codMateGlobalRefresh, object: nil)
+        }) {
+          Label("Refresh", systemImage: "arrow.clockwise")
         }
         .keyboardShortcut("r", modifiers: [.command])
 
-        Button("Toggle Sidebar") {
+        Button(action: {
           NotificationCenter.default.post(name: .codMateToggleSidebar, object: nil)
+        }) {
+          Label("Toggle Sidebar", systemImage: "sidebar.left")
         }
         .keyboardShortcut("1", modifiers: [.command])
 
-        Button("Toggle Session List") {
+        Button(action: {
           NotificationCenter.default.post(name: .codMateToggleList, object: nil)
+        }) {
+          Label("Toggle Session List", systemImage: "sidebar.leading")
         }
         .keyboardShortcut("2", modifiers: [.command])
+
+        Divider()
+
+        Button(action: {
+          withAnimation {
+            if preferences.statusBarVisibility == .hidden {
+              preferences.statusBarVisibility = .auto
+            } else {
+              preferences.statusBarVisibility = .hidden
+            }
+          }
+        }) {
+          if preferences.statusBarVisibility == .hidden {
+            Label("Show Status Bar", systemImage: "rectangle.bottomthird.inset.filled")
+          } else {
+            Label("Hide Status Bar", systemImage: "rectangle.bottomthird.inset.filled")
+          }
+        }
+        .keyboardShortcut("3", modifiers: [.command])
       }
       // Override Cmd+Q to use smart quit behavior
       CommandGroup(replacing: .appTermination) {

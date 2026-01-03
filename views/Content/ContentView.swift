@@ -6,6 +6,7 @@ struct ContentView: View {
   @ObservedObject var viewModel: SessionListViewModel
   @ObservedObject var preferences: SessionPreferencesStore
   @StateObject var permissionsManager = SandboxPermissionsManager.shared
+  @StateObject var statusBarStore = StatusBarLogStore.shared
   @Environment(\.colorScheme) var colorScheme
   @Environment(\.openWindow) var openWindow
   // Stable shared cache for project Review VMs to avoid ephemeral lifetimes
@@ -33,6 +34,7 @@ struct ContentView: View {
   @State var contentColumnIdealWidth: CGFloat = 420
   @State var sidebarNewProjectPrefill: ProjectEditorSheet.Prefill? = nil
   @State var projectEditorTarget: Project? = nil
+  @State var showNewTaskSheet: Bool = false
   // When starting embedded sessions, record the initial command lines per-session
   @State var embeddedInitialCommands: [SessionSummary.ID: String] = [:]
   // Soft-return flag: when true, stopping embedded terminal should not change
@@ -66,6 +68,12 @@ struct ContentView: View {
   @State var popoverDismissDisabled = false
   @State var lastWorkspaceMode: ProjectWorkspaceMode? = nil
   @StateObject var overviewViewModel: AllOverviewViewModel
+  @State var sidebarWidth: CGFloat = 0
+  // Preference key to read sidebar width
+  struct SidebarWidthPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+  }
   static let defaultSearchPopoverSize = CGSize(width: 440, height: 320)
   static let searchPopoverMinSize = CGSize(width: 380, height: 220)
   static let searchPopoverMaxSize = CGSize(width: 640, height: 520)
@@ -140,6 +148,9 @@ struct ContentView: View {
         // Using .sheet(item:) - set empty prefill to trigger sheet without pre-filled data
         sidebarNewProjectPrefill = ProjectEditorSheet.Prefill()
       },
+      requestNewTask: {
+        showNewTaskSheet = true
+      },
       setDateDimension: { viewModel.dateDimension = $0 },
       setMonthStart: { viewModel.setSidebarMonthStart($0) },
       setSelectedDay: { viewModel.setSelectedDay($0) },
@@ -191,18 +202,36 @@ struct ContentView: View {
         }
         .frame(width: 0, height: 0)
 
-        navigationSplitView(geometry: geometry)
-          .frame(maxWidth: .infinity, maxHeight: .infinity)
-          .sheet(item: $projectEditorTarget) { target in
-            ProjectEditorSheet(
-              isPresented: Binding(
-                get: { true },
-                set: { if !$0 { projectEditorTarget = nil } }
-              ),
-              mode: .edit(existing: target)
+        ZStack(alignment: .bottomLeading) {
+          navigationSplitView(geometry: geometry)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+          
+          // Status bar overlay - positioned to cover only the main content area (content+detail columns)
+          // It should start after the sidebar and span to the right edge
+          if preferences.statusBarVisibility != .hidden {
+            StatusBarOverlayView(
+              store: statusBarStore,
+              preferences: preferences,
+              sidebarInset: 0
             )
-            .environmentObject(viewModel)
+            .frame(width: geometry.size.width - statusBarSidebarInset)
+            .offset(x: statusBarSidebarInset)
+            .frame(height: statusBarReservedHeight, alignment: .bottom)
           }
+        }
+        .sheet(item: $projectEditorTarget) { target in
+          ProjectEditorSheet(
+            isPresented: Binding(
+              get: { true },
+              set: { if !$0 { projectEditorTarget = nil } }
+            ),
+            mode: .edit(existing: target)
+          )
+          .environmentObject(viewModel)
+        }
+        .sheet(isPresented: $showNewTaskSheet) {
+          NewTaskSheet(viewModel: viewModel)
+        }
       }
       .onAppear {
         MainWindowCoordinator.shared.applyMenuVisibility(preferences.systemMenuVisibility)
@@ -211,6 +240,34 @@ struct ContentView: View {
         MainWindowCoordinator.shared.applyMenuVisibility(newValue)
       }
     }
+  }
+
+
+  private var statusBarSidebarInset: CGFloat {
+    // Sidebar inset: check if sidebar is actually visible
+    // NavigationSplitViewVisibility.all means sidebar is visible
+    // .doubleColumn means sidebar is hidden (only content+detail visible)
+    // .detailOnly means only detail is visible (sidebar and content hidden)
+    // Sidebar width is fixed at 260pt according to navigationSplitViewColumnWidth
+    switch columnVisibility {
+    case .all:
+      // Sidebar is visible, offset by sidebar width (dynamic)
+      return sidebarWidth
+    case .doubleColumn:
+      // Sidebar is hidden, no offset needed
+      return 0
+    case .detailOnly:
+      // Sidebar is hidden, no offset needed
+      return 0
+    default:
+      // Fallback: use storeSidebarHidden as backup
+      return storeSidebarHidden ? 0 : sidebarWidth
+    }
+  }
+
+  var statusBarReservedHeight: CGFloat {
+    guard preferences.statusBarVisibility != .hidden else { return 0 }
+    return statusBarStore.isExpanded ? statusBarStore.expandedHeight : statusBarStore.collapsedHeight
   }
 
   // navigationSplitView moved to Content/ContentView+Modifiers.swift

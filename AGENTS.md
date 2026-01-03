@@ -43,6 +43,10 @@ UI Rules (macOS specific)
   - Default scope loads “today” only for speed.
   - Sorting picker is left‑aligned with list content.
   - Each row shows: title, timestamps/duration, snippet, and compact metrics (user/assistant/tool/reasoning).
+- Status bar (bottom console):
+  - Docked console bar spans the right-side area (list + detail); sidebar stays full height.
+  - Resizable via a drag handle; single-line header collapses/expands to multi-line log history.
+  - Auto mode collapses when idle (no interaction); View menu supports Always Show/Hide.
 - Detail (right):
   - Sticky action bar at top: Resume, Reveal in Finder, Delete, Export Markdown.
   - Add “New” button next to Resume to start a fresh Codex session using the current session’s working directory and model.
@@ -94,15 +98,23 @@ CLI Integration (codex)
 Codex Settings
 - Settings › Codex only manages Codex CLI runtime-related configuration (Model & Reasoning, Sandbox & Approvals, Notifications, Privacy, Raw Config).
 - Providers page is independent: Settings › Providers (cross-application shared, for Codex and Claude Code selection/configuration, including OAuth).
+- Provider selection uses the unified provider picker (same list as Git Review), backed by CLI Proxy API when chosen; Auto keeps CLI defaults.
+- Provider tab includes a separate Model List setting under Active Provider with an editor to add/remove model IDs per provider (empty = default list).
 - Notifications: TUI notifications toggle; system notifications bridge via the bundled Swift `codmate-notify` helper (installed to `~/Library/Application Support/CodMate/bin/`).
 - Privacy: expose `shell_environment_policy`, reasoning visibility, OTEL exporter; do not surface history persistence in phase 1.
 - Projects auto‑create a same‑id Profile on creation; renaming a project synchronizes the profile name. Conflict prompts are required.
 
 Claude Settings
 - Settings › Claude splits into Provider, Runtime, Notifications, and Raw Config tabs.
+- Provider selection uses the unified provider picker (same list as Git Review), backed by CLI Proxy API when chosen; Auto keeps CLI defaults.
+- Provider tab includes a Model List setting with Default/Opus/Sonnet/Haiku mappings (edited via the mapping sheet); mappings write to Claude env keys in `~/.claude/settings.json`.
 - Notifications tab mirrors Codex UX: single toggle to install/remove macOS notification hooks, health indicator, and self-test button.
 - Hooks write to `~/.claude/settings.json` under `hooks.Notification` and `hooks.Stop`, pointing to `/usr/bin/open -g "codmate://notify?source=claude&event=…&title64=…&body64=…"`.
 - Always request Home directory access through `AuthorizationHub` before mutating the hooks file when sandboxed.
+
+Gemini Settings
+- Settings › Gemini adds a Provider tab with the unified provider picker (same list as Git Review); Gemini CLI model selection remains in the Model tab.
+- Provider tab includes a Model List setting for CLI Proxy providers; the Model tab remains the source of truth for Gemini CLI model selection.
 
 Session Metadata (Rename/Comment)
 - Users can rename any session and attach a short comment.

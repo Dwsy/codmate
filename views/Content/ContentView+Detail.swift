@@ -31,6 +31,7 @@ extension ContentView {
           .animation(nil, value: isListHidden)
       }
     }
+    .padding(.bottom, statusBarReservedHeight)
     .frame(minWidth: 640)
     .onChange(of: selectedDetailTab) { newVal in
       // Coerce legacy .review to .timeline in Tasks mode (session-level Git Review removed)

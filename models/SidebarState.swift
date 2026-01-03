@@ -16,6 +16,7 @@ struct SidebarState: Equatable {
 struct SidebarActions {
     var selectAllProjects: () -> Void
     var requestNewProject: () -> Void
+    var requestNewTask: () -> Void
     var setDateDimension: (DateDimension) -> Void
     var setMonthStart: (Date) -> Void
     var setSelectedDay: (Date?) -> Void

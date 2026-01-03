@@ -31,6 +31,11 @@ extension ContentView {
           .environmentObject(viewModel)
       }
       .navigationSplitViewColumnWidth(min: 260, ideal: 260, max: 260)
+      .background(
+        GeometryReader { gr in
+          Color.clear.preference(key: ContentView.SidebarWidthPreferenceKey.self, value: gr.size.width)
+        }
+      )
     }
     .sheet(item: $sidebarNewProjectPrefill) { prefill in
       ProjectEditorSheet(
@@ -89,6 +94,7 @@ extension ContentView {
     .refuseFirstResponder(when: isSearchPopoverPresented || shouldBlockAutoSelection || selection.isEmpty)
     .environment(\.controlActiveState,
                 ((preferences.searchPanelStyle == .popover && (isSearchPopoverPresented || shouldBlockAutoSelection)) || selection.isEmpty) ? .inactive : .active)
+    .padding(.bottom, statusBarReservedHeight)
     .sheet(item: $viewModel.editingSession, onDismiss: { viewModel.cancelEdits() }) { _ in
       EditSessionMetaView(viewModel: viewModel)
     }
@@ -127,6 +133,7 @@ extension ContentView {
       }
       .allowsHitTesting(false)
       .id(isListHidden ? "list-placeholder-hidden" : "list-placeholder-shown")
+      .padding(.bottom, statusBarReservedHeight)
   }
 
   // Left column for Project Review: Git changes tree/search/commit
@@ -172,6 +179,7 @@ extension ContentView {
     .onPreferenceChange(ContentColumnWidthPreferenceKey.self) { w in
       captureContentColumnWidth(w)
     }
+    .padding(.bottom, statusBarReservedHeight)
   }
 
   private func placeholderTitleAndIcon(for mode: ProjectWorkspaceMode) -> (String, String) {

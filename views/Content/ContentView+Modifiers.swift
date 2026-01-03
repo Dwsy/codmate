@@ -159,6 +159,9 @@ extension ContentView {
 
     let baseView = splitView
       .navigationTitle(navigationTitleForSelection())
+      .onPreferenceChange(ContentView.SidebarWidthPreferenceKey.self) { width in
+        sidebarWidth = width
+      }
       .onAppear {
         applyVisibilityFromStorage(animated: false)
         permissionsManager.restoreAccess()
