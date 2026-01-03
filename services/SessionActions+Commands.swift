@@ -121,8 +121,22 @@ extension SessionActions {
                                 }
                                 // Aliases: default and small/fast
                                 if let aliases = conn?.modelAliases {
-                                    if let d = aliases["default"], !d.isEmpty { envOverlays["ANTHROPIC_MODEL"] = d }
-                                    if let h = aliases["haiku"], !h.isEmpty { envOverlays["ANTHROPIC_SMALL_FAST_MODEL"] = h }
+                                    if let o = aliases["opus"], !o.isEmpty {
+                                        envOverlays["ANTHROPIC_DEFAULT_OPUS_MODEL"] = o
+                                    }
+                                    if let s = aliases["sonnet"], !s.isEmpty {
+                                        envOverlays["ANTHROPIC_DEFAULT_SONNET_MODEL"] = s
+                                    }
+                                    if let h = aliases["haiku"], !h.isEmpty {
+                                        envOverlays["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = h
+                                        envOverlays["ANTHROPIC_SMALL_FAST_MODEL"] = h
+                                    }
+                                    if let d = aliases["default"], !d.isEmpty {
+                                        envOverlays["ANTHROPIC_MODEL"] = d
+                                        if envOverlays["ANTHROPIC_DEFAULT_SONNET_MODEL"] == nil {
+                                            envOverlays["ANTHROPIC_DEFAULT_SONNET_MODEL"] = d
+                                        }
+                                    }
                                 }
                                 // Fall back to registry default model if alias not set
                                 if envOverlays["ANTHROPIC_MODEL"] == nil,
@@ -1123,6 +1137,8 @@ extension SessionActions {
         // Embedded per-project profile config (preferred)
         let pp = project.profile
         let profileId = project.profileId?.trimmingCharacters(in: .whitespaces)
+        let provider = readTopLevelConfigString("model_provider")?.trimmingCharacters(
+            in: .whitespacesAndNewlines)
 
         // Flags only; avoid explicit --model for Codex new to keep behavior consistent
         if let pp {
@@ -1160,9 +1176,14 @@ extension SessionActions {
             }
             if sandboxRaw == nil { sandboxRaw = SandboxMode.workspaceWrite.rawValue }
 
+            let modelFromProject = pp?.model
+            let modelForInline = (provider == "codmate-proxy" && isLikelyBuiltinCodexModel(modelFromProject))
+                ? nil
+                : modelFromProject  // include model only inside profile injection
             if let inline = renderInlineProfileConfig(
                 key: profileId,
-                model: pp?.model,  // include model only inside profile injection
+                model: modelForInline,
+                modelProvider: provider,
                 approvalPolicy: approvalRaw,
                 sandboxMode: sandboxRaw
             ) {
@@ -1349,6 +1370,8 @@ extension SessionActions {
     ) -> [String] {
         var args: [String] = []
         let pid = project.profileId?.trimmingCharacters(in: .whitespaces)
+        let provider = readTopLevelConfigString("model_provider")?.trimmingCharacters(
+            in: .whitespacesAndNewlines)
 
         // Flags precedence: danger -> full-auto -> explicit -s/-a when present in project profile
         if project.profile?.dangerouslyBypass == true {
@@ -1386,9 +1409,14 @@ extension SessionActions {
             }
             if sandboxRaw == nil { sandboxRaw = SandboxMode.workspaceWrite.rawValue }
 
+            let preferredModel = modelFromProject ?? fallbackModel
+            let modelForInline = (provider == "codmate-proxy" && isLikelyBuiltinCodexModel(preferredModel))
+                ? nil
+                : preferredModel
             if let inline = renderInlineProfileConfig(
                 key: pid,
-                model: modelFromProject ?? fallbackModel,
+                model: modelForInline,
+                modelProvider: provider,
                 approvalPolicy: approvalRaw,
                 sandboxMode: sandboxRaw
             ) {
@@ -1646,6 +1674,8 @@ extension SessionActions {
     ) -> [String] {
         var args: [String] = []
         let pid = project.profileId?.trimmingCharacters(in: .whitespaces)
+        let provider = readTopLevelConfigString("model_provider")?.trimmingCharacters(
+            in: .whitespacesAndNewlines)
 
         // Always use -c to inject inline profile (zero-write approach)
         // Only select profile; do not pass flags to preserve original resume semantics
@@ -1671,9 +1701,14 @@ extension SessionActions {
             }
             if sandboxRaw == nil { sandboxRaw = SandboxMode.workspaceWrite.rawValue }
 
+            let preferredModel = project.profile?.model ?? fallbackModel
+            let modelForInline = (provider == "codmate-proxy" && isLikelyBuiltinCodexModel(preferredModel))
+                ? nil
+                : preferredModel
             if let inline = renderInlineProfileConfig(
                 key: pid,
-                model: project.profile?.model ?? fallbackModel,
+                model: modelForInline,
+                modelProvider: provider,
                 approvalPolicy: approvalRaw,
                 sandboxMode: sandboxRaw
             ) {

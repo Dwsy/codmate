@@ -26,11 +26,18 @@ final class CLIProxyService: ObservableObject {
         let data: [LocalModel]
     }
 
-    struct LocalModel: Decodable, Hashable {
+    struct LocalModel: Codable, Hashable {
         let id: String
         let owned_by: String?
         let provider: String?
         let source: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id
+            case owned_by
+            case provider
+            case source
+        }
     }
     
     // Log streaming
@@ -56,6 +63,15 @@ final class CLIProxyService: ObservableObject {
     private let configPath: String
     private let authDir: String
     private let managementKey: String
+    private static let publicAPIKeyDefaultsKey = "CLIProxyPublicAPIKey"
+    private static let publicAPIKeyPrefix = "cm"
+    private static let publicAPIKeyLength = 36
+    private static let localModelsCacheKey = "CLIProxyLocalModelsCache"
+    private static let localModelsCacheTimestampKey = "CLIProxyLocalModelsCacheTimestamp"
+    private static let localModelsCacheTTL: TimeInterval = 300
+
+    private var cachedLocalModels: [LocalModel] = []
+    private var cachedLocalModelsTimestamp: Date?
     
     // Constants
     private static let githubRepo = "router-for-me/CLIProxyAPIPlus"
@@ -406,18 +422,50 @@ final class CLIProxyService: ObservableObject {
                         value.removeFirst()
                         value.removeLast()
                     }
-                    return value.trimmingCharacters(in: .whitespaces)
+                    let trimmed = value.trimmingCharacters(in: .whitespaces)
+                    if !trimmed.isEmpty {
+                        persistPublicAPIKey(trimmed)
+                        return trimmed
+                    }
+                    return nil
                 }
                 if !trimmed.isEmpty {
                     inKeys = false
                 }
             }
         }
+        if let stored = UserDefaults.standard.string(forKey: Self.publicAPIKeyDefaultsKey),
+           !stored.isEmpty
+        {
+            return stored
+        }
         return nil
     }
 
-    func fetchLocalModels() async -> [LocalModel] {
-        guard let url = URL(string: "http://127.0.0.1:\(port)/v1/models") else { return [] }
+    func resolvePublicAPIKey() -> String {
+        if let key = loadPublicAPIKey(), !key.isEmpty {
+            return key
+        }
+        if let stored = UserDefaults.standard.string(forKey: Self.publicAPIKeyDefaultsKey),
+           !stored.isEmpty
+        {
+            return stored
+        }
+        let generated = generatePublicAPIKey(length: Self.publicAPIKeyLength)
+        persistPublicAPIKey(generated)
+        return generated
+    }
+
+    func fetchLocalModels(forceRefresh: Bool = false) async -> [LocalModel] {
+        guard isRunning else { return [] }
+        if !forceRefresh, let cached = validCachedModels() {
+            return cached
+        }
+        let fallback = loadAnyCachedModels()
+
+        guard let url = URL(string: "http://127.0.0.1:\(port)/v1/models") else {
+            return fallback ?? []
+        }
         var request = URLRequest(url: url)
         if let key = loadPublicAPIKey(), !key.isEmpty {
             let bearer = key.hasPrefix("Bearer ") ? key : "Bearer \(key)"
@@ -425,11 +473,66 @@ final class CLIProxyService: ObservableObject {
         }
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return [] }
-            return (try? JSONDecoder().decode(LocalModelList.self, from: data))?.data ?? []
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                return fallback ?? []
+            }
+            let models = (try? JSONDecoder().decode(LocalModelList.self, from: data))?.data ?? []
+            persistCachedModels(models)
+            return models
         } catch {
-            return []
+            return fallback ?? []
         }
+    }
+
+    private func validCachedModels() -> [LocalModel]? {
+        if isCacheValid(cachedLocalModelsTimestamp), !cachedLocalModels.isEmpty {
+            return cachedLocalModels
+        }
+        let persisted = loadCachedModelsFromDefaults()
+        if isCacheValid(persisted.timestamp), !persisted.models.isEmpty {
+            cachedLocalModels = persisted.models
+            cachedLocalModelsTimestamp = persisted.timestamp
+            return persisted.models
+        }
+        return nil
+    }
+
+    private func loadAnyCachedModels() -> [LocalModel]? {
+        if !cachedLocalModels.isEmpty {
+            return cachedLocalModels
+        }
+        let persisted = loadCachedModelsFromDefaults()
+        if !persisted.models.isEmpty {
+            cachedLocalModels = persisted.models
+            cachedLocalModelsTimestamp = persisted.timestamp
+            return persisted.models
+        }
+        return nil
+    }
+
+    private func isCacheValid(_ timestamp: Date?) -> Bool {
+        guard let timestamp else { return false }
+        return Date().timeIntervalSince(timestamp) < Self.localModelsCacheTTL
+    }
+
+    private func loadCachedModelsFromDefaults() -> (models: [LocalModel], timestamp: Date?) {
+        let defaults = UserDefaults.standard
+        guard let data = defaults.data(forKey: Self.localModelsCacheKey) else {
+            return ([], nil)
+        }
+        let models = (try? JSONDecoder().decode([LocalModel].self, from: data)) ?? []
+        let timestamp = defaults.object(forKey: Self.localModelsCacheTimestampKey) as? Date
+        return (models, timestamp)
+    }
+
+    private func persistCachedModels(_ models: [LocalModel]) {
+        cachedLocalModels = models
+        cachedLocalModelsTimestamp = Date()
+        let defaults = UserDefaults.standard
+        if let data = try? JSONEncoder().encode(models) {
+            defaults.set(data, forKey: Self.localModelsCacheKey)
+        }
+        defaults.set(cachedLocalModelsTimestamp, forKey: Self.localModelsCacheTimestampKey)
     }
 
     func updatePublicAPIKey(_ key: String) {
@@ -476,15 +579,25 @@ final class CLIProxyService: ObservableObject {
 
         content = out.joined(separator: "\n")
         try? content.write(toFile: configPath, atomically: true, encoding: .utf8)
+        persistPublicAPIKey(key)
     }
 
-    func generatePublicAPIKey(minLength: Int = 20) -> String {
-        let raw = UUID().uuidString.replacingOccurrences(of: "-", with: "")
-        if raw.count >= minLength {
-            return "codmate-\(raw.prefix(minLength))"
+    func generatePublicAPIKey(length: Int = 36) -> String {
+        let prefix = Self.publicAPIKeyPrefix
+        let required = max(prefix.count + 1, length)
+        let bodyLength = required - prefix.count
+        var pool = ""
+        while pool.count < bodyLength {
+            pool += UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         }
-        let padding = String(repeating: "x", count: max(0, minLength - raw.count))
-        return "codmate-\(raw)\(padding)"
+        let body = pool.prefix(bodyLength)
+        return prefix + body
+    }
+
+    private func persistPublicAPIKey(_ key: String) {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        UserDefaults.standard.set(trimmed, forKey: Self.publicAPIKeyDefaultsKey)
     }
     
     // MARK: - Helpers
@@ -518,13 +631,14 @@ final class CLIProxyService: ObservableObject {
     private func ensureConfigExists() {
         guard !FileManager.default.fileExists(atPath: configPath) else { return }
 
+        let apiKey = resolvePublicAPIKey()
         let config = """
 host: \"127.0.0.1\"
 port: \(internalPort)
 auth-dir: \"\(authDir)\"
 
 api-keys:
-  - \"codmate-local-\(UUID().uuidString.prefix(8))\"
+  - \"\(apiKey)\"
 
 remote-management:
   allow-remote: false
@@ -544,6 +658,7 @@ routing:
     func syncThirdPartyProviders() async {
         let registry = ProvidersRegistryService()
         let providers = await registry.listProviders()
+        let apiKey = resolvePublicAPIKey()
 
         var config = """
 host: \"127.0.0.1\"
@@ -551,7 +666,7 @@ port: \(internalPort)
 auth-dir: \"\(authDir)\"
 
 api-keys:
-  - \"codmate-local-\(UUID().uuidString.prefix(8))\"
+  - \"\(apiKey)\"
 
 remote-management:
   allow-remote: false

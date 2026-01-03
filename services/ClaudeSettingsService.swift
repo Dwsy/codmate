@@ -258,4 +258,36 @@ actor ClaudeSettingsService {
         if env.isEmpty { obj.removeValue(forKey: "env") } else { obj["env"] = env }
         try writeObject(obj)
     }
+
+    func setEnvValues(_ entries: [String: String?]) throws {
+        guard !entries.isEmpty else { return }
+        var obj = loadObject()
+        var env = (obj["env"] as? [String: Any]) ?? [:]
+        for (key, value) in entries {
+            if let v = value?.trimmingCharacters(in: .whitespacesAndNewlines), !v.isEmpty {
+                env[key] = v
+            } else {
+                env.removeValue(forKey: key)
+            }
+        }
+        if env.isEmpty { obj.removeValue(forKey: "env") } else { obj["env"] = env }
+        try writeObject(obj)
+    }
+
+    func currentModel() -> String? {
+        let obj = loadObject()
+        return obj["model"] as? String
+    }
+
+    func envSnapshot() -> [String: String] {
+        let obj = loadObject()
+        guard let env = obj["env"] as? [String: Any] else { return [:] }
+        var out: [String: String] = [:]
+        for (key, value) in env {
+            if let str = value as? String, !str.isEmpty {
+                out[key] = str
+            }
+        }
+        return out
+    }
 }

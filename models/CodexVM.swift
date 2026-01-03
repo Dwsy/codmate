@@ -91,6 +91,7 @@ final class CodexVM: ObservableObject {
   // Debounce tasks
   private var debounceProviderTask: Task<Void, Never>? = nil
   private var debounceModelTask: Task<Void, Never>? = nil
+  private var debounceProxySelectionTask: Task<Void, Never>? = nil
   private var debounceReasoningTask: Task<Void, Never>? = nil
   private var debounceTuiNotifTask: Task<Void, Never>? = nil
   private var debounceSysNotifTask: Task<Void, Never>? = nil
@@ -135,6 +136,15 @@ final class CodexVM: ObservableObject {
     normalizeBuiltinModelIfNeeded()
   }
 
+  func loadProxyDefaults(preferences: SessionPreferencesStore) async {
+    let currentModel = await service.getTopLevelString("model")
+    if let value = currentModel, !value.isEmpty {
+      if preferences.codexProxyModelId == nil {
+        preferences.codexProxyModelId = value
+      }
+    }
+  }
+
   // MARK: - Debounced schedulers
   private func schedule(
     _ taskRef: inout Task<Void, Never>?, delayMs: UInt64 = 300,
@@ -153,6 +163,16 @@ final class CodexVM: ObservableObject {
     schedule(&debounceProviderTask) { [weak self] in
       guard let self else { return }
       await self.applyRegistryProviderSelection()
+    }
+  }
+  func scheduleApplyProxySelectionDebounced(
+    providerId: String?,
+    modelId: String?,
+    preferences: SessionPreferencesStore
+  ) {
+    schedule(&debounceProxySelectionTask) { [weak self] in
+      guard let self else { return }
+      await self.applyProxySelection(providerId: providerId, modelId: modelId, preferences: preferences)
     }
   }
   func scheduleApplyModelDebounced() {
@@ -446,6 +466,35 @@ final class CodexVM: ObservableObject {
       lastError = "Failed to apply provider"
     }
     await loadRegistryBindings()
+  }
+
+  func applyProxySelection(
+    providerId: String?,
+    modelId: String?,
+    preferences: SessionPreferencesStore
+  ) async {
+    do {
+      if providerId == nil {
+        try await service.replaceProviders(with: [])
+        try await service.setActiveProvider(nil)
+        try await service.setTopLevelString("model", value: nil)
+        await MainActor.run { self.lastError = nil }
+        return
+      }
+      let key = CLIProxyService.shared.resolvePublicAPIKey()
+      let port = preferences.localServerPort
+      try await service.applyLocalProxyProvider(
+        providerId: "codmate-proxy",
+        port: port,
+        apiKey: key,
+        modelId: modelId
+      )
+      await MainActor.run { self.lastError = nil }
+    } catch {
+      await MainActor.run {
+        self.lastError = "Failed to apply CLI Proxy provider: \(error.localizedDescription)"
+      }
+    }
   }
 
   private func normalizeBuiltinModelIfNeeded() {

@@ -54,6 +54,7 @@ final class SessionPreferencesStore: ObservableObject {
     static let enabledRemoteHosts = "codex.remote.enabledHosts"
     static let searchPanelStyle = "codmate.search.panelStyle"
     static let systemMenuVisibility = "codmate.systemMenu.visibility"
+    static let statusBarVisibility = "codmate.statusbar.visibility"
     static let confirmBeforeQuit = "codmate.app.confirmBeforeQuit"
     static let launchAtLogin = "codmate.app.launchAtLogin"
     // Claude advanced
@@ -78,6 +79,16 @@ final class SessionPreferencesStore: ObservableObject {
     static let commitPromptTemplate = "git.review.commitPromptTemplate"
     static let commitProviderId = "git.review.commitProviderId"  // provider id or nil for auto
     static let commitModelId = "git.review.commitModelId"  // optional model id tied to provider
+    // Unified provider selections (CLIProxy-backed pickers)
+    static let codexProxyProviderId = "codmate.codex.proxyProviderId"
+    static let codexProxyModelId = "codmate.codex.proxyModelId"
+    static let claudeProxyProviderId = "codmate.claude.proxyProviderId"
+    static let claudeProxyModelId = "codmate.claude.proxyModelId"
+    static let geminiProxyProviderId = "codmate.gemini.proxyProviderId"
+    static let geminiProxyModelId = "codmate.gemini.proxyModelId"
+    static let codexProxyModelOverrides = "codmate.codex.proxyModelOverrides"
+    static let claudeProxyModelAliases = "codmate.claude.proxyModelAliases"
+    static let geminiProxyModelOverrides = "codmate.gemini.proxyModelOverrides"
     // Terminal mode (DEV): use CLI console instead of shell
     static let terminalUseCLIConsole = "terminal.useCliConsole"
     static let terminalFontName = "terminal.fontName"
@@ -175,6 +186,9 @@ final class SessionPreferencesStore: ObservableObject {
     let resolvedExternalId = ExternalTerminalProfileStore.shared.resolvePreferredId(id: appRaw)
     self.defaultResumeExternalAppId = resolvedExternalId
 
+    let statusBarRaw = defaults.string(forKey: Keys.statusBarVisibility) ?? StatusBarVisibility.hidden.rawValue
+    self.statusBarVisibility = StatusBarVisibility(rawValue: statusBarRaw) ?? .hidden
+
     // Default editor for quick open (files)
     let editorRaw = defaults.string(forKey: Keys.defaultFileEditor) ?? EditorApp.vscode.rawValue
     var editor = EditorApp(rawValue: editorRaw) ?? .vscode
@@ -191,6 +205,18 @@ final class SessionPreferencesStore: ObservableObject {
     self.commitPromptTemplate = defaults.string(forKey: Keys.commitPromptTemplate) ?? ""
     self.commitProviderId = defaults.string(forKey: Keys.commitProviderId)
     self.commitModelId = defaults.string(forKey: Keys.commitModelId)
+    self.codexProxyProviderId = defaults.string(forKey: Keys.codexProxyProviderId)
+    self.codexProxyModelId = defaults.string(forKey: Keys.codexProxyModelId)
+    self.claudeProxyProviderId = defaults.string(forKey: Keys.claudeProxyProviderId)
+    self.claudeProxyModelId = defaults.string(forKey: Keys.claudeProxyModelId)
+    self.geminiProxyProviderId = defaults.string(forKey: Keys.geminiProxyProviderId)
+    self.geminiProxyModelId = defaults.string(forKey: Keys.geminiProxyModelId)
+    self.codexProxyModelOverrides =
+      SessionPreferencesStore.decodeJSON([String: [String]].self, defaults: defaults, key: Keys.codexProxyModelOverrides) ?? [:]
+    self.claudeProxyModelAliases =
+      SessionPreferencesStore.decodeJSON([String: [String: String]].self, defaults: defaults, key: Keys.claudeProxyModelAliases) ?? [:]
+    self.geminiProxyModelOverrides =
+      SessionPreferencesStore.decodeJSON([String: [String]].self, defaults: defaults, key: Keys.geminiProxyModelOverrides) ?? [:]
 
     // Terminal mode (DEV) – compute locally first
     let cliConsole: Bool
@@ -337,21 +363,56 @@ final class SessionPreferencesStore: ObservableObject {
     self.localServerPort = defaults.object(forKey: Keys.localServerPort) as? Int ?? legacyPort ?? 8080
     self.localServerEnabled = defaults.object(forKey: Keys.localServerEnabled) as? Bool ?? false
     self.localServerReroute = defaults.object(forKey: Keys.localServerReroute) as? Bool ?? legacyUse
-    self.localServerReroute3P = defaults.object(forKey: Keys.localServerReroute3P) as? Bool ?? false
+    // Temporarily disable rerouting API key providers until finalized.
+    self.localServerReroute3P = false
+    defaults.set(false, forKey: Keys.localServerReroute3P)
     // Default auto-start to true if public server is enabled, or if reroute is on (on-demand implied)
     self.localServerAutoStart = defaults.object(forKey: Keys.localServerAutoStart) as? Bool ?? true
 
     let oauthEnabled = defaults.array(forKey: Keys.oauthProvidersEnabled) as? [String] ?? []
     self.oauthProvidersEnabled = Set(oauthEnabled)
+
+    Task { @MainActor [weak self] in
+      await self?.normalizeProviderSelectionsIfNeeded()
+    }
     
     // Now that all properties are initialized, ensure directories exist
     ensureDirectoryExists(sessionsRoot)
     ensureDirectoryExists(notesRoot)
     }
+
+  private func normalizeProviderSelectionsIfNeeded() async {
+    let registry = ProvidersRegistryService()
+    let providers = await registry.listProviders()
+    let normalize: (String?) -> String? = { UnifiedProviderID.normalize($0, registryProviders: providers) }
+
+    let nextCommit = normalize(commitProviderId)
+    if nextCommit != commitProviderId { commitProviderId = nextCommit }
+
+    let nextCodex = normalize(codexProxyProviderId)
+    if nextCodex != codexProxyProviderId { codexProxyProviderId = nextCodex }
+
+    let nextClaude = normalize(claudeProxyProviderId)
+    if nextClaude != claudeProxyProviderId { claudeProxyProviderId = nextClaude }
+
+    let nextGemini = normalize(geminiProxyProviderId)
+    if nextGemini != geminiProxyProviderId { geminiProxyProviderId = nextGemini }
+  }
+
   private func persist() {
     defaults.set(sessionsRoot.path, forKey: Keys.sessionsRootPath)
     defaults.set(notesRoot.path, forKey: Keys.notesRootPath)
     defaults.set(projectsRoot.path, forKey: Keys.projectsRootPath)
+    }
+
+    private static func decodeJSON<T: Decodable>(_ type: T.Type, defaults: UserDefaults, key: String) -> T? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(T.self, from: data)
+    }
+
+    private func persistJSON<T: Encodable>(_ value: T, key: String) {
+        guard let data = try? JSONEncoder().encode(value) else { return }
+        defaults.set(data, forKey: key)
     }
 
     private func persistCLIPaths() {
@@ -585,6 +646,10 @@ final class SessionPreferencesStore: ObservableObject {
     didSet { defaults.set(searchPanelStyle.rawValue, forKey: Keys.searchPanelStyle) }
   }
 
+  @Published var statusBarVisibility: StatusBarVisibility {
+    didSet { defaults.set(statusBarVisibility.rawValue, forKey: Keys.statusBarVisibility) }
+  }
+
   @Published var systemMenuVisibility: SystemMenuVisibility {
     didSet { defaults.set(systemMenuVisibility.rawValue, forKey: Keys.systemMenuVisibility) }
   }
@@ -693,6 +758,33 @@ final class SessionPreferencesStore: ObservableObject {
   }
   @Published var commitModelId: String? {
     didSet { defaults.set(commitModelId, forKey: Keys.commitModelId) }
+  }
+  @Published var codexProxyProviderId: String? {
+    didSet { defaults.set(codexProxyProviderId, forKey: Keys.codexProxyProviderId) }
+  }
+  @Published var codexProxyModelId: String? {
+    didSet { defaults.set(codexProxyModelId, forKey: Keys.codexProxyModelId) }
+  }
+  @Published var claudeProxyProviderId: String? {
+    didSet { defaults.set(claudeProxyProviderId, forKey: Keys.claudeProxyProviderId) }
+  }
+  @Published var claudeProxyModelId: String? {
+    didSet { defaults.set(claudeProxyModelId, forKey: Keys.claudeProxyModelId) }
+  }
+  @Published var geminiProxyProviderId: String? {
+    didSet { defaults.set(geminiProxyProviderId, forKey: Keys.geminiProxyProviderId) }
+  }
+  @Published var geminiProxyModelId: String? {
+    didSet { defaults.set(geminiProxyModelId, forKey: Keys.geminiProxyModelId) }
+  }
+  @Published var codexProxyModelOverrides: [String: [String]] {
+    didSet { persistJSON(codexProxyModelOverrides, key: Keys.codexProxyModelOverrides) }
+  }
+  @Published var claudeProxyModelAliases: [String: [String: String]] {
+    didSet { persistJSON(claudeProxyModelAliases, key: Keys.claudeProxyModelAliases) }
+  }
+  @Published var geminiProxyModelOverrides: [String: [String]] {
+    didSet { persistJSON(geminiProxyModelOverrides, key: Keys.geminiProxyModelOverrides) }
   }
 
   // MARK: - Terminal (DEV)

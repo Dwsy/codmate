@@ -84,6 +84,7 @@ extension SessionActions {
     func renderInlineProfileConfig(
         key id: String,
         model: String?,
+        modelProvider: String?,
         approvalPolicy: String?,
         sandboxMode: String?
     ) -> String? {
@@ -104,7 +105,21 @@ extension SessionActions {
             let val = sandbox.replacingOccurrences(of: "\"", with: "\\\"")
             pairs.append("sandbox_mode=\"\(val)\"")
         }
+        if let provider = modelProvider,
+            !provider.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            let val = provider.replacingOccurrences(of: "\"", with: "\\\"")
+            pairs.append("model_provider=\"\(val)\"")
+        }
         guard !pairs.isEmpty else { return nil }
         return "profiles.\(id)={ \(pairs.joined(separator: ", ")) }"
+    }
+
+    func isLikelyBuiltinCodexModel(_ raw: String?) -> Bool {
+        guard let text = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
+            return false
+        }
+        let lower = text.lowercased()
+        return lower.hasPrefix("gpt-") || lower.hasPrefix("gpt5")
     }
 }

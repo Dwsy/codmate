@@ -6,8 +6,6 @@ import Foundation
 actor LLMHTTPService {
     enum PreferredEngine { case auto, codex, claudeCode }
 
-    private static let localReroutePrefix = "local-reroute:"
-
     struct Options: Sendable {
         var preferred: PreferredEngine = .auto
         var model: String? = nil
@@ -120,16 +118,40 @@ actor LLMHTTPService {
         let rerouteBuiltIn = defaults.bool(forKey: "codmate.localserver.reroute")
         let reroute3P = defaults.bool(forKey: "codmate.localserver.reroute3p")
 
-        var effectiveProviderId = providerId
-        if let pid = providerId, LocalServerBuiltInProvider.from(providerId: pid) != nil, !rerouteBuiltIn {
-            effectiveProviderId = nil
-        }
-        if let pid = providerId, Self.rerouteProviderName(from: pid) != nil, !reroute3P {
-            effectiveProviderId = nil
+        var parsedSelection = providerId.map { UnifiedProviderID.parse($0) }
+        if case .unknown(let raw) = parsedSelection,
+           let normalized = UnifiedProviderID.normalize(raw, registryProviders: reg.providers) {
+            parsedSelection = UnifiedProviderID.parse(normalized)
         }
 
-        // Handle CLI Proxy reroute providers selection
-        if let pid = effectiveProviderId, let name = Self.rerouteProviderName(from: pid) {
+        var effectiveProviderId: String?
+        var builtinProvider: LocalServerBuiltInProvider?
+        var legacyRerouteLabel: String?
+
+        switch parsedSelection {
+        case .oauth(let auth):
+            builtinProvider = Self.builtinProvider(for: auth)
+        case .api(let id):
+            effectiveProviderId = id
+        case .legacyBuiltin(let builtin):
+            builtinProvider = builtin
+        case .legacyReroute(let label):
+            legacyRerouteLabel = label
+        case .unknown(let value):
+            effectiveProviderId = value
+        case .none:
+            break
+        }
+
+        if builtinProvider != nil && !rerouteBuiltIn {
+            builtinProvider = nil
+        }
+        if legacyRerouteLabel != nil && !reroute3P {
+            legacyRerouteLabel = nil
+        }
+
+        // Handle legacy CLI Proxy reroute providers selection (local-reroute:*)
+        if let name = legacyRerouteLabel, let pid = providerId {
             let port = Self.localServerPort()
             let base = "http://127.0.0.1:\(port)/v1"
             let vConnector = ProvidersRegistryService.Connector(
@@ -150,16 +172,21 @@ actor LLMHTTPService {
             return (vProvider, vConnector, base, headers, "internal")
         }
 
-        // Handle built-in providers selection (explicitly chosen via providerId)
-        if let builtin = LocalServerBuiltInProvider.from(providerId: effectiveProviderId) {
+        // Handle built-in OAuth providers selection (oauth:*)
+        if let builtin = builtinProvider {
             let port = Self.localServerPort()
             let base = "http://127.0.0.1:\(port)/v1"
             let vConnector = ProvidersRegistryService.Connector(
                 baseURL: base,
                 wireAPI: "chat"
             )
+            let id: String = {
+                if case .oauth(let auth) = parsedSelection { return UnifiedProviderID.oauth(auth) }
+                if case .legacyBuiltin(let legacy) = parsedSelection { return legacy.id }
+                return builtin.id
+            }()
             let vProvider = ProvidersRegistryService.Provider(
-                id: builtin.id,
+                id: id,
                 name: builtin.displayName,
                 class: "openai-compatible",
                 managedByCodMate: true,
@@ -278,11 +305,14 @@ actor LLMHTTPService {
         return port > 0 ? port : 8080
     }
 
-    private static func rerouteProviderName(from providerId: String) -> String? {
-        guard providerId.hasPrefix(localReroutePrefix) else { return nil }
-        let name = String(providerId.dropFirst(localReroutePrefix.count))
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+    private static func builtinProvider(for auth: LocalAuthProvider) -> LocalServerBuiltInProvider? {
+        switch auth {
+        case .codex: return .openai
+        case .claude: return .anthropic
+        case .gemini: return .gemini
+        case .antigravity: return .antigravity
+        case .qwen: return .qwen
+        }
     }
 
     private static func localServerConfigPath() -> String {

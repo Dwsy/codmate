@@ -136,6 +136,37 @@ actor CodexConfigService {
         }
     }
 
+    func applyLocalProxyProvider(
+        providerId: String = "codmate-proxy",
+        port: Int,
+        apiKey: String?,
+        modelId: String?
+    ) throws {
+        let baseURL = "http://127.0.0.1:\(port)/v1"
+        var headers: [String: String] = [:]
+        if let key = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty {
+            headers["Authorization"] = key.hasPrefix("Bearer ") ? key : "Bearer \(key)"
+        }
+        let provider = CodexProvider(
+            id: providerId,
+            name: "CLI Proxy API",
+            baseURL: baseURL,
+            envKey: nil,
+            // CLI Proxy API supports Responses; default to the modern wire API.
+            wireAPI: "responses",
+            queryParamsRaw: nil,
+            httpHeadersRaw: headers.isEmpty ? nil : renderInlineTable(headers),
+            envHttpHeadersRaw: nil,
+            requestMaxRetries: nil,
+            streamMaxRetries: nil,
+            streamIdleTimeoutMs: nil,
+            managedByCodMate: true
+        )
+        try replaceProviders(with: [provider])
+        try setActiveProvider(providerId)
+        try setTopLevelString("model", value: modelId)
+    }
+
     // MARK: - Runtime: model, reasoning, sandbox, approvals
 
     func getTopLevelString(_ key: String) -> String? {

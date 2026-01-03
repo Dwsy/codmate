@@ -26,6 +26,7 @@ final class ClaudeCodeVM: ObservableObject {
     private let registry = ProvidersRegistryService()
     private var saveDebounceTask: Task<Void, Never>? = nil
     private var applyProviderDebounceTask: Task<Void, Never>? = nil
+    private var proxySelectionDebounceTask: Task<Void, Never>? = nil
     private var defaultAliasDebounceTask: Task<Void, Never>? = nil
     private var runtimeDebounceTask: Task<Void, Never>? = nil
     private var notificationDebounceTask: Task<Void, Never>? = nil
@@ -40,6 +41,35 @@ final class ClaudeCodeVM: ObservableObject {
             self.syncLoginMethod()
         }
         await loadNotificationSettings()
+    }
+
+    func loadProxyDefaults(preferences: SessionPreferencesStore) async {
+        let settings = ClaudeSettingsService()
+        let currentModel = await settings.currentModel()
+        let env = await settings.envSnapshot()
+        if preferences.claudeProxyModelId == nil {
+            if let model = currentModel, !model.isEmpty {
+                preferences.claudeProxyModelId = model
+            } else if let envModel = env["ANTHROPIC_MODEL"] ?? env["ANTHROPIC_DEFAULT_SONNET_MODEL"]
+                        ?? env["ANTHROPIC_DEFAULT_OPUS_MODEL"] ?? env["ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+                      !envModel.isEmpty {
+                preferences.claudeProxyModelId = envModel
+            }
+        }
+        if let providerId = preferences.claudeProxyProviderId {
+            let existing = preferences.claudeProxyModelAliases[providerId] ?? [:]
+            if existing.isEmpty {
+                var aliases: [String: String] = [:]
+                if let opus = env["ANTHROPIC_DEFAULT_OPUS_MODEL"] { aliases["opus"] = opus }
+                if let sonnet = env["ANTHROPIC_DEFAULT_SONNET_MODEL"] { aliases["sonnet"] = sonnet }
+                if let haiku = env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] { aliases["haiku"] = haiku }
+                if !aliases.isEmpty {
+                    var stored = preferences.claudeProxyModelAliases
+                    stored[providerId] = aliases
+                    preferences.claudeProxyModelAliases = stored
+                }
+            }
+        }
     }
 
     func availableModels() -> [String] {
@@ -160,6 +190,209 @@ final class ClaudeCodeVM: ObservableObject {
         } else {
             try? await settings.setEnvToken(nil)
         }
+    }
+
+    func applyProxySelection(
+        providerId: String?,
+        modelId: String?,
+        preferences: SessionPreferencesStore
+    ) async {
+        if SecurityScopedBookmarks.shared.isSandboxed {
+            let home = SessionPreferencesStore.getRealUserHomeURL()
+            _ = AuthorizationHub.shared.ensureDirectoryAccessOrPromptSync(directory: home, purpose: .generalAccess)
+        }
+        let settings = ClaudeSettingsService()
+        do {
+            if providerId == nil {
+                try await settings.setModel(nil)
+                try await settings.setEnvBaseURL(nil)
+                try await settings.setForceLoginMethod(nil)
+                try await settings.setEnvToken(nil)
+                try await settings.setEnvValues([
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL": nil,
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL": nil,
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL": nil,
+                    "ANTHROPIC_MODEL": nil,
+                    "ANTHROPIC_SMALL_FAST_MODEL": nil
+                ])
+                await MainActor.run { self.lastError = nil }
+                return
+            }
+            let port = preferences.localServerPort
+            let baseURL = "http://127.0.0.1:\(port)"
+            let trimmedModel = modelId?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let apiKey = CLIProxyService.shared.resolvePublicAPIKey()
+            let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            try await settings.setEnvBaseURL(baseURL)
+            try await settings.setForceLoginMethod(nil)
+            try await settings.setEnvToken(trimmedKey.isEmpty ? nil : trimmedKey)
+            let resolved = await resolveProxyAliases(
+                providerId: providerId,
+                selectedModel: trimmedModel,
+                preferences: preferences
+            )
+            try await settings.setModel(resolved.defaultModel)
+            try await settings.setEnvValues([
+                "ANTHROPIC_DEFAULT_OPUS_MODEL": resolved.opus,
+                "ANTHROPIC_DEFAULT_SONNET_MODEL": resolved.sonnet,
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL": resolved.haiku,
+                "ANTHROPIC_MODEL": resolved.defaultModel,
+                "ANTHROPIC_SMALL_FAST_MODEL": resolved.haiku ?? resolved.defaultModel
+            ])
+            await MainActor.run { self.lastError = nil }
+        } catch {
+            await MainActor.run {
+                self.lastError = "Failed to apply CLI Proxy provider: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private struct ClaudeProxyAliasSet {
+        var defaultModel: String?
+        var opus: String?
+        var sonnet: String?
+        var haiku: String?
+    }
+
+    private func resolveProxyAliases(
+        providerId: String?,
+        selectedModel: String?,
+        preferences: SessionPreferencesStore
+    ) async -> ClaudeProxyAliasSet {
+        let trimmedSelected = selectedModel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        var defaultModel = (trimmedSelected?.isEmpty == false) ? trimmedSelected : nil
+
+        let storedAliases = providerId.flatMap { preferences.claudeProxyModelAliases[$0] } ?? [:]
+        var opus = storedAliases["opus"]
+        var sonnet = storedAliases["sonnet"]
+        var haiku = storedAliases["haiku"]
+
+        var fallbackAliases: [String: String] = [:]
+
+        if let providerId {
+            switch UnifiedProviderID.parse(providerId) {
+            case .oauth(let authProvider):
+                fallbackAliases = await proxyAliasDefaults(
+                    for: authProvider,
+                    fallbackModel: defaultModel
+                )
+            case .api(let apiId):
+                fallbackAliases = await registryAliasDefaults(
+                    for: apiId
+                )
+            default:
+                break
+            }
+        }
+
+        if defaultModel == nil {
+            defaultModel = fallbackAliases["default"]
+                ?? fallbackAliases["sonnet"]
+                ?? fallbackAliases["opus"]
+                ?? fallbackAliases["haiku"]
+        }
+
+        if opus == nil { opus = fallbackAliases["opus"] ?? defaultModel }
+        if sonnet == nil { sonnet = fallbackAliases["sonnet"] ?? defaultModel }
+        if haiku == nil { haiku = fallbackAliases["haiku"] ?? defaultModel }
+
+        return ClaudeProxyAliasSet(
+            defaultModel: defaultModel,
+            opus: opus,
+            sonnet: sonnet,
+            haiku: haiku
+        )
+    }
+
+    private func proxyAliasDefaults(
+        for provider: LocalAuthProvider,
+        fallbackModel: String?
+    ) async -> [String: String] {
+        let trimmedSelected = fallbackModel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallback = (trimmedSelected?.isEmpty == false) ? trimmedSelected : nil
+        var models: [String] = []
+        if let target = builtInProvider(for: provider), CLIProxyService.shared.isRunning {
+            let localModels = await CLIProxyService.shared.fetchLocalModels()
+            models = localModels.compactMap { model in
+                let candidate = model.id.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !candidate.isEmpty else { return nil }
+                if builtInProvider(for: model) == target {
+                    return candidate
+                }
+                return nil
+            }
+        }
+
+        let preferred = fallback ?? selectDefaultModel(from: models)
+        let opus = selectModel(from: models, tokens: ["opus"]) ?? preferred
+        let sonnet = selectModel(from: models, tokens: ["sonnet"]) ?? preferred
+        let haiku = selectModel(from: models, tokens: ["haiku", "flash", "lite", "mini"]) ?? preferred
+
+        var out: [String: String] = [:]
+        if let preferred { out["default"] = preferred }
+        if let opus { out["opus"] = opus }
+        if let sonnet { out["sonnet"] = sonnet }
+        if let haiku { out["haiku"] = haiku }
+        return out
+    }
+
+    private func registryAliasDefaults(for providerId: String) async -> [String: String] {
+        let providers = await registry.listAllProviders()
+        guard let provider = providers.first(where: { $0.id == providerId }) else { return [:] }
+        let connector = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]
+        let aliases = connector?.modelAliases ?? [:]
+        var out: [String: String] = [:]
+        if let def = aliases["default"] { out["default"] = def }
+        if let opus = aliases["opus"] { out["opus"] = opus }
+        if let sonnet = aliases["sonnet"] { out["sonnet"] = sonnet }
+        if let haiku = aliases["haiku"] { out["haiku"] = haiku }
+        if let rec = provider.recommended?.defaultModelFor?[ProvidersRegistryService.Consumer.claudeCode.rawValue],
+           out["default"] == nil {
+            out["default"] = rec
+        }
+        if out["default"] == nil,
+           let first = provider.catalog?.models?.first?.vendorModelId {
+            out["default"] = first
+        }
+        return out
+    }
+
+    private func selectDefaultModel(from models: [String]) -> String? {
+        if let match = selectModel(from: models, tokens: ["sonnet", "opus", "haiku"]) { return match }
+        if let match = selectModel(from: models, tokens: ["pro", "latest", "preview"]) { return match }
+        return models.first
+    }
+
+    private func selectModel(from models: [String], tokens: [String]) -> String? {
+        guard !models.isEmpty else { return nil }
+        for token in tokens {
+            if let match = models.first(where: { $0.localizedCaseInsensitiveContains(token) }) {
+                return match
+            }
+        }
+        return nil
+    }
+
+    private func builtInProvider(for provider: LocalAuthProvider) -> LocalServerBuiltInProvider? {
+        switch provider {
+        case .codex: return .openai
+        case .claude: return .anthropic
+        case .gemini: return .gemini
+        case .antigravity: return .antigravity
+        case .qwen: return .qwen
+        }
+    }
+
+    private func builtInProvider(for model: CLIProxyService.LocalModel) -> LocalServerBuiltInProvider? {
+        let hint = model.provider ?? model.source ?? model.owned_by
+        if let hint, let provider = LocalServerBuiltInProvider.allCases.first(where: { $0.matchesOwnedBy(hint) }) {
+            return provider
+        }
+        let modelId = model.id
+        if let provider = LocalServerBuiltInProvider.allCases.first(where: { $0.matchesModelId(modelId) }) {
+            return provider
+        }
+        return nil
     }
 
     func save() async {
@@ -410,6 +643,25 @@ final class ClaudeCodeVM: ObservableObject {
             do { try await Task.sleep(nanoseconds: delayMs * 1_000_000) } catch { return }
             if Task.isCancelled { return }
             await self.applyActiveProvider()
+        }
+    }
+
+    func scheduleApplyProxySelectionDebounced(
+        providerId: String?,
+        modelId: String?,
+        preferences: SessionPreferencesStore,
+        delayMs: UInt64 = 300
+    ) {
+        proxySelectionDebounceTask?.cancel()
+        proxySelectionDebounceTask = Task { [weak self] in
+            guard let self else { return }
+            do { try await Task.sleep(nanoseconds: delayMs * 1_000_000) } catch { return }
+            if Task.isCancelled { return }
+            await self.applyProxySelection(
+                providerId: providerId,
+                modelId: modelId,
+                preferences: preferences
+            )
         }
     }
 
