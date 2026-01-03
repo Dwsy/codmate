@@ -133,6 +133,9 @@ final class SessionListViewModel: ObservableObject {
         }
       }
       sessionLookup = Dictionary(uniqueKeysWithValues: allSessions.map { ($0.id, $0) })
+
+      // Auto-assign unassigned sessions to "Others" task
+      autoAssignSessionsToOthersTask()
     }
   }
   private var sessionLookup: [String: SessionSummary] = [:]
@@ -313,6 +316,7 @@ final class SessionListViewModel: ObservableObject {
   // Projects
   let configService = CodexConfigService()
   var projectsStore: ProjectsStore
+  var tasksStore: TasksStore
   let claudeProvider: ClaudeSessionProvider
   let geminiProvider: GeminiSessionProvider
   private let claudeUsageClient = ClaudeUsageAPIClient()
@@ -556,6 +560,8 @@ final class SessionListViewModel: ObservableObject {
       membershipsURL: pr.appendingPathComponent("memberships.json", isDirectory: false)
     )
     self.projectsStore = ProjectsStore(paths: p)
+    // Initialize TasksStore (defaults to ~/.codmate/tasks)
+    self.tasksStore = TasksStore()
     self.claudeProvider = ClaudeSessionProvider(cacheStore: sqliteStore)
     self.geminiProvider = GeminiSessionProvider(
       projectsStore: self.projectsStore, cacheStore: sqliteStore)
@@ -724,6 +730,57 @@ final class SessionListViewModel: ObservableObject {
   func immediateApplyQuickSearch(_ text: String) { quickSearchText = text }
 
   private var activeRefreshToken = UUID()
+  private var refreshPulseTask: Task<Void, Never>?
+  private var refreshStatusToken: String?
+
+  private func beginRefreshStatus(force: Bool) {
+    refreshPulseTask?.cancel()
+    refreshStatusToken = StatusBarLogStore.shared.beginTask(
+      force ? "Refreshing sessions (forced)..." : "Refreshing sessions...",
+      level: .info,
+      source: "Sessions"
+    )
+    refreshPulseTask = Task.detached { [weak self] in
+      guard let self else { return }
+      var tick = 0
+      while !Task.isCancelled {
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        tick += 1
+        let currentTick = tick
+        await MainActor.run {
+          let progressText: String
+          if self.enrichmentTotal > 0 {
+            progressText = "Enriching \(self.enrichmentProgress)/\(self.enrichmentTotal)"
+          } else {
+            progressText = "Scanning sessions"
+          }
+          StatusBarLogStore.shared.post(
+            "\(progressText) - \(currentTick)s",
+            level: .info,
+            source: "Sessions"
+          )
+        }
+      }
+    }
+  }
+
+  private func endRefreshStatus(elapsed: TimeInterval, isCurrent: Bool) {
+    refreshPulseTask?.cancel()
+    refreshPulseTask = nil
+    guard let token = refreshStatusToken else { return }
+    refreshStatusToken = nil
+    if isCurrent {
+      let count = allSessions.count
+      StatusBarLogStore.shared.endTask(
+        token,
+        message: "Refresh complete in \(String(format: "%.1f", elapsed))s - \(count) sessions",
+        level: .success,
+        source: "Sessions"
+      )
+    } else {
+      StatusBarLogStore.shared.endTask(token)
+    }
+  }
 
   func refreshSessions(force: Bool = false) async {
     scheduledFilterRefresh?.cancel()
@@ -734,6 +791,7 @@ final class SessionListViewModel: ObservableObject {
       diagLogger.log(
         "refreshSessions skipped due to cache unavailable (cooldown) ts=\(self.ts(), format: .fixed(precision: 3))"
       )
+      StatusBarLogStore.shared.post("Refresh skipped (cache unavailable)", level: .warning, source: "Sessions")
       await MainActor.run { self.isLoading = false }
       return
     }
@@ -744,29 +802,34 @@ final class SessionListViewModel: ObservableObject {
       diagLogger.log(
         "refreshSessions skipped (executing or recent) scope=\(scopeKeyValue, privacy: .public) force=\(force, privacy: .public) ts=\(self.ts(), format: .fixed(precision: 3))"
       )
+      StatusBarLogStore.shared.post("Refresh skipped (already running)", level: .warning, source: "Sessions")
       await MainActor.run { self.isLoading = false }
       return
     }
 
     isLoading = true
+    beginRefreshStatus(force: force)
     activeScopeRefreshes[scopeKeyValue] = token
     if force {
       invalidateEnrichmentCache(for: selectedDay)
     }
     let refreshBegan = Date()
     defer {
+      let elapsed = Date().timeIntervalSince(refreshBegan)
       if token == activeRefreshToken {
         isLoading = false
-        let elapsed = Date().timeIntervalSince(refreshBegan)
         lastRefreshAt = Date()
         lastRefreshScope = currentScope()
         // Clean up active refresh tracker
         if activeScopeRefreshes[scopeKeyValue] == token {
           activeScopeRefreshes.removeValue(forKey: scopeKeyValue)
         }
+        endRefreshStatus(elapsed: elapsed, isCurrent: true)
         diagLogger.log(
           "refreshSessions done in \(elapsed, format: .fixed(precision: 3))s sessions=\(self.allSessions.count, privacy: .public) ts=\(self.ts(), format: .fixed(precision: 3))"
         )
+      } else {
+        endRefreshStatus(elapsed: elapsed, isCurrent: false)
       }
     }
 
@@ -1326,11 +1389,15 @@ final class SessionListViewModel: ObservableObject {
   }
 
   func delete(summaries: [SessionSummary]) async {
+    let count = summaries.count
+    AppLogger.shared.info("Deleting \(count) session\(count == 1 ? "" : "s")", source: "Sessions")
     do {
       try actions.delete(summaries: summaries)
       await indexer.deleteSessions(ids: summaries.map(\.id))
+      AppLogger.shared.success("Deleted \(count) session\(count == 1 ? "" : "s")", source: "Sessions")
       await refreshSessions(force: true)
     } catch {
+      AppLogger.shared.error("Delete failed: \(error.localizedDescription)", source: "Sessions")
       errorMessage = error.localizedDescription
     }
   }
@@ -3986,8 +4053,11 @@ extension SessionListViewModel {
   func syncRemoteHosts(force: Bool = true, refreshAfter: Bool = true) async {
     let enabledHosts = preferences.enabledRemoteHosts
     guard !enabledHosts.isEmpty else { return }
+    let hostCount = enabledHosts.count
+    AppLogger.shared.info("Syncing \(hostCount) remote host\(hostCount == 1 ? "" : "s")", source: "Remote")
     await remoteProvider.syncHosts(enabledHosts, force: force)
     await updateRemoteSyncStates()
+    AppLogger.shared.success("Remote sync complete", source: "Remote")
     if refreshAfter {
       await refreshSessions(force: true)
     }
@@ -4047,5 +4117,59 @@ extension SessionListViewModel {
     guard parts.count == 3, parts[0] == "session" else { return nil }
     guard let source = ProjectSessionSource(rawValue: parts[1]) else { return nil }
     return SessionAssignment(id: parts[2], source: source)
+  }
+
+  // MARK: - Task Management
+
+  /// Automatically assign unassigned sessions to the "Others" task
+  private func autoAssignSessionsToOthersTask() {
+    Task { [weak self] in
+      guard let self else { return }
+      let sessions = await MainActor.run { self.allSessions }
+
+      for session in sessions {
+        // Check if session is already assigned to a task
+        let taskId = await self.tasksStore.taskId(for: session.id)
+        if taskId == nil {
+          // Not assigned to any task, assign to Others
+          await self.tasksStore.assignToOthers(sessionId: session.id)
+        }
+      }
+    }
+  }
+
+  /// Get the task ID for a given session
+  func getTaskId(for sessionId: String) async -> UUID? {
+    return await tasksStore.taskId(for: sessionId)
+  }
+
+  /// Get all tasks
+  func getTasks() async -> [CodMateTask] {
+    return await tasksStore.listTasks()
+  }
+
+  /// Get tasks for a specific project
+  func getTasks(for projectId: String) async -> [CodMateTask] {
+    return await tasksStore.listTasks(for: projectId)
+  }
+
+  /// Create a new task
+  func createTask(_ task: CodMateTask) async {
+    await tasksStore.upsertTask(task)
+  }
+
+  /// Update an existing task
+  func updateTask(_ task: CodMateTask) async {
+    await tasksStore.upsertTask(task)
+  }
+
+  /// Delete a task
+  func deleteTask(id: UUID) async {
+    await tasksStore.deleteTask(id: id)
+  }
+
+  /// Assign sessions to a task
+  func assignSessions(_ sessionIds: [String], to taskId: UUID?) async {
+    await tasksStore.assignSessions(sessionIds, to: taskId)
   }
 }

@@ -20,6 +20,25 @@ extension ProjectWorkspaceViewModel {
             guard shouldProceed else { return }
         }
 
+        let statusToken = StatusBarLogStore.shared.beginTask(
+            "Generating task title & description...",
+            level: .info,
+            source: "Tasks"
+        )
+        var finalStatus: (message: String, level: StatusBarLogLevel)?
+        defer {
+            if let finalStatus {
+                StatusBarLogStore.shared.endTask(
+                    statusToken,
+                    message: finalStatus.message,
+                    level: finalStatus.level,
+                    source: "Tasks"
+                )
+            } else {
+                StatusBarLogStore.shared.endTask(statusToken)
+            }
+        }
+
         // Set loading state
         isGeneratingTitleDescription = true
         generatingTaskId = task.id
@@ -42,11 +61,13 @@ extension ProjectWorkspaceViewModel {
             let hasDescContent = !descToUse.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 
             guard hasTitleContent || hasDescContent else {
+                finalStatus = ("No task content to generate from", .warning)
                 return
             }
 
             // Generate based on available content (title and/or description)
-            await generateFromContent(title: titleToUse, description: descToUse)
+            let ok = await generateFromContent(title: titleToUse, description: descToUse)
+            finalStatus = ok ? ("Task title ready", .success) : ("Task generation failed", .error)
             return
         }
 
@@ -55,6 +76,7 @@ extension ProjectWorkspaceViewModel {
 
         // Load prompt template
         guard let promptTemplate = loadPromptTemplate(named: "task-title-and-description") else {
+            finalStatus = ("Missing task prompt template", .error)
             return
         }
 
@@ -63,26 +85,29 @@ extension ProjectWorkspaceViewModel {
 
         // Call LLM
         guard let response = await callLLM(prompt: fullPrompt) else {
+            finalStatus = ("Task generation failed (no response)", .error)
             return
         }
 
         // Parse response
         guard let parsed = Self.parseTitleDescriptionResponse(response) else {
+            finalStatus = ("Failed to parse task response", .error)
             return
         }
 
         // Update generated content state - EditTaskSheet will pick these up
         generatedTaskTitle = parsed.title
         generatedTaskDescription = parsed.description.isEmpty ? nil : parsed.description
+        finalStatus = ("Task title & description ready", .success)
     }
 
     // MARK: - Private Helpers
 
     /// Generate title and description based on existing content (when no sessions exist)
-    private func generateFromContent(title: String, description: String) async {
+    private func generateFromContent(title: String, description: String) async -> Bool {
         // Load prompt template for content-based generation
         guard let promptTemplate = loadPromptTemplate(named: "task-title-only") else {
-            return
+            return false
         }
 
         // Build prompt with current title and/or description
@@ -101,18 +126,15 @@ extension ProjectWorkspaceViewModel {
         let fullPrompt = promptTemplate + "\n\n" + contentLines.joined(separator: "\n")
 
         // Call LLM
-        guard let response = await callLLM(prompt: fullPrompt) else {
-            return
-        }
+        guard let response = await callLLM(prompt: fullPrompt) else { return false }
 
         // Parse response
-        guard let parsed = Self.parseTitleDescriptionResponse(response) else {
-            return
-        }
+        guard let parsed = Self.parseTitleDescriptionResponse(response) else { return false }
 
         // Update generated content state
         generatedTaskTitle = parsed.title
         generatedTaskDescription = parsed.description.isEmpty ? nil : parsed.description
+        return true
     }
 
     private func buildSessionMetadataMaterial(sessions: [SessionSummary]) -> String {

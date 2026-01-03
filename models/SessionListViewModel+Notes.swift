@@ -15,6 +15,24 @@ extension SessionListViewModel {
     ///   - force: If true, skip the confirmation dialog when existing content is present
     func generateTitleAndComment(for session: SessionSummary, force: Bool = false) async {
         Self.log.info("Starting generation for session \(session.id, privacy: .public)")
+        let statusToken = StatusBarLogStore.shared.beginTask(
+            "Generating title & comment...",
+            level: .info,
+            source: "Session"
+        )
+        var finalStatus: (message: String, level: StatusBarLogLevel)?
+        defer {
+            if let finalStatus {
+                StatusBarLogStore.shared.endTask(
+                    statusToken,
+                    message: finalStatus.message,
+                    level: finalStatus.level,
+                    source: "Session"
+                )
+            } else {
+                StatusBarLogStore.shared.endTask(statusToken)
+            }
+        }
 
         // Check if there's existing content and we should confirm
         if !force {
@@ -28,6 +46,7 @@ extension SessionListViewModel {
                 let shouldProceed = await showOverwriteConfirmation()
                 if !shouldProceed {
                     Self.log.info("User cancelled generation")
+                    finalStatus = ("Generation cancelled", .warning)
                     return
                 }
                 Self.log.info("User confirmed, proceeding with generation")
@@ -53,6 +72,7 @@ extension SessionListViewModel {
             if turns.isEmpty {
                 Self.log.warning("No conversation turns found")
                 await showGenerationError("No conversation data found in session.")
+                finalStatus = ("No conversation data found", .warning)
                 return
             }
 
@@ -100,6 +120,7 @@ extension SessionListViewModel {
             guard let result = Self.parseTitleCommentResponse(raw) else {
                 Self.log.error("Failed to parse JSON response")
                 await showGenerationError("Failed to parse response from LLM. Response: \(raw)")
+                finalStatus = ("Failed to parse LLM response", .error)
                 return
             }
 
@@ -132,10 +153,12 @@ extension SessionListViewModel {
                 body: "Generated title and comment in \(res.elapsedMs)ms",
                 threadId: "session-summary"
             )
+            finalStatus = ("Title & comment ready", .success)
 
         } catch {
             Self.log.error("Generation error: \(error.localizedDescription, privacy: .public)")
             await showGenerationError("Generation failed: \(error.localizedDescription)")
+            finalStatus = ("Generation failed: \(error.localizedDescription)", .error)
         }
     }
 

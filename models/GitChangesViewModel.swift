@@ -471,12 +471,31 @@ final class GitChangesViewModel: ObservableObject {
         }
         generatingTask = Task { [weak self] in
             guard let self else { return }
+            let statusToken = StatusBarLogStore.shared.beginTask(
+                "Generating commit message...",
+                level: .info,
+                source: "Git"
+            )
+            var finalStatus: (message: String, level: StatusBarLogLevel)?
+            defer {
+                if let finalStatus {
+                    StatusBarLogStore.shared.endTask(
+                        statusToken,
+                        message: finalStatus.message,
+                        level: finalStatus.level,
+                        source: "Git"
+                    )
+                } else {
+                    StatusBarLogStore.shared.endTask(statusToken)
+                }
+            }
             guard let repo = self.repo else {
                 await SystemNotifier.shared.notify(
                     title: "AI Commit",
                     body: "Cannot generate commit message: not a Git repository.",
                     threadId: "ai-commit"
                 )
+                finalStatus = ("Not a Git repository", .error)
                 return
             }
             let repoPath = repo.root.path
@@ -500,6 +519,7 @@ final class GitChangesViewModel: ObservableObject {
                 print("[AICommit] No staged changes; generation skipped")
                 #endif
                 Self.log.info("No staged changes; generation skipped")
+                finalStatus = ("No staged changes to summarize", .warning)
                 return
             }
             // Truncate by bytes for safety
@@ -542,12 +562,14 @@ final class GitChangesViewModel: ObservableObject {
                     print("[AICommit] Empty response from provider=\(res.providerId), elapsedMs=\(res.elapsedMs)")
                     #endif
                     Self.log.warning("Empty commit message from provider=\(res.providerId, privacy: .public)")
+                    finalStatus = ("Empty commit message from provider", .warning)
                 } else {
                     let preview = finalMessage.prefix(120)
                     #if DEBUG
                     print("[AICommit] Success provider=\(res.providerId) elapsedMs=\(res.elapsedMs) msg=\(preview)")
                     #endif
                     Self.log.info("Success provider=\(res.providerId, privacy: .public) elapsedMs=\(res.elapsedMs) msg=\(String(preview), privacy: .public)")
+                    finalStatus = ("Commit message ready", .success)
                 }
                 await SystemNotifier.shared.notify(
                     title: "AI Commit",
@@ -566,6 +588,7 @@ final class GitChangesViewModel: ObservableObject {
                     body: "Generation failed: \(error.localizedDescription)",
                     threadId: "ai-commit"
                 )
+                finalStatus = ("Generation failed: \(error.localizedDescription)", .error)
             }
         }
     }
