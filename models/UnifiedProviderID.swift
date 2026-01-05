@@ -5,16 +5,23 @@ enum UnifiedProviderID {
   static let apiPrefix = "api:"
   static let legacyReroutePrefix = "local-reroute:"
 
+  /// Special provider ID for "Auto (CLI Proxy API)" mode in simple picker
+  static let autoProxyId = "__auto_cli_proxy__"
+
   enum Parsed: Equatable {
-    case oauth(LocalAuthProvider)
+    case oauth(LocalAuthProvider, accountId: String?)
     case api(String)
     case legacyBuiltin(LocalServerBuiltInProvider)
     case legacyReroute(String)
+    case autoProxy
     case unknown(String)
   }
 
-  static func oauth(_ provider: LocalAuthProvider) -> String {
-    "\(oauthPrefix)\(provider.rawValue)"
+  static func oauth(_ provider: LocalAuthProvider, accountId: String? = nil) -> String {
+    if let accountId = accountId, !accountId.isEmpty {
+      return "\(oauthPrefix)\(provider.rawValue):\(accountId)"
+    }
+    return "\(oauthPrefix)\(provider.rawValue)"
   }
 
   static func api(_ id: String) -> String {
@@ -22,10 +29,24 @@ enum UnifiedProviderID {
   }
 
   static func parse(_ raw: String) -> Parsed {
+    // Check for special auto proxy ID first
+    if raw == autoProxyId {
+      return .autoProxy
+    }
     if raw.hasPrefix(oauthPrefix) {
       let value = String(raw.dropFirst(oauthPrefix.count))
-      if let provider = LocalAuthProvider(rawValue: value) {
-        return .oauth(provider)
+      // Check if it contains account ID (format: provider:accountId)
+      if let colonIndex = value.firstIndex(of: ":") {
+        let providerValue = String(value[..<colonIndex])
+        let accountId = String(value[value.index(after: colonIndex)...])
+        if let provider = LocalAuthProvider(rawValue: providerValue) {
+          return .oauth(provider, accountId: accountId)
+        }
+      } else {
+        // Legacy format without account ID
+        if let provider = LocalAuthProvider(rawValue: value) {
+          return .oauth(provider, accountId: nil)
+        }
       }
       return .unknown(raw)
     }
@@ -52,13 +73,15 @@ enum UnifiedProviderID {
       return nil
     }
     switch parse(raw) {
+    case .autoProxy:
+      return autoProxyId
     case .oauth:
       return raw
     case .api:
       return raw
     case .legacyBuiltin(let builtin):
       if let auth = authProvider(for: builtin) {
-        return oauth(auth)
+        return oauth(auth, accountId: nil)
       }
       return nil
     case .legacyReroute(let label):
