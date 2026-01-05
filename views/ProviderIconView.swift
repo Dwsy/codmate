@@ -17,7 +17,7 @@ struct ProviderIconView: View {
         .aspectRatio(contentMode: .fit)
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-        .modifier(DarkModeInvertModifier(active: provider == .codex && colorScheme == .dark))
+        .providerIconTheme(iconName: name)
         .saturation(saturation)
         .opacity(opacity)
     } else {

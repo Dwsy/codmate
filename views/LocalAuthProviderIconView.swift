@@ -12,17 +12,13 @@ struct LocalAuthProviderIconView: View {
 
   var body: some View {
     Group {
-      if let image = nsImage(for: provider) {
-        let scale = iconScale(for: provider)
+      if let image = processedIcon {
         Image(nsImage: image)
           .resizable()
           .interpolation(.high)
           .aspectRatio(contentMode: .fit)
           .frame(width: size, height: size)
-          .scaleEffect(scale)
-          .frame(width: size, height: size)
           .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-          .modifier(DarkModeInvertModifier(active: provider == .codex && colorScheme == .dark))
           .saturation(saturation)
           .opacity(opacity)
       } else {
@@ -34,22 +30,35 @@ struct LocalAuthProviderIconView: View {
       }
     }
     .frame(width: size, height: size, alignment: .center)
+    .id(colorScheme) // Force refresh when colorScheme changes
   }
 
   private var dotSize: CGFloat {
     max(6, size * 0.75)
   }
 
-  private func nsImage(for provider: LocalAuthProvider) -> NSImage? {
-    let name: String
+  /// Computed property that depends on colorScheme, ensuring real-time theme updates
+  private var processedIcon: NSImage? {
+    let name = iconName(for: provider)
+    
+    // Use unified resource processing with theme adaptation
+    // This computed property depends on colorScheme, so SwiftUI will recompute it when theme changes
+    let isDarkMode = colorScheme == .dark
+    return ProviderIconResource.processedImage(
+      named: name,
+      size: NSSize(width: size, height: size),
+      isDarkMode: isDarkMode
+    )
+  }
+
+  private func iconName(for provider: LocalAuthProvider) -> String {
     switch provider {
-    case .codex: name = "ChatGPTIcon"
-    case .claude: name = "ClaudeIcon"
-    case .gemini: name = "GeminiIcon"
-    case .antigravity: name = "AntigravityIcon"
-    case .qwen: name = "QwenIcon"
+    case .codex: return "ChatGPTIcon"
+    case .claude: return "ClaudeIcon"
+    case .gemini: return "GeminiIcon"
+    case .antigravity: return "AntigravityIcon"
+    case .qwen: return "QwenIcon"
     }
-    return NSImage(named: name)
   }
 
   private func accent(for provider: LocalAuthProvider) -> Color {
@@ -62,12 +71,4 @@ struct LocalAuthProviderIconView: View {
     }
   }
 
-  private func iconScale(for provider: LocalAuthProvider) -> CGFloat {
-    switch provider {
-    case .antigravity, .qwen:
-      return 0.82
-    case .codex, .claude, .gemini:
-      return 1.0
-    }
-  }
 }
