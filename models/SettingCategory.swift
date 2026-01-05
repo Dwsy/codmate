@@ -3,6 +3,7 @@ import Foundation
 enum SettingCategory: String, CaseIterable, Identifiable {
   case general
   case terminal
+  case notifications
   case command
   case providers
   case codex
@@ -17,7 +18,20 @@ enum SettingCategory: String, CaseIterable, Identifiable {
   // Customize displayed order and allow hiding categories without breaking enums elsewhere.
   // Remote Hosts appears as a top-level settings page alongside Codex.
   static var allCases: [SettingCategory] {
-    [.general, .terminal, .providers, .gitReview, .mcpServer, .remoteHosts, .codex, .gemini, .claudeCode, .advanced, .about]
+    [
+      .general,
+      .terminal,
+      .providers,
+      .gitReview,
+      .mcpServer,
+      .remoteHosts,
+      .codex,
+      .gemini,
+      .claudeCode,
+      .notifications,
+      .advanced,
+      .about
+    ]
   }
 
   var id: String { rawValue }
@@ -26,10 +40,11 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     switch self {
     case .general: return "General"
     case .terminal: return "Terminal"
+    case .notifications: return "Notifications"
     case .command: return "Command"
     case .providers: return "Providers"
     case .codex: return "Codex"
-    case .gemini: return "Gemini"
+    case .gemini: return "Gemini CLI"
     case .remoteHosts: return "Remote Hosts"
     case .gitReview: return "Git Review"
     case .claudeCode: return "Claude Code"
@@ -43,6 +58,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     switch self {
     case .general: return "gear"
     case .terminal: return "terminal"
+    case .notifications: return "bell"
     case .command: return "slider.horizontal.3"
     case .providers: return "server.rack"
     case .codex: return "sparkles"
@@ -60,6 +76,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     switch self {
     case .general: return "Basic application settings"
     case .terminal: return "Terminal and resume preferences"
+    case .notifications: return "Notification preferences and hooks"
     case .command: return "Command execution policies"
     case .providers: return "Global providers and bindings"
     case .codex: return "Codex CLI configuration"

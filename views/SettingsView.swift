@@ -150,6 +150,8 @@ struct SettingsView: View {
       generalSettings
     case .terminal:
       terminalSettings
+    case .notifications:
+      notificationsSettings
     case .command:
       commandSettings
     case .providers:
@@ -188,7 +190,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
           Text("App Behavior").font(.headline).fontWeight(.semibold)
           settingsCard {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
               GridRow {
                 VStack(alignment: .leading, spacing: 2) {
                   Label("Confirm before quit", systemImage: "exclamationmark.triangle")
@@ -259,7 +261,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
           Text("Editor").font(.headline).fontWeight(.semibold)
           settingsCard {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
               GridRow {
                 let editors = EditorApp.installedEditors
                 VStack(alignment: .leading, spacing: 0) {
@@ -668,7 +670,7 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: 10) {
             Text("Embedded Terminal").font(.headline).fontWeight(.semibold)
             settingsCard {
-              Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+              Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
                 // Row: Embedded terminal toggle
                 GridRow {
                   VStack(alignment: .leading, spacing: 2) {
@@ -768,7 +770,7 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: 10) {
             Text("External Terminal").font(.headline).fontWeight(.semibold)
             settingsCard {
-              Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+              Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
                 GridRow {
                   VStack(alignment: .leading, spacing: 2) {
                     Label("Auto open external terminal", systemImage: "arrow.up.right.square")
@@ -834,6 +836,286 @@ struct SettingsView: View {
         }
         .padding(.bottom, 16)
       }
+    }
+  }
+
+  private var notificationsSettings: some View {
+    settingsScroll {
+      VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 6) {
+          Text("Notifications Settings")
+            .font(.title2)
+            .fontWeight(.bold)
+          Text("Configure notification delivery and hooks")
+            .font(.subheadline)
+            .foregroundColor(.secondary)
+        }
+
+        VStack(alignment: .leading, spacing: 10) {
+          Text("Common").font(.headline).fontWeight(.semibold)
+          settingsCard {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+              GridRow {
+                VStack(alignment: .leading, spacing: 2) {
+                  Label("Commit message notifications", systemImage: "square.and.pencil")
+                    .font(.subheadline).fontWeight(.medium)
+                  Text("Notify when commit message generation completes or fails.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Toggle("", isOn: $preferences.commitMessageNotificationsEnabled)
+                  .labelsHidden()
+                  .toggleStyle(.switch)
+                  .controlSize(.small)
+                  .frame(maxWidth: .infinity, alignment: .trailing)
+                  .gridColumnAlignment(.trailing)
+              }
+
+              gridDivider
+
+              GridRow {
+                VStack(alignment: .leading, spacing: 2) {
+                  Label("Title & comment notifications", systemImage: "text.bubble")
+                    .font(.subheadline).fontWeight(.medium)
+                  Text("Notify when title and comment generation completes or fails.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Toggle("", isOn: $preferences.titleCommentNotificationsEnabled)
+                  .labelsHidden()
+                  .toggleStyle(.switch)
+                  .controlSize(.small)
+                  .frame(maxWidth: .infinity, alignment: .trailing)
+                  .gridColumnAlignment(.trailing)
+              }
+
+              gridDivider
+
+              GridRow {
+                VStack(alignment: .leading, spacing: 2) {
+                  Label("Copy command notifications", systemImage: "doc.on.doc")
+                    .font(.subheadline).fontWeight(.medium)
+                  Text("Notify after copying New/Resume commands to the clipboard.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Toggle("", isOn: $preferences.commandCopyNotificationsEnabled)
+                  .labelsHidden()
+                  .toggleStyle(.switch)
+                  .controlSize(.small)
+                  .frame(maxWidth: .infinity, alignment: .trailing)
+                  .gridColumnAlignment(.trailing)
+              }
+            }
+          }
+        }
+
+        VStack(alignment: .leading, spacing: 10) {
+          Text("Codex").font(.headline).fontWeight(.semibold)
+          settingsCard {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+              GridRow {
+                VStack(alignment: .leading, spacing: 2) {
+                  Label("TUI Notifications", systemImage: "terminal")
+                    .font(.subheadline).fontWeight(.medium)
+                  Text(
+                    "Show in-terminal notifications during TUI sessions (supported terminals only)."
+                  )
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .fixedSize(horizontal: false, vertical: true)
+                }
+                Toggle("", isOn: $codexVM.tuiNotifications)
+                  .labelsHidden()
+                  .toggleStyle(.switch)
+                  .controlSize(.small)
+                  .onChange(of: codexVM.tuiNotifications) { _ in
+                    codexVM.scheduleApplyTuiNotificationsDebounced()
+                  }
+                  .frame(maxWidth: .infinity, alignment: .trailing)
+              }
+
+              gridDivider
+
+              GridRow {
+                VStack(alignment: .leading, spacing: 2) {
+                  Label("System Notifications", systemImage: "bell")
+                    .font(.subheadline).fontWeight(.medium)
+                  Text(
+                    "Forward Codex turn-complete events to macOS notifications via notify."
+                  )
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .fixedSize(horizontal: false, vertical: true)
+                }
+                Toggle("", isOn: $codexVM.systemNotifications)
+                  .labelsHidden()
+                  .toggleStyle(.switch)
+                  .controlSize(.small)
+                  .onChange(of: codexVM.systemNotifications) { _ in
+                    codexVM.scheduleApplySystemNotificationsDebounced()
+                  }
+                  .frame(maxWidth: .infinity, alignment: .trailing)
+              }
+
+              if let path = codexVM.notifyBridgePath {
+                gridDivider
+                GridRow {
+                  VStack(alignment: .leading, spacing: 2) {
+                    Label("Notify bridge", systemImage: "link")
+                      .font(.subheadline).fontWeight(.medium)
+                    Text(path)
+                      .font(.caption)
+                      .foregroundStyle(.secondary)
+                      .fixedSize(horizontal: false, vertical: true)
+                  }
+                }
+              }
+
+              gridDivider
+
+              GridRow {
+                VStack(alignment: .leading, spacing: 2) {
+                  Label("Self-test", systemImage: "checkmark.seal")
+                    .font(.subheadline).fontWeight(.medium)
+                  Text("Send a sample event through the notify bridge.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(spacing: 8) {
+                  if codexVM.notifyBridgeHealthy {
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                  } else {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                      .foregroundStyle(.orange)
+                  }
+                  Button("Run Self-test") { Task { await codexVM.runNotifySelfTest() } }
+                    .controlSize(.small)
+                  if let r = codexVM.notifySelfTestResult {
+                    Text(r).font(.caption).foregroundStyle(.secondary)
+                  }
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+              }
+            }
+          }
+        }
+
+        VStack(alignment: .leading, spacing: 10) {
+          Text("Claude Code").font(.headline).fontWeight(.semibold)
+          settingsCard {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+              GridRow {
+                VStack(alignment: .leading, spacing: 2) {
+                  Label("System Notifications", systemImage: "bell")
+                    .font(.subheadline).fontWeight(.medium)
+                  Text("Forward Claude Code permission and completion hooks to macOS via codmate://notify.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Toggle("", isOn: $claudeVM.notificationsEnabled)
+                  .labelsHidden()
+                  .toggleStyle(.switch)
+                  .controlSize(.small)
+                  .frame(maxWidth: .infinity, alignment: .trailing)
+                  .onChange(of: claudeVM.notificationsEnabled) { _ in
+                    claudeVM.scheduleApplyNotificationSettingsDebounced()
+                  }
+              }
+
+              gridDivider
+
+              GridRow {
+                VStack(alignment: .leading, spacing: 2) {
+                  Label("Self-test", systemImage: "checkmark.seal")
+                    .font(.subheadline).fontWeight(.medium)
+                  Text("Send a sample event through the notify bridge.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(spacing: 8) {
+                  if claudeVM.notificationBridgeHealthy {
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                  } else {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                      .foregroundStyle(.orange)
+                  }
+                  Button("Run Self-test") { Task { await claudeVM.runNotificationSelfTest() } }
+                    .controlSize(.small)
+                  if let result = claudeVM.notificationSelfTestResult {
+                    Text(result).font(.caption).foregroundStyle(.secondary)
+                  }
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+              }
+            }
+          }
+        }
+
+        VStack(alignment: .leading, spacing: 10) {
+          Text("Gemini CLI").font(.headline).fontWeight(.semibold)
+          settingsCard {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
+              GridRow {
+                VStack(alignment: .leading, spacing: 2) {
+                  Label("System Notifications", systemImage: "bell")
+                    .font(.subheadline).fontWeight(.medium)
+                  Text("Forward Gemini permission prompts to macOS via codmate://notify.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Toggle("", isOn: $geminiVM.notificationsEnabled)
+                  .labelsHidden()
+                  .toggleStyle(.switch)
+                  .controlSize(.small)
+                  .onChange(of: geminiVM.notificationsEnabled) { _ in
+                    geminiVM.scheduleApplyNotificationSettingsDebounced()
+                  }
+                  .frame(maxWidth: .infinity, alignment: .trailing)
+              }
+
+              gridDivider
+
+              GridRow {
+                VStack(alignment: .leading, spacing: 2) {
+                  Label("Self-test", systemImage: "checkmark.seal")
+                    .font(.subheadline).fontWeight(.medium)
+                  Text("Send a sample event through the notify bridge.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack(spacing: 8) {
+                  if geminiVM.notificationBridgeHealthy {
+                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
+                  } else {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                      .foregroundStyle(.orange)
+                  }
+                  Button("Run Self-test") { Task { await geminiVM.runNotificationSelfTest() } }
+                    .controlSize(.small)
+                  if let result = geminiVM.notificationSelfTestResult {
+                    Text(result).font(.caption).foregroundStyle(.secondary)
+                  }
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+              }
+            }
+          }
+        }
+      }
+      .padding(.bottom, 16)
+    }
+    .task {
+      await claudeVM.loadAll()
+      await geminiVM.loadIfNeeded()
     }
   }
 
@@ -933,7 +1215,7 @@ struct SettingsView: View {
           Text("About CodMate")
             .font(.title2)
             .fontWeight(.bold)
-          Text("Build information and project links")
+          Text("CodMate is a macOS SwiftUI app for managing CLI AI sessions: browse, search, organize, resume, and review work produced by Codex, Claude Code, and Gemini CLI.")
             .font(.subheadline)
             .foregroundColor(.secondary)
         }
@@ -944,11 +1226,11 @@ struct SettingsView: View {
           LabeledContent("Latest Release") {
             Link(releasesURL.absoluteString, destination: releasesURL)
           }
-          LabeledContent("Project URL") {
-            Link(projectURL.absoluteString, destination: projectURL)
-          }
           LabeledContent("Repository") {
             Link(repoURL.absoluteString, destination: repoURL)
+          }
+          LabeledContent("Project URL") {
+            Link(projectURL.absoluteString, destination: projectURL)
           }
           LabeledContent("Open Source Licenses") {
             Button("View…") { showLicensesSheet = true }
@@ -957,9 +1239,35 @@ struct SettingsView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
 
-        Text("CodMate is a macOS companion for managing Codex CLI sessions.")
-          .font(.body)
-          .foregroundColor(.secondary)
+        // Discord Community Card
+        HStack(spacing: 12) {
+          Image(systemName: "bubble.left.and.bubble.right.fill")
+            .font(.title2)
+            .foregroundStyle(.blue)
+            .frame(width: 32)
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Join our Discord community")
+              .font(.headline)
+              .fontWeight(.semibold)
+            Text("Get help, share feedback, and connect with other users")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            Link("Join Discord", destination: discordURL)
+              .font(.subheadline)
+              .fontWeight(.medium)
+              .padding(.top, 2)
+          }
+          Spacer()
+        }
+        .padding(16)
+        .background(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.blue.opacity(0.08))
+        )
+        .overlay(
+          RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .stroke(Color.blue.opacity(0.2), lineWidth: 1)
+        )
       }
     }
     .sheet(isPresented: $showLicensesSheet) {
@@ -986,6 +1294,7 @@ struct SettingsView: View {
   private var projectURL: URL { URL(string: "https://umate.ai/codmate")! }
   private var repoURL: URL { URL(string: "https://github.com/loocor/CodMate")! }
   private var releasesURL: URL { URL(string: "https://github.com/loocor/CodMate/releases/latest")! }
+  private var discordURL: URL { URL(string: "https://discord.gg/5AcaTpVCcx")! }
   private var mcpMateURL: URL { URL(string: "https://mcpmate.io/")! }
   private let mcpMateTagline = "Dedicated MCP orchestration for Codex workflows."
 

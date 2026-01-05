@@ -7,10 +7,6 @@ struct CodexSettingsView: View {
     @State private var envSetPairsLastValue = ""
     @StateObject private var providerCatalog = UnifiedProviderCatalogModel()
     @State private var providerModels: [String] = []
-    @State private var showModelEditor = false
-    @State private var modelEditorProviderId: String?
-    @State private var modelEditorModels: [String] = []
-    @State private var modelEditorAutoModels: [String] = []
     @State private var lastProviderId: String?
 
     var body: some View {
@@ -22,7 +18,7 @@ struct CodexSettingsView: View {
                         .font(.title2)
                         .fontWeight(.bold)
                     Text(
-                        "Configure Codex CLI: providers, runtime defaults, notifications, and privacy."
+                        "Configure Codex CLI: providers, runtime defaults, features, and privacy."
                     )
                     .font(.subheadline)
                     .foregroundColor(.secondary)
@@ -44,7 +40,6 @@ struct CodexSettingsView: View {
                         Tab("Provider", systemImage: "server.rack") { providerPane }
                         Tab("Runtime", systemImage: "gearshape.2") { runtimePane }
                         Tab("Features", systemImage: "wand.and.stars") { featuresPane }
-                        Tab("Notifications", systemImage: "bell") { notificationsPane }
                         Tab("Privacy", systemImage: "lock.shield") { privacyPane }
                         Tab("Raw Config", systemImage: "doc.text") { rawConfigPane }
                     }
@@ -56,8 +51,6 @@ struct CodexSettingsView: View {
                             .tabItem { Label("Runtime", systemImage: "gearshape.2") }
                         featuresPane
                             .tabItem { Label("Features", systemImage: "wand.and.stars") }
-                        notificationsPane
-                            .tabItem { Label("Notifications", systemImage: "bell") }
                         privacyPane
                             .tabItem { Label("Privacy", systemImage: "lock.shield") }
                         rawConfigPane
@@ -68,98 +61,13 @@ struct CodexSettingsView: View {
             .controlSize(.regular)
             .padding(.bottom, 16)
         }
-        .sheet(isPresented: $showModelEditor) {
-            ModelListEditorSheet(
-                title: "Codex Provider Models",
-                description: "Choose which models appear for this provider. Leave empty to fall back to the default list.",
-                availableModels: modelEditorAutoModels,
-                models: modelEditorModels,
-                onSave: { saveModelOverrides($0) },
-                onReset: { clearModelOverrides() }
-            )
-        }
     }
 
     // MARK: - Provider Pane
     private var providerPane: some View {
-        SettingsTabContent {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
-                GridRow {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label("Active Provider", systemImage: "server.rack")
-                            .font(.subheadline).fontWeight(.medium)
-                        Text("Choose an OAuth or API key provider via CLI Proxy API.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    UnifiedProviderPickerView(
-                        sections: providerCatalog.sections,
-                        models: providerModels,
-                        modelSectionTitle: providerCatalog.sectionTitle(for: preferences.codexProxyProviderId),
-                        includeAuto: true,
-                        autoTitle: "Auto (CLI built-in)",
-                        includeDefaultModel: true,
-                        defaultModelTitle: "(default)",
-                        providerUnavailableHint: providerCatalog.availabilityHint(
-                            for: preferences.codexProxyProviderId),
-                        disableModels: preferences.codexProxyProviderId == nil
-                            || !providerCatalog.isProviderAvailable(preferences.codexProxyProviderId),
-                        showModelPicker: false,
-                        providerId: $preferences.codexProxyProviderId,
-                        modelId: $preferences.codexProxyModelId
-                    )
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .onChange(of: preferences.codexProxyProviderId) { _ in
-                        normalizeProxySelection()
-                        if preferences.codexProxyProviderId == nil {
-                            Task { await reloadProxyCatalog(forceRefresh: true) }
-                        }
-                        codexVM.scheduleApplyProxySelectionDebounced(
-                            providerId: preferences.codexProxyProviderId,
-                            modelId: preferences.codexProxyModelId,
-                            preferences: preferences
-                        )
-                    }
-                    .onChange(of: preferences.codexProxyModelId) { _ in
-                        codexVM.scheduleApplyProxySelectionDebounced(
-                            providerId: preferences.codexProxyProviderId,
-                            modelId: preferences.codexProxyModelId,
-                            preferences: preferences
-                        )
-                    }
-                }
-                gridDivider
-                GridRow {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label("Model List", systemImage: "list.bullet")
-                            .font(.subheadline).fontWeight(.medium)
-                        Text("Pick a default model and manage the provider’s model list.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    UnifiedProviderPickerView(
-                        sections: providerCatalog.sections,
-                        models: providerModels,
-                        modelSectionTitle: providerCatalog.sectionTitle(for: preferences.codexProxyProviderId),
-                        includeAuto: false,
-                        autoTitle: "Auto (CLI built-in)",
-                        includeDefaultModel: true,
-                        defaultModelTitle: "(default)",
-                        providerUnavailableHint: nil,
-                        disableModels: preferences.codexProxyProviderId == nil
-                            || !providerCatalog.isProviderAvailable(preferences.codexProxyProviderId),
-                        showProviderPicker: false,
-                        onEditModels: canEditModels ? { presentModelEditor() } : nil,
-                        editModelsHelp: "Edit model list",
-                        providerId: $preferences.codexProxyProviderId,
-                        modelId: $preferences.codexProxyModelId
-                    )
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-                // Base URL and API Key Env rows are hidden to reduce redundancy
-            }
+        let content = providerPaneContent
+        return SettingsTabContent {
+            content
         }
         .task {
             await codexVM.loadProxyDefaults(preferences: preferences)
@@ -174,8 +82,67 @@ struct CodexSettingsView: View {
         .onChange(of: preferences.oauthProvidersEnabled) { _ in
             Task { await reloadProxyCatalog() }
         }
+        .onChange(of: preferences.apiKeyProvidersEnabled) { _ in
+            Task { await reloadProxyCatalog() }
+        }
         .onChange(of: CLIProxyService.shared.isRunning) { _ in
             Task { await reloadProxyCatalog() }
+        }
+    }
+
+    private var providerPaneContent: some View {
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+            GridRow {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Active Provider", systemImage: "server.rack")
+                        .font(.subheadline).fontWeight(.medium)
+                    Text("Use built-in provider or route through CLI Proxy API.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                SimpleProviderPicker(providerId: $preferences.codexProxyProviderId)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .onChange(of: preferences.codexProxyProviderId) { _ in
+                        normalizeProxySelection()
+                        if preferences.codexProxyProviderId == nil {
+                            Task { await reloadProxyCatalog(forceRefresh: true) }
+                        }
+                        codexVM.scheduleApplyProxySelectionDebounced(
+                            providerId: preferences.codexProxyProviderId,
+                            modelId: preferences.codexProxyModelId,
+                            preferences: preferences
+                        )
+                    }
+            }
+            gridDivider
+            GridRow {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("Model List", systemImage: "list.bullet")
+                        .font(.subheadline).fontWeight(.medium)
+                    Text("Select a default model from the available models.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                SimpleModelPicker(
+                    models: providerModels,
+                    isDisabled: preferences.codexProxyProviderId == nil
+                        || !providerCatalog.isProviderAvailable(preferences.codexProxyProviderId),
+                    providerId: preferences.codexProxyProviderId,
+                    providerCatalog: providerCatalog,
+                    modelId: $preferences.codexProxyModelId
+                )
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .onChange(of: preferences.codexProxyModelId) { _ in
+                    codexVM.scheduleApplyProxySelectionDebounced(
+                        providerId: preferences.codexProxyProviderId,
+                        modelId: preferences.codexProxyModelId,
+                        preferences: preferences
+                    )
+                }
+            }
+            // Base URL and API Key Env rows are hidden to reduce redundancy
         }
     }
 
@@ -378,88 +345,6 @@ struct CodexSettingsView: View {
         }
     }
 
-    // MARK: - Notifications Pane
-    private var notificationsPane: some View {
-        SettingsTabContent {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
-                        GridRow {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Label("TUI Notifications", systemImage: "terminal")
-                                    .font(.subheadline).fontWeight(.medium)
-                                Text(
-                                    "Show in-terminal notifications during TUI sessions (supported terminals only)."
-                                )
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            }
-                                Toggle("", isOn: $codexVM.tuiNotifications)
-                                    .labelsHidden()
-                                    .toggleStyle(.switch)
-                                    .controlSize(.small)
-                            .onChange(of: codexVM.tuiNotifications) { _ in codexVM.scheduleApplyTuiNotificationsDebounced() }
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                        gridDivider
-                        GridRow {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Label("System Notifications", systemImage: "bell")
-                                    .font(.subheadline).fontWeight(.medium)
-                                Text(
-                                    "Forward Codex turn-complete events to macOS notifications via notify."
-                                )
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            }
-                                Toggle("", isOn: $codexVM.systemNotifications)
-                                    .labelsHidden()
-                                    .toggleStyle(.switch)
-                                    .controlSize(.small)
-                                .onChange(of: codexVM.systemNotifications) { _ in codexVM.scheduleApplySystemNotificationsDebounced() }
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                        if let path = codexVM.notifyBridgePath {
-                            gridDivider
-                            GridRow {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Label("Notify bridge", systemImage: "link")
-                                        .font(.subheadline).fontWeight(.medium)
-                                    Text(path)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                        }
-                        gridDivider
-                        GridRow {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Label("Self-test", systemImage: "checkmark.seal")
-                                    .font(.subheadline).fontWeight(.medium)
-                                Text("Send a sample event through the notify bridge.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            HStack(spacing: 8) {
-                                if codexVM.notifyBridgeHealthy {
-                                    Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
-                                } else {
-                                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                                }
-                                Button("Run Self-test") { Task { await codexVM.runNotifySelfTest() } }
-                                    .controlSize(.small)
-                                if let r = codexVM.notifySelfTestResult {
-                                    Text(r).font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                        }
-                    }
-        }
-    }
-
     // MARK: - Privacy Pane
     private var privacyPane: some View {
         SettingsTabContent {
@@ -655,12 +540,7 @@ struct CodexSettingsView: View {
             preferences.codexProxyModelId = nil
             return
         }
-        let autoModels = providerCatalog.models(for: providerId)
-        if let override = preferences.codexProxyModelOverrides[providerId], !override.isEmpty {
-            providerModels = override
-        } else {
-            providerModels = autoModels
-        }
+        providerModels = providerCatalog.models(for: providerId)
         if providerChanged {
             preferences.codexProxyModelId = nil
             return
@@ -668,42 +548,6 @@ struct CodexSettingsView: View {
         guard !providerModels.isEmpty else {
             return
         }
-    }
-
-    private var canEditModels: Bool {
-        preferences.codexProxyProviderId != nil
-    }
-
-    private func presentModelEditor() {
-        guard let providerId = preferences.codexProxyProviderId else { return }
-        modelEditorProviderId = providerId
-        modelEditorAutoModels = providerCatalog.models(for: providerId)
-        if let override = preferences.codexProxyModelOverrides[providerId], !override.isEmpty {
-            modelEditorModels = override
-        } else {
-            modelEditorModels = modelEditorAutoModels
-        }
-        showModelEditor = true
-    }
-
-    private func saveModelOverrides(_ models: [String]) {
-        guard let providerId = modelEditorProviderId else { return }
-        var overrides = preferences.codexProxyModelOverrides
-        if models.isEmpty {
-            overrides.removeValue(forKey: providerId)
-        } else {
-            overrides[providerId] = models
-        }
-        preferences.codexProxyModelOverrides = overrides
-        normalizeProxySelection()
-    }
-
-    private func clearModelOverrides() {
-        guard let providerId = modelEditorProviderId else { return }
-        var overrides = preferences.codexProxyModelOverrides
-        overrides.removeValue(forKey: providerId)
-        preferences.codexProxyModelOverrides = overrides
-        normalizeProxySelection()
     }
 
     @ViewBuilder

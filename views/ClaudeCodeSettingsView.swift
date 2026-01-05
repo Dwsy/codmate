@@ -7,11 +7,16 @@ struct ClaudeCodeSettingsView: View {
     @ObservedObject var preferences: SessionPreferencesStore
     @StateObject private var providerCatalog = UnifiedProviderCatalogModel()
     @State private var providerModels: [String] = []
-    @State private var showModelMappingEditor = false
-    @State private var modelMappingProviderId: String?
-    @State private var modelMappingDefault: String?
-    @State private var modelMappingAliases: [String: String] = [:]
+    @State private var modelMappingData: ModelMappingData?
     @State private var lastProviderId: String?
+
+    private struct ModelMappingData: Identifiable {
+        let id = UUID()
+        let providerId: String
+        let defaultModel: String?
+        let aliases: [String: String]
+        let models: [String]
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -36,7 +41,6 @@ struct ClaudeCodeSettingsView: View {
                     TabView {
                         Tab("Provider", systemImage: "server.rack") { SettingsTabContent { providerPane } }
                         Tab("Runtime", systemImage: "gearshape.2") { SettingsTabContent { runtimePane } }
-                        Tab("Notifications", systemImage: "bell") { SettingsTabContent { notificationsPane } }
                         Tab("Raw Config", systemImage: "doc.text") { SettingsTabContent { rawPane } }
                     }
                 } else {
@@ -45,8 +49,6 @@ struct ClaudeCodeSettingsView: View {
                             .tabItem { Label("Provider", systemImage: "server.rack") }
                         SettingsTabContent { runtimePane }
                             .tabItem { Label("Runtime", systemImage: "gearshape.2") }
-                        SettingsTabContent { notificationsPane }
-                            .tabItem { Label("Notifications", systemImage: "bell") }
                         SettingsTabContent { rawPane }
                             .tabItem { Label("Raw Config", systemImage: "doc.text") }
                     }
@@ -68,19 +70,24 @@ struct ClaudeCodeSettingsView: View {
         .onChange(of: preferences.oauthProvidersEnabled) { _ in
             Task { await reloadProxyCatalog() }
         }
+        .onChange(of: preferences.apiKeyProvidersEnabled) { _ in
+            Task { await reloadProxyCatalog() }
+        }
         .onChange(of: CLIProxyService.shared.isRunning) { _ in
             Task { await reloadProxyCatalog() }
         }
-        .sheet(isPresented: $showModelMappingEditor) {
+        .sheet(item: $modelMappingData) { data in
             ClaudeModelMappingSheet(
-                availableModels: providerModels,
-                defaultModel: modelMappingDefault,
-                aliases: modelMappingAliases,
+                availableModels: data.models,
+                defaultModel: data.defaultModel,
+                aliases: data.aliases,
+                providerId: data.providerId,
+                providerCatalog: providerCatalog,
                 onSave: { newDefault, newAliases in
-                    saveModelMappings(defaultModel: newDefault, aliases: newAliases)
+                    saveModelMappings(providerId: data.providerId, defaultModel: newDefault, aliases: newAliases)
                 },
                 onAutoFill: { selectedDefault in
-                    autoFillMappings(selectedDefault: selectedDefault)
+                    autoFillMappings(providerId: data.providerId, selectedDefault: selectedDefault)
                 }
             )
         }
@@ -93,46 +100,24 @@ struct ClaudeCodeSettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Label("Active Provider", systemImage: "server.rack")
                         .font(.subheadline).fontWeight(.medium)
-                    Text("Choose an OAuth or API key provider via CLI Proxy API.")
+                    Text("Use built-in provider or route through CLI Proxy API.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                UnifiedProviderPickerView(
-                    sections: providerCatalog.sections,
-                    models: providerModels,
-                    modelSectionTitle: providerCatalog.sectionTitle(for: preferences.claudeProxyProviderId),
-                    includeAuto: true,
-                    autoTitle: "Auto (CLI built-in)",
-                    includeDefaultModel: true,
-                    defaultModelTitle: "(default)",
-                    providerUnavailableHint: providerCatalog.availabilityHint(
-                        for: preferences.claudeProxyProviderId),
-                    disableModels: preferences.claudeProxyProviderId == nil
-                        || !providerCatalog.isProviderAvailable(preferences.claudeProxyProviderId),
-                    showModelPicker: false,
-                    providerId: $preferences.claudeProxyProviderId,
-                    modelId: $preferences.claudeProxyModelId
-                )
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .onChange(of: preferences.claudeProxyProviderId) { _ in
-                    normalizeProxySelection()
-                    if preferences.claudeProxyProviderId == nil {
-                        Task { await reloadProxyCatalog(forceRefresh: true) }
+                SimpleProviderPicker(providerId: $preferences.claudeProxyProviderId)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .onChange(of: preferences.claudeProxyProviderId) { _ in
+                        normalizeProxySelection()
+                        if preferences.claudeProxyProviderId == nil {
+                            Task { await reloadProxyCatalog(forceRefresh: true) }
+                        }
+                        vm.scheduleApplyProxySelectionDebounced(
+                            providerId: preferences.claudeProxyProviderId,
+                            modelId: preferences.claudeProxyModelId,
+                            preferences: preferences
+                        )
                     }
-                    vm.scheduleApplyProxySelectionDebounced(
-                        providerId: preferences.claudeProxyProviderId,
-                        modelId: preferences.claudeProxyModelId,
-                        preferences: preferences
-                    )
-                }
-                .onChange(of: preferences.claudeProxyModelId) { _ in
-                    vm.scheduleApplyProxySelectionDebounced(
-                        providerId: preferences.claudeProxyProviderId,
-                        modelId: preferences.claudeProxyModelId,
-                        preferences: preferences
-                    )
-                }
             }
             gridDivider
             GridRow {
@@ -144,24 +129,24 @@ struct ClaudeCodeSettingsView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                UnifiedProviderPickerView(
-                    sections: providerCatalog.sections,
+                SimpleModelPicker(
                     models: providerModels,
-                    modelSectionTitle: providerCatalog.sectionTitle(for: preferences.claudeProxyProviderId),
-                    includeAuto: false,
-                    autoTitle: "Auto (CLI built-in)",
-                    includeDefaultModel: true,
-                    defaultModelTitle: "(default)",
-                    providerUnavailableHint: nil,
-                    disableModels: preferences.claudeProxyProviderId == nil
+                    isDisabled: preferences.claudeProxyProviderId == nil
                         || !providerCatalog.isProviderAvailable(preferences.claudeProxyProviderId),
-                    showProviderPicker: false,
                     onEditModels: canEditModelMappings ? { presentModelMappingEditor() } : nil,
                     editModelsHelp: "Edit model mappings",
-                    providerId: $preferences.claudeProxyProviderId,
+                    providerId: preferences.claudeProxyProviderId,
+                    providerCatalog: providerCatalog,
                     modelId: $preferences.claudeProxyModelId
                 )
                 .frame(maxWidth: .infinity, alignment: .trailing)
+                .onChange(of: preferences.claudeProxyModelId) { _ in
+                    vm.scheduleApplyProxySelectionDebounced(
+                        providerId: preferences.claudeProxyProviderId,
+                        modelId: preferences.claudeProxyModelId,
+                        preferences: preferences
+                    )
+                }
             }
         }
     }
@@ -169,74 +154,9 @@ struct ClaudeCodeSettingsView: View {
     // MARK: - Models / Aliases
     // modelsPane removed; Provider pane now includes the default model picker like Codex
 
-    // MARK: - Raw Config (read-only; toolbar mirrors Codex)
-    private var notificationsPane: some View {
-        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
-            GridRow {
-                VStack(alignment: .leading, spacing: 2) {
-                    Label("macOS Notifications", systemImage: "bell")
-                        .font(.subheadline).fontWeight(.medium)
-                    Text("Forward Claude Code permission and completion hooks to macOS via codmate://notify.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Toggle("", isOn: $vm.notificationsEnabled)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .controlSize(.small)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .onChange(of: vm.notificationsEnabled) { _ in
-                        vm.scheduleApplyNotificationSettingsDebounced()
-                    }
-            }
-            gridDivider
-            GridRow {
-                VStack(alignment: .leading, spacing: 2) {
-                    Label("Hook Commands", systemImage: "link")
-                        .font(.subheadline).fontWeight(.medium)
-                    Text("/usr/bin/open -g codmate://notify?source=claude&event=permission&title64=…&body64=…")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    Text("/usr/bin/open -g codmate://notify?source=claude&event=complete&title64=…&body64=…")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    Text("Titles/bodies are base64-encoded to avoid shell escaping issues.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            gridDivider
-            GridRow {
-                VStack(alignment: .leading, spacing: 2) {
-                    Label("Self-test", systemImage: "checkmark.seal")
-                        .font(.subheadline).fontWeight(.medium)
-                    Text("Sends a codmate:// test URL to verify notification routing.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                HStack(spacing: 8) {
-                    if vm.notificationBridgeHealthy {
-                        Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
-                    } else {
-                        Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    }
-                    Button("Send Test") { Task { await vm.runNotificationSelfTest() } }
-                        .controlSize(.small)
-                    if let result = vm.notificationSelfTestResult {
-                        Text(result).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-        }
-    }
-
     private var rawPane: some View {
         let displayText = vm.rawSettingsText
-        
+
         return ZStack(alignment: .topTrailing) {
             ScrollView {
                 Text(displayText.isEmpty ? "(empty settings.json)" : displayText)
@@ -259,69 +179,69 @@ struct ClaudeCodeSettingsView: View {
         }
         .task { await vm.reloadRawSettings() }
     }
-    
+
     private func buildRawConfigText() -> String {
         // Prefer showing the canonical user settings file in full
         let settingsURL = SessionPreferencesStore.getRealUserHomeURL()
             .appendingPathComponent(".claude", isDirectory: true)
             .appendingPathComponent("settings.json")
-        
+
         if let fileText = try? String(contentsOf: settingsURL, encoding: .utf8) {
             return fileText
         }
-        
+
         // Fallback: build preview from current settings
         var lines = vm.launchEnvPreview()
-        
+
         // Append launch/runtime flags preview
         lines.append("\n# Launch flags preview")
         lines.append("permission-mode=\(preferences.claudePermissionMode.rawValue)")
         lines.append("sandbox=\(preferences.defaultResumeSandboxMode.rawValue)")
         lines.append("approvals=\(preferences.defaultResumeApprovalPolicy.rawValue)")
-        
+
         // Debug info
         if preferences.claudeDebug {
             lines.append("debug=true filter=\(preferences.claudeDebugFilter)")
         } else {
             lines.append("debug=false")
         }
-        
+
         lines.append("verbose=\(preferences.claudeVerbose ? "true" : "false")")
         lines.append("ide=\(preferences.claudeIDE ? "true" : "false")")
         lines.append("strictMCP=\(preferences.claudeStrictMCP ? "true" : "false")")
-        
+
         // Tools configuration
         let allowedTools = preferences.claudeAllowedTools.trimmingCharacters(in: .whitespaces)
         if !allowedTools.isEmpty {
             lines.append("allowed-tools=\(allowedTools)")
         }
-        
+
         let disallowedTools = preferences.claudeDisallowedTools.trimmingCharacters(in: .whitespaces)
         if !disallowedTools.isEmpty {
             lines.append("disallowed-tools=\(disallowedTools)")
         }
-        
+
         let fallbackModel = preferences.claudeFallbackModel.trimmingCharacters(in: .whitespaces)
         if !fallbackModel.isEmpty {
             lines.append("fallback-model=\(fallbackModel)")
         }
-        
+
         // Build example command
         let exampleCommand = buildExampleCommand()
         lines.append("\n# Example command")
         lines.append(exampleCommand)
-        
+
         return lines.joined(separator: "\n")
     }
-    
+
     private func buildExampleCommand() -> String {
         var example: [String] = ["claude"]
-        
+
         // Permission mode
         if preferences.claudePermissionMode.rawValue != "default" {
             example.append("--permission-mode \(preferences.claudePermissionMode.rawValue)")
         }
-        
+
         // Debug/Verbose
         if preferences.claudeDebug {
             let debugFilter = preferences.claudeDebugFilter.trimmingCharacters(in: .whitespaces)
@@ -331,33 +251,33 @@ struct ClaudeCodeSettingsView: View {
                 example.append("--debug")
             }
         }
-        
+
         if preferences.claudeVerbose {
             example.append("--verbose")
         }
-        
+
         // Tools
         let allowedTools = preferences.claudeAllowedTools.trimmingCharacters(in: .whitespaces)
         if !allowedTools.isEmpty {
             example.append("--allowed-tools \"\(allowedTools)\"")
         }
-        
+
         let disallowedTools = preferences.claudeDisallowedTools.trimmingCharacters(in: .whitespaces)
         if !disallowedTools.isEmpty {
             example.append("--disallowed-tools \"\(disallowedTools)\"")
         }
-        
+
         // IDE
         if preferences.claudeIDE {
             example.append("--ide")
         }
-        
+
         // Fallback model
         let fallbackModel = preferences.claudeFallbackModel.trimmingCharacters(in: .whitespaces)
         if !fallbackModel.isEmpty {
             example.append("--fallback-model \(fallbackModel)")
         }
-        
+
         return example.joined(separator: " ")
     }
 
@@ -368,7 +288,7 @@ struct ClaudeCodeSettingsView: View {
                 Task { vm.scheduleApplyRuntimeSettings(preferences) }
             }
     }
-    
+
     private var runtimePaneGrid: some View {
         Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
             // Claude-native permission mode
@@ -536,14 +456,32 @@ struct ClaudeCodeSettingsView: View {
 
     private func presentModelMappingEditor() {
         guard let providerId = preferences.claudeProxyProviderId else { return }
-        modelMappingProviderId = providerId
-        modelMappingDefault = preferences.claudeProxyModelId
-        modelMappingAliases = preferences.claudeProxyModelAliases[providerId] ?? [:]
-        showModelMappingEditor = true
+        // Use sheet(item:) pattern to ensure fresh data is passed each time
+        modelMappingData = ModelMappingData(
+            providerId: providerId,
+            defaultModel: preferences.claudeProxyModelId,
+            aliases: loadModelAliases(for: providerId),
+            models: providerCatalog.models(for: providerId)
+        )
     }
 
-    private func saveModelMappings(defaultModel: String?, aliases: [String: String]) {
-        guard let providerId = modelMappingProviderId else { return }
+    private func loadModelAliases(for providerId: String) -> [String: String] {
+        // First try the exact providerId
+        if let aliases = preferences.claudeProxyModelAliases[providerId], !aliases.isEmpty {
+            return aliases
+        }
+        // For OAuth providers, also try the base providerId (without accountId)
+        let parsed = UnifiedProviderID.parse(providerId)
+        if case .oauth(let provider, _) = parsed {
+            let baseId = UnifiedProviderID.oauth(provider, accountId: nil)
+            if let aliases = preferences.claudeProxyModelAliases[baseId], !aliases.isEmpty {
+                return aliases
+            }
+        }
+        return [:]
+    }
+
+    private func saveModelMappings(providerId: String, defaultModel: String?, aliases: [String: String]) {
         preferences.claudeProxyModelId = defaultModel
         var stored = preferences.claudeProxyModelAliases
         if aliases.isEmpty {
@@ -559,8 +497,9 @@ struct ClaudeCodeSettingsView: View {
         )
     }
 
-    private func autoFillMappings(selectedDefault: String?) -> [String: String] {
-        let models = providerModels
+    private func autoFillMappings(providerId: String, selectedDefault: String?) -> [String: String] {
+        // Get fresh models from catalog based on the provider used when opening the editor
+        let models = providerCatalog.models(for: providerId)
         let trimmedDefault = selectedDefault?.trimmingCharacters(in: .whitespacesAndNewlines)
         let preferred = (trimmedDefault?.isEmpty == false) ? trimmedDefault : selectDefaultModel(from: models)
         let opus = selectModel(from: models, tokens: ["opus"]) ?? preferred
