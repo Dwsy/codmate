@@ -925,7 +925,6 @@ struct ProvidersSettingsView: View {
     case .gemini: return .gemini
     case .antigravity: return .antigravity
     case .qwen: return .qwen
-    case .warp: return .warp
     }
   }
 
@@ -1680,7 +1679,6 @@ private struct OAuthProviderInfoSheet: View {
     case .gemini: return .gemini
     case .antigravity: return .antigravity
     case .qwen: return .qwen
-    case .warp: return .warp
     }
   }
 
@@ -2949,7 +2947,6 @@ private struct ProviderMenuIconView: View {
     case .gemini: return "GeminiIcon"
     case .antigravity: return "AntigravityIcon"
     case .qwen: return "QwenIcon"
-    case .warp: return "WarpIcon"
     }
   }
 

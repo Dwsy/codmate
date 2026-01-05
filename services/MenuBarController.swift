@@ -113,11 +113,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   private func applyStaticIcon(to button: NSStatusBarButton?) {
     guard let button else { return }
     if let image = NSImage(
-      systemSymbolName: "circle.fill", accessibilityDescription: "CodMate")
+      systemSymbolName: "fossil.shell.fill", accessibilityDescription: "CodMate")
     {
       image.isTemplate = true
-      image.size = NSSize(width: 18, height: 18)
-      button.image = image
+      // Apply rotation and flip to make the shell spiral look correct
+      let transformed = horizontallyFlippedImage(image)
+      button.image = transformed ?? image
     } else {
       // Fallback: create a placeholder icon if system symbol fails
       button.image = createPlaceholderIcon()
@@ -284,9 +285,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   private func updateActivationPolicy(for visibility: SystemMenuVisibility) {
     #if os(macOS)
       let app = NSApplication.shared
-      // Always use .accessory to hide Dock icon (makes CodMate a pure menu bar app)
-      // Temporarily switch to .regular only when showing windows (handled in activateApp)
-      app.setActivationPolicy(.accessory)
+      switch visibility {
+      case .hidden:
+        // When menu bar is hidden, show Dock icon so user can still access the app
+        app.setActivationPolicy(.regular)
+      case .visible:
+        // When both are visible, show Dock icon
+        app.setActivationPolicy(.regular)
+      case .menuOnly:
+        // Menu bar only mode - hide Dock icon
+        app.setActivationPolicy(.accessory)
+      }
     #endif
   }
 
@@ -673,7 +682,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     case .gemini: name = "GeminiIcon"
     case .antigravity: name = "AntigravityIcon"
     case .qwen: name = "QwenIcon"
-    case .warp: name = "WarpIcon"
     }
     return ProviderIconThemeHelper.menuImage(named: name)
   }
@@ -1343,8 +1351,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       for window in visibleWindows {
         window.close()
       }
-      // Hide Dock icon after closing windows
-      NSApp.setActivationPolicy(.accessory)
+      // Only hide Dock icon if user preference is "Menu Bar Only" mode
+      if preferences.systemMenuVisibility == .menuOnly {
+        NSApp.setActivationPolicy(.accessory)
+      }
       return
     }
 

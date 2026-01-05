@@ -271,7 +271,7 @@ final class CLIProxyService: ObservableObject {
         lastError = nil
 
         // Use Homebrew services if Homebrew installation detected
-        if binarySource == .homebrew, let brewPath = brewCommandPath {
+        if binarySource == .homebrew, brewCommandPath != nil {
             try await brewServicesStart()
             return
         }
@@ -394,7 +394,7 @@ final class CLIProxyService: ObservableObject {
 
     func stop() {
         // Use Homebrew services if Homebrew installation detected
-        if binarySource == .homebrew, let brewPath = brewCommandPath {
+        if binarySource == .homebrew, brewCommandPath != nil {
             brewServicesStop()
             return
         }
@@ -1740,7 +1740,6 @@ claude:
         case .gemini: return "gemini-cli-auth-url"
         case .antigravity: return "antigravity-auth-url"
         case .qwen: return "qwen-auth-url"
-        case .warp: return "warp-auth-url"
         }
     }
 
