@@ -57,6 +57,9 @@ final class SessionPreferencesStore: ObservableObject {
     static let statusBarVisibility = "codmate.statusbar.visibility"
     static let confirmBeforeQuit = "codmate.app.confirmBeforeQuit"
     static let launchAtLogin = "codmate.app.launchAtLogin"
+    static let notifyCommitMessage = "codmate.notifications.commitMessage"
+    static let notifyTitleComment = "codmate.notifications.titleComment"
+    static let notifyCommandCopy = "codmate.notifications.commandCopy"
     // Claude advanced
     static let claudeDebug = "claude.debug"
     static let claudeDebugFilter = "claude.debug.filter"
@@ -86,9 +89,7 @@ final class SessionPreferencesStore: ObservableObject {
     static let claudeProxyModelId = "codmate.claude.proxyModelId"
     static let geminiProxyProviderId = "codmate.gemini.proxyProviderId"
     static let geminiProxyModelId = "codmate.gemini.proxyModelId"
-    static let codexProxyModelOverrides = "codmate.codex.proxyModelOverrides"
     static let claudeProxyModelAliases = "codmate.claude.proxyModelAliases"
-    static let geminiProxyModelOverrides = "codmate.gemini.proxyModelOverrides"
     // Terminal mode (DEV): use CLI console instead of shell
     static let terminalUseCLIConsole = "terminal.useCliConsole"
     static let terminalFontName = "terminal.fontName"
@@ -102,6 +103,7 @@ final class SessionPreferencesStore: ObservableObject {
     static let localServerAutoStart = "codmate.localserver.autostart"     // On-demand/Auto logic
     static let localServerPort = "codmate.localserver.port"
     static let oauthProvidersEnabled = "codmate.providers.oauth.enabled"
+    static let apiKeyProvidersEnabled = "codmate.providers.apikey.enabled"
     // Legacy keys for migration
     static let legacyUseCLIProxy = "codmate.cliproxy.useForInternal"
     static let legacyCLIProxyPort = "codmate.cliproxy.port"
@@ -211,12 +213,8 @@ final class SessionPreferencesStore: ObservableObject {
     self.claudeProxyModelId = defaults.string(forKey: Keys.claudeProxyModelId)
     self.geminiProxyProviderId = defaults.string(forKey: Keys.geminiProxyProviderId)
     self.geminiProxyModelId = defaults.string(forKey: Keys.geminiProxyModelId)
-    self.codexProxyModelOverrides =
-      SessionPreferencesStore.decodeJSON([String: [String]].self, defaults: defaults, key: Keys.codexProxyModelOverrides) ?? [:]
     self.claudeProxyModelAliases =
       SessionPreferencesStore.decodeJSON([String: [String: String]].self, defaults: defaults, key: Keys.claudeProxyModelAliases) ?? [:]
-    self.geminiProxyModelOverrides =
-      SessionPreferencesStore.decodeJSON([String: [String]].self, defaults: defaults, key: Keys.geminiProxyModelOverrides) ?? [:]
 
     // Terminal mode (DEV) – compute locally first
     let cliConsole: Bool
@@ -299,7 +297,7 @@ final class SessionPreferencesStore: ObservableObject {
     if resolvedTimelineKinds.contains(.tool) {
       resolvedTimelineKinds.insert(.codeEdit)
     }
-    
+
     var resolvedMarkdownKinds: Set<MessageVisibilityKind>
     if let storedMarkdown = defaults.array(forKey: Keys.markdownVisibleKinds) as? [String] {
       resolvedMarkdownKinds = Set(
@@ -312,7 +310,7 @@ final class SessionPreferencesStore: ObservableObject {
     if resolvedMarkdownKinds.contains(.tool) {
       resolvedMarkdownKinds.insert(.codeEdit)
     }
-    
+
     self.timelineVisibleKinds = resolvedTimelineKinds
     self.markdownVisibleKinds = resolvedMarkdownKinds
     // Global search panel style: load stored preference when available, default to floating.
@@ -331,6 +329,13 @@ final class SessionPreferencesStore: ObservableObject {
     // App behavior defaults
     self.confirmBeforeQuit = defaults.object(forKey: Keys.confirmBeforeQuit) as? Bool ?? true
     self.launchAtLogin = defaults.object(forKey: Keys.launchAtLogin) as? Bool ?? false
+    // Notifications defaults
+    self.commitMessageNotificationsEnabled =
+      defaults.object(forKey: Keys.notifyCommitMessage) as? Bool ?? true
+    self.titleCommentNotificationsEnabled =
+      defaults.object(forKey: Keys.notifyTitleComment) as? Bool ?? true
+    self.commandCopyNotificationsEnabled =
+      defaults.object(forKey: Keys.notifyCommandCopy) as? Bool ?? true
     // Claude advanced defaults
     self.claudeDebug = defaults.object(forKey: Keys.claudeDebug) as? Bool ?? false
     self.claudeDebugFilter = defaults.string(forKey: Keys.claudeDebugFilter) ?? ""
@@ -349,17 +354,17 @@ final class SessionPreferencesStore: ObservableObject {
     self.claudeSkipPermissions = defaults.object(forKey: Keys.claudeSkipPermissions) as? Bool ?? false
     self.claudeAllowSkipPermissions = defaults.object(forKey: Keys.claudeAllowSkipPermissions) as? Bool ?? false
     self.claudeAllowUnsandboxedCommands = defaults.object(forKey: Keys.claudeAllowUnsandboxedCommands) as? Bool ?? false
-    
+
     // Remote hosts
     let storedHosts = defaults.array(forKey: Keys.enabledRemoteHosts) as? [String] ?? []
     self.enabledRemoteHosts = Set(storedHosts)
 
     self.promptForWarpTitle = defaults.object(forKey: Keys.warpPromptEnabled) as? Bool ?? false
-    
+
     // Local Server Defaults & Migration
     let legacyPort = defaults.object(forKey: Keys.legacyCLIProxyPort) as? Int
     let legacyUse = defaults.object(forKey: Keys.legacyUseCLIProxy) as? Bool ?? false
-    
+
     self.localServerPort = defaults.object(forKey: Keys.localServerPort) as? Int ?? legacyPort ?? 8080
     self.localServerEnabled = defaults.object(forKey: Keys.localServerEnabled) as? Bool ?? false
     self.localServerReroute = defaults.object(forKey: Keys.localServerReroute) as? Bool ?? legacyUse
@@ -371,11 +376,13 @@ final class SessionPreferencesStore: ObservableObject {
 
     let oauthEnabled = defaults.array(forKey: Keys.oauthProvidersEnabled) as? [String] ?? []
     self.oauthProvidersEnabled = Set(oauthEnabled)
+    let apiKeyEnabled = defaults.array(forKey: Keys.apiKeyProvidersEnabled) as? [String] ?? []
+    self.apiKeyProvidersEnabled = Set(apiKeyEnabled)
 
     Task { @MainActor [weak self] in
       await self?.normalizeProviderSelectionsIfNeeded()
     }
-    
+
     // Now that all properties are initialized, ensure directories exist
     ensureDirectoryExists(sessionsRoot)
     ensureDirectoryExists(notesRoot)
@@ -465,6 +472,18 @@ final class SessionPreferencesStore: ObservableObject {
     homeDirectory
       .appendingPathComponent(".codmate", isDirectory: true)
       .appendingPathComponent("projects", isDirectory: true)
+  }
+
+  static func isCommitMessageNotificationEnabled(defaults: UserDefaults = .standard) -> Bool {
+    defaults.object(forKey: Keys.notifyCommitMessage) as? Bool ?? true
+  }
+
+  static func isTitleCommentNotificationEnabled(defaults: UserDefaults = .standard) -> Bool {
+    defaults.object(forKey: Keys.notifyTitleComment) as? Bool ?? true
+  }
+
+  static func isCommandCopyNotificationEnabled(defaults: UserDefaults = .standard) -> Bool {
+    defaults.object(forKey: Keys.notifyCommandCopy) as? Bool ?? true
   }
 
   func resolvedCommandOverrideURL(for kind: SessionSource.Kind) -> URL? {
@@ -605,6 +624,9 @@ final class SessionPreferencesStore: ObservableObject {
   @Published var oauthProvidersEnabled: Set<String> {
     didSet { defaults.set(Array(oauthProvidersEnabled), forKey: Keys.oauthProvidersEnabled) }
   }
+  @Published var apiKeyProvidersEnabled: Set<String> {
+    didSet { defaults.set(Array(apiKeyProvidersEnabled), forKey: Keys.apiKeyProvidersEnabled) }
+  }
 
   @Published var defaultResumeSandboxMode: SandboxMode {
     didSet { defaults.set(defaultResumeSandboxMode.rawValue, forKey: Keys.resumeSandboxMode) }
@@ -663,6 +685,17 @@ final class SessionPreferencesStore: ObservableObject {
       defaults.set(launchAtLogin, forKey: Keys.launchAtLogin)
       LaunchAtLoginService.shared.setLaunchAtLogin(enabled: launchAtLogin)
     }
+  }
+
+  // MARK: - Notifications (App)
+  @Published var commitMessageNotificationsEnabled: Bool {
+    didSet { defaults.set(commitMessageNotificationsEnabled, forKey: Keys.notifyCommitMessage) }
+  }
+  @Published var titleCommentNotificationsEnabled: Bool {
+    didSet { defaults.set(titleCommentNotificationsEnabled, forKey: Keys.notifyTitleComment) }
+  }
+  @Published var commandCopyNotificationsEnabled: Bool {
+    didSet { defaults.set(commandCopyNotificationsEnabled, forKey: Keys.notifyCommandCopy) }
   }
 
   @Published var enabledRemoteHosts: Set<String> = [] {
@@ -777,14 +810,8 @@ final class SessionPreferencesStore: ObservableObject {
   @Published var geminiProxyModelId: String? {
     didSet { defaults.set(geminiProxyModelId, forKey: Keys.geminiProxyModelId) }
   }
-  @Published var codexProxyModelOverrides: [String: [String]] {
-    didSet { persistJSON(codexProxyModelOverrides, key: Keys.codexProxyModelOverrides) }
-  }
   @Published var claudeProxyModelAliases: [String: [String: String]] {
     didSet { persistJSON(claudeProxyModelAliases, key: Keys.claudeProxyModelAliases) }
-  }
-  @Published var geminiProxyModelOverrides: [String: [String]] {
-    didSet { persistJSON(geminiProxyModelOverrides, key: Keys.geminiProxyModelOverrides) }
   }
 
   // MARK: - Terminal (DEV)

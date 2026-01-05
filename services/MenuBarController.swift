@@ -100,7 +100,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     item.button?.imagePosition = .imageOnly
     item.menu = statusMenu
     statusItem = item
-    
+
     // Initial icon update
     if let snapshots = viewModel?.usageSnapshots {
         updateStatusItemIcon(with: snapshots)
@@ -412,11 +412,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     let item = NSMenuItem(title: baseTitle, action: nil, keyEquivalent: "")
     item.image = providerImage(for: provider)
 
-    if provider == .gemini {
-      item.isEnabled = false
-      return item
-    }
-
     if let rightLabel = activeProviderLabel(for: provider) {
       item.attributedTitle = makeAlignedMenuTitle(left: baseTitle, right: rightLabel)
     }
@@ -460,11 +455,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       if !reset.isEmpty, reset.first?.isLowercase == true {
         reset = reset.prefix(1).uppercased() + reset.dropFirst()
       }
-      
+
       // Always use aligned title to keep the provider name in the same vertical column.
       // Use a space if reset is empty to ensure the tab stop is applied.
       item.attributedTitle = makeAlignedMenuTitle(left: name, right: reset.isEmpty ? " " : reset)
-      
+
     case .empty:
       item.title = "\(provider.displayName) Not available"
     case .comingSoon:
@@ -591,6 +586,29 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       }
     }()
 
+    // For Gemini, use preferences.geminiProxyProviderId instead of Consumer
+    if provider == .gemini {
+      guard let preferences else {
+        menu.addItem(disabledItem(title: "Preferences not available"))
+        return menu
+      }
+      let activeId = preferences.geminiProxyProviderId
+
+      // Default (Built-in) option
+      let builtIn = actionItem(title: "Default (Built-in)", action: #selector(handleSelectProvider(_:)))
+      builtIn.representedObject = ProviderSelection(consumer: nil, providerId: nil, isGemini: true)
+      builtIn.state = (activeId != UnifiedProviderID.autoProxyId) ? .on : .off
+      menu.addItem(builtIn)
+
+      // Auto-Proxy (CliProxyAPI) option
+      let autoProxy = actionItem(title: "Auto-Proxy (CliProxyAPI)", action: #selector(handleSelectProvider(_:)))
+      autoProxy.representedObject = ProviderSelection(consumer: nil, providerId: UnifiedProviderID.autoProxyId, isGemini: true)
+      autoProxy.state = (activeId == UnifiedProviderID.autoProxyId) ? .on : .off
+      menu.addItem(autoProxy)
+
+      return menu
+    }
+
     guard let consumer else {
       menu.addItem(disabledItem(title: "Providers not available"))
       return menu
@@ -598,31 +616,100 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     let activeId = cachedBindings.activeProvider?[consumer.rawValue]
 
-    let builtIn = actionItem(title: "(Built-in)", action: #selector(handleSelectProvider(_:)))
+    // Default (Built-in) option
+    let builtIn = actionItem(title: "Default (Built-in)", action: #selector(handleSelectProvider(_:)))
     builtIn.representedObject = ProviderSelection(consumer: consumer, providerId: nil)
-    builtIn.state = (activeId == nil || activeId?.isEmpty == true) ? .on : .off
+    builtIn.state = (activeId != UnifiedProviderID.autoProxyId) ? .on : .off
     menu.addItem(builtIn)
 
-    let compatible =
-      cachedProviders
-      .filter { $0.connectors[consumer.rawValue] != nil }
-      .sorted {
-        providerDisplayName($0).localizedCaseInsensitiveCompare(providerDisplayName($1))
-          == .orderedAscending
-      }
-
-    if !compatible.isEmpty {
-      menu.addItem(.separator())
-      for provider in compatible {
-        let name = providerDisplayName(provider)
-        let item = actionItem(title: name, action: #selector(handleSelectProvider(_:)))
-        item.representedObject = ProviderSelection(consumer: consumer, providerId: provider.id)
-        item.state = (provider.id == activeId) ? .on : .off
-        menu.addItem(item)
-      }
-    }
+    // Auto-Proxy (CliProxyAPI) option
+    let autoProxy = actionItem(title: "Auto-Proxy (CliProxyAPI)", action: #selector(handleSelectProvider(_:)))
+    autoProxy.representedObject = ProviderSelection(consumer: consumer, providerId: UnifiedProviderID.autoProxyId)
+    autoProxy.state = (activeId == UnifiedProviderID.autoProxyId) ? .on : .off
+    menu.addItem(autoProxy)
 
     return menu
+  }
+
+  private func providerImage(for authProvider: LocalAuthProvider) -> NSImage? {
+    let name: String
+    switch authProvider {
+    case .codex: name = "ChatGPTIcon"
+    case .claude: name = "ClaudeIcon"
+    case .gemini: name = "GeminiIcon"
+    case .antigravity: name = "AntigravityIcon"
+    case .qwen: name = "QwenIcon"
+    }
+    return ProviderIconThemeHelper.menuImage(named: name)
+  }
+
+  private func apiKeyProviderImage(for provider: ProvidersRegistryService.Provider) -> NSImage? {
+    guard let iconName = iconNameForAPIProvider(provider) else { return nil }
+    return ProviderIconThemeHelper.menuImage(named: iconName)
+  }
+
+  private func iconNameForAPIProvider(_ provider: ProvidersRegistryService.Provider) -> String? {
+    let id = provider.id.lowercased()
+    let name = (provider.name ?? "").lowercased()
+
+    // Match by ID
+    switch id {
+    case "deepseek", "deep-seek":
+      return "DeepSeekIcon"
+    case "minimax", "mini-max":
+      return "MiniMaxIcon"
+    case "openrouter", "open-router":
+      return "OpenRouterIcon"
+    case "zai", "z.ai", "glm":
+      return "ZaiIcon"
+    case "k2", "kimi":
+      return "KimiIcon"
+    case "openai":
+      return "ChatGPTIcon"
+    case "anthropic":
+      return "ClaudeIcon"
+    default:
+      break
+    }
+
+    // Match by name
+    switch name {
+    case let n where n.contains("deepseek") || n.contains("deep-seek"):
+      return "DeepSeekIcon"
+    case let n where n.contains("minimax") || n.contains("mini-max"):
+      return "MiniMaxIcon"
+    case let n where n.contains("openrouter") || n.contains("open-router"):
+      return "OpenRouterIcon"
+    case let n where n.contains("zai") || n.contains("z.ai") || n.contains("glm"):
+      return "ZaiIcon"
+    case let n where n.contains("kimi") || n.contains("k2"):
+      return "KimiIcon"
+    case let n where n.contains("openai"):
+      return "ChatGPTIcon"
+    case let n where n.contains("anthropic") || n.contains("claude"):
+      return "ClaudeIcon"
+    default:
+      break
+    }
+
+    // Match by baseURL
+    let codexBaseURL = provider.connectors[ProvidersRegistryService.Consumer.codex.rawValue]?.baseURL?.lowercased() ?? ""
+    let claudeBaseURL = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]?.baseURL?.lowercased() ?? ""
+    let baseURL = codexBaseURL.isEmpty ? claudeBaseURL : codexBaseURL
+
+    if baseURL.contains("deepseek.com") {
+      return "DeepSeekIcon"
+    } else if baseURL.contains("minimaxi.com") || baseURL.contains("minimax.com") {
+      return "MiniMaxIcon"
+    } else if baseURL.contains("openrouter.ai") {
+      return "OpenRouterIcon"
+    } else if baseURL.contains("zai.com") || baseURL.contains("z.ai") || baseURL.contains("bigmodel.cn") {
+      return "ZaiIcon"
+    } else if baseURL.contains("moonshot.cn") || baseURL.contains("kimi") {
+      return "KimiIcon"
+    }
+
+    return nil
   }
 
   private func buildMCPServersMenu() -> NSMenu {
@@ -688,6 +775,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   // MARK: - Helpers
 
   private func activeProviderLabel(for provider: UsageProviderKind) -> String? {
+    // For Gemini, use preferences.geminiProxyProviderId
+    if provider == .gemini {
+      guard let preferences else { return nil }
+      let activeId = preferences.geminiProxyProviderId
+      if let activeId, !activeId.isEmpty, activeId == UnifiedProviderID.autoProxyId {
+        return "Auto-Proxy"
+      }
+      return "Built-in"
+    }
+
     let consumer: ProvidersRegistryService.Consumer? = {
       switch provider {
       case .codex: return .codex
@@ -698,13 +795,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     guard let consumer else { return nil }
 
     let activeId = cachedBindings.activeProvider?[consumer.rawValue]
-    if let activeId, !activeId.isEmpty {
-      if let p = cachedProviders.first(where: { $0.id == activeId }) {
-        return providerDisplayName(p)
-      }
-      return activeId
+    if let activeId, !activeId.isEmpty, activeId == UnifiedProviderID.autoProxyId {
+      return "Auto-Proxy"
     }
-    return "(Built-in)"
+    return "Built-in"
   }
 
   private func updatedLabel(_ snapshot: UsageProviderSnapshot, referenceDate: Date) -> String {
@@ -930,17 +1024,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     if profile.usesWarpCommands {
       viewModel.openPreferredTerminalViaScheme(profile: profile, directory: dir)
       if viewModel.shouldCopyCommandsToClipboard {
-        Task {
-          await SystemNotifier.shared.notify(
-            title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-        }
-      }
-      return
-    }
-    if profile.isTerminal {
-      if !viewModel.openNewSession(session: target) {
-        _ = viewModel.openAppleTerminal(at: dir)
-        if viewModel.shouldCopyCommandsToClipboard {
+        if viewModel.preferences.commandCopyNotificationsEnabled {
           Task {
             await SystemNotifier.shared.notify(
               title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
@@ -949,11 +1033,27 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       }
       return
     }
+    if profile.isTerminal {
+      if !viewModel.openNewSession(session: target) {
+        _ = viewModel.openAppleTerminal(at: dir)
+        if viewModel.shouldCopyCommandsToClipboard {
+          if viewModel.preferences.commandCopyNotificationsEnabled {
+            Task {
+              await SystemNotifier.shared.notify(
+                title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
+            }
+          }
+        }
+      }
+      return
+    }
     if profile.isNone {
       if viewModel.shouldCopyCommandsToClipboard {
-        Task {
-          await SystemNotifier.shared.notify(
-            title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
+        if viewModel.preferences.commandCopyNotificationsEnabled {
+          Task {
+            await SystemNotifier.shared.notify(
+              title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
+          }
         }
       }
       return
@@ -1103,39 +1203,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     case .claude: name = "ClaudeIcon"
     case .gemini: name = "GeminiIcon"
     }
-    guard var image = NSImage(named: NSImage.Name(name)) else { return nil }
-    image.size = NSSize(width: 14, height: 14)
-
-    // Apply color inversion for Codex icon in dark mode
-    if provider == .codex, isDarkMode() {
-      image = invertedImage(image) ?? image
-    }
-
-    return image
+    return ProviderIconThemeHelper.menuImage(named: name)
   }
 
-  private func isDarkMode() -> Bool {
-    if let appearance = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) {
-      return appearance == .darkAqua
-    }
-    return false
-  }
-
-  private func invertedImage(_ image: NSImage) -> NSImage? {
-    guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-      return nil
-    }
-
-    let ciImage = CIImage(cgImage: cgImage)
-    guard let filter = CIFilter(name: "CIColorInvert") else { return nil }
-    filter.setValue(ciImage, forKey: kCIInputImageKey)
-    guard let outputImage = filter.outputImage else { return nil }
-
-    let rep = NSCIImageRep(ciImage: outputImage)
-    let newImage = NSImage(size: image.size)
-    newImage.addRepresentation(rep)
-    return newImage
-  }
 
   private func providerKind(for session: SessionSummary) -> UsageProviderKind {
     switch session.source.baseKind {
@@ -1279,11 +1349,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   }
 
   private final class ProviderSelection: NSObject {
-    let consumer: ProvidersRegistryService.Consumer
+    let consumer: ProvidersRegistryService.Consumer?
     let providerId: String?
-    init(consumer: ProvidersRegistryService.Consumer, providerId: String?) {
+    let isGemini: Bool
+    init(consumer: ProvidersRegistryService.Consumer?, providerId: String?, isGemini: Bool = false) {
       self.consumer = consumer
       self.providerId = providerId
+      self.isGemini = isGemini
     }
   }
 
@@ -1291,11 +1363,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     guard let selection = sender.representedObject as? ProviderSelection else { return }
     Task { [weak self] in
       guard let self else { return }
-      switch selection.consumer {
-      case .codex:
-        await applyCodexProviderSelection(providerId: selection.providerId)
-      case .claudeCode:
-        await applyClaudeProviderSelection(providerId: selection.providerId)
+      if selection.isGemini {
+        await applyGeminiProviderSelection(providerId: selection.providerId)
+      } else if let consumer = selection.consumer {
+        switch consumer {
+        case .codex:
+          await applyCodexProviderSelection(providerId: selection.providerId)
+        case .claudeCode:
+          await applyClaudeProviderSelection(providerId: selection.providerId)
+        }
       }
       await MainActor.run { self.refreshMenuData() }
     }
@@ -1351,9 +1427,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var didNotify = false
     if profile.isNone {
       if viewModel.shouldCopyCommandsToClipboard {
-        Task {
-          await SystemNotifier.shared.notify(
-            title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
+        if viewModel.preferences.commandCopyNotificationsEnabled {
+          Task {
+            await SystemNotifier.shared.notify(
+              title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
+          }
         }
       }
       return
@@ -1366,13 +1444,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         _ = viewModel.copyResumeCommandsIfEnabled(session: session, destinationApp: profile)
         _ = viewModel.openAppleTerminal(at: dir)
         if viewModel.shouldCopyCommandsToClipboard {
-          Task {
-            await SystemNotifier.shared.notify(
-              title: "CodMate",
-              body: "Command copied. Paste it in the opened terminal."
-            )
+          if viewModel.preferences.commandCopyNotificationsEnabled {
+            Task {
+              await SystemNotifier.shared.notify(
+                title: "CodMate",
+                body: "Command copied. Paste it in the opened terminal."
+              )
+            }
+            didNotify = true
           }
-          didNotify = true
         }
       }
     } else {
@@ -1383,7 +1463,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       viewModel.openPreferredTerminalViaScheme(profile: profile, directory: dir, command: cmd)
     }
 
-    if viewModel.shouldCopyCommandsToClipboard, didNotify == false {
+    if viewModel.shouldCopyCommandsToClipboard,
+      didNotify == false,
+      viewModel.preferences.commandCopyNotificationsEnabled
+    {
       Task {
         await SystemNotifier.shared.notify(
           title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
@@ -1394,9 +1477,19 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   private func applyCodexProviderSelection(providerId: String?) async {
     do {
       try await providersRegistry.setActiveProvider(.codex, providerId: providerId)
-      let all = await providersRegistry.listAllProviders()
-      let provider = providerId.flatMap { id in all.first(where: { $0.id == id }) }
-      try await CodexConfigService().applyProviderFromRegistry(provider)
+      // For OAuth accounts, providerId is in format "oauth:provider:accountId"
+      // For API key providers, providerId is in format "api:providerId"
+      // For Auto-Proxy, providerId is UnifiedProviderID.autoProxyId
+      let parsed = UnifiedProviderID.parse(providerId ?? "")
+      if case .api(let apiId) = parsed {
+        // Only apply for API key providers
+        let all = await providersRegistry.listAllProviders()
+        let provider = all.first(where: { $0.id == apiId })
+        try await CodexConfigService().applyProviderFromRegistry(provider)
+      } else {
+        // For OAuth accounts and Auto-Proxy, no need to apply (handled by CLI Proxy API)
+        try await CodexConfigService().applyProviderFromRegistry(nil)
+      }
     } catch {
       await SystemNotifier.shared.notify(title: "CodMate", body: "Failed to switch provider.")
     }
@@ -1419,6 +1512,21 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     let settings = ClaudeSettingsService()
     let isBuiltin = (providerId == nil)
 
+    // Check if this is an OAuth account (format: "oauth:provider:accountId") or Auto-Proxy
+    let parsed = UnifiedProviderID.parse(providerId ?? "")
+    let isOAuth: Bool
+    if case .oauth = parsed {
+      isOAuth = true
+    } else {
+      isOAuth = false
+    }
+    let isAutoProxy: Bool
+    if case .autoProxy = parsed {
+      isAutoProxy = true
+    } else {
+      isAutoProxy = false
+    }
+
     if isBuiltin {
       try? await settings.setModel(nil)
       try? await settings.setEnvBaseURL(nil)
@@ -1427,8 +1535,20 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       return
     }
 
+    // For OAuth accounts and Auto-Proxy, no need to configure settings (handled by CLI Proxy API)
+    if isOAuth || isAutoProxy {
+      return
+    }
+
     let providers = await providersRegistry.listAllProviders()
-    guard let provider = providers.first(where: { $0.id == providerId }) else { return }
+    // For API key providers, extract the actual provider ID
+    let actualProviderId: String?
+    if case .api(let apiId) = parsed {
+      actualProviderId = apiId
+    } else {
+      actualProviderId = providerId
+    }
+    guard let provider = providers.first(where: { $0.id == actualProviderId }) else { return }
     let connector = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]
     let loginMethod =
       connector?.loginMethod?.lowercased() == "subscription" ? "subscription" : "api"
@@ -1461,6 +1581,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     } else {
       try? await settings.setEnvToken(nil)
     }
+  }
+
+  private func applyGeminiProviderSelection(providerId: String?) async {
+    guard let preferences else { return }
+    // For Gemini, just update preferences.geminiProxyProviderId
+    // No need to apply provider configuration (handled by CLI Proxy API or built-in)
+    preferences.geminiProxyProviderId = providerId
   }
 
   private func toggleMCPServer(named name: String) async {

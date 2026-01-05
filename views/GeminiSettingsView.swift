@@ -5,10 +5,6 @@ struct GeminiSettingsView: View {
   @ObservedObject var preferences: SessionPreferencesStore
   @StateObject private var providerCatalog = UnifiedProviderCatalogModel()
   @State private var providerModels: [String] = []
-  @State private var showModelEditor = false
-  @State private var modelEditorProviderId: String?
-  @State private var modelEditorModels: [String] = []
-  @State private var modelEditorAutoModels: [String] = []
   @State private var lastProviderId: String?
 
   private let docsURL = URL(string: "https://geminicli.com/docs/cli/settings/")!
@@ -23,7 +19,6 @@ struct GeminiSettingsView: View {
             Tab("General", systemImage: "gearshape") { generalTab }
             Tab("Runtime", systemImage: "gauge") { runtimeTab }
             Tab("Model", systemImage: "cpu") { modelTab }
-            Tab("Notifications", systemImage: "bell") { notificationsTab }
             Tab("Raw Config", systemImage: "doc.text") { rawTab }
           }
         } else {
@@ -36,8 +31,6 @@ struct GeminiSettingsView: View {
               .tabItem { Label("Runtime", systemImage: "gauge") }
             modelTab
               .tabItem { Label("Model", systemImage: "cpu") }
-            notificationsTab
-              .tabItem { Label("Notifications", systemImage: "bell") }
             rawTab
               .tabItem { Label("Raw Config", systemImage: "doc.text") }
           }
@@ -59,18 +52,11 @@ struct GeminiSettingsView: View {
     .onChange(of: preferences.oauthProvidersEnabled) { _ in
       Task { await reloadProxyCatalog() }
     }
-    .onChange(of: CLIProxyService.shared.isRunning) { _ in
+    .onChange(of: preferences.apiKeyProvidersEnabled) { _ in
       Task { await reloadProxyCatalog() }
     }
-    .sheet(isPresented: $showModelEditor) {
-      ModelListEditorSheet(
-        title: "Gemini Provider Models",
-        description: "Choose which models appear for this provider. Leave empty to fall back to the default list.",
-        availableModels: modelEditorAutoModels,
-        models: modelEditorModels,
-        onSave: { saveModelOverrides($0) },
-        onReset: { clearModelOverrides() }
-      )
+    .onChange(of: CLIProxyService.shared.isRunning) { _ in
+      Task { await reloadProxyCatalog() }
     }
   }
 
@@ -110,12 +96,7 @@ struct GeminiSettingsView: View {
       preferences.geminiProxyModelId = nil
       return
     }
-    let autoModels = providerCatalog.models(for: providerId)
-    if let override = preferences.geminiProxyModelOverrides[providerId], !override.isEmpty {
-      providerModels = override
-    } else {
-      providerModels = autoModels
-    }
+    providerModels = providerCatalog.models(for: providerId)
     if providerChanged {
       preferences.geminiProxyModelId = nil
       return
@@ -123,42 +104,6 @@ struct GeminiSettingsView: View {
     guard !providerModels.isEmpty else {
       return
     }
-  }
-
-  private var canEditModels: Bool {
-    preferences.geminiProxyProviderId != nil
-  }
-
-  private func presentModelEditor() {
-    guard let providerId = preferences.geminiProxyProviderId else { return }
-    modelEditorProviderId = providerId
-    modelEditorAutoModels = providerCatalog.models(for: providerId)
-    if let override = preferences.geminiProxyModelOverrides[providerId], !override.isEmpty {
-      modelEditorModels = override
-    } else {
-      modelEditorModels = modelEditorAutoModels
-    }
-    showModelEditor = true
-  }
-
-  private func saveModelOverrides(_ models: [String]) {
-    guard let providerId = modelEditorProviderId else { return }
-    var overrides = preferences.geminiProxyModelOverrides
-    if models.isEmpty {
-      overrides.removeValue(forKey: providerId)
-    } else {
-      overrides[providerId] = models
-    }
-    preferences.geminiProxyModelOverrides = overrides
-    normalizeProxySelection()
-  }
-
-  private func clearModelOverrides() {
-    guard let providerId = modelEditorProviderId else { return }
-    var overrides = preferences.geminiProxyModelOverrides
-    overrides.removeValue(forKey: providerId)
-    preferences.geminiProxyModelOverrides = overrides
-    normalizeProxySelection()
   }
 
   private var generalTab: some View {
@@ -269,73 +214,39 @@ struct GeminiSettingsView: View {
           VStack(alignment: .leading, spacing: 2) {
             Label("Active Provider", systemImage: "server.rack")
               .font(.subheadline).fontWeight(.medium)
-            Text("Choose an OAuth or API key provider via CLI Proxy API.")
+            Text("Use built-in provider or route through CLI Proxy API.")
               .font(.caption)
               .foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
           }
-          UnifiedProviderPickerView(
-            sections: providerCatalog.sections,
-            models: providerModels,
-            modelSectionTitle: providerCatalog.sectionTitle(for: preferences.geminiProxyProviderId),
-            includeAuto: true,
-            autoTitle: "Auto (CLI built-in)",
-            includeDefaultModel: true,
-            defaultModelTitle: "(default)",
-            providerUnavailableHint: providerCatalog.availabilityHint(
-              for: preferences.geminiProxyProviderId),
-            disableModels: preferences.geminiProxyProviderId == nil
-              || !providerCatalog.isProviderAvailable(preferences.geminiProxyProviderId),
-            showModelPicker: false,
-            providerId: $preferences.geminiProxyProviderId,
-            modelId: $preferences.geminiProxyModelId
-          )
-          .frame(maxWidth: .infinity, alignment: .trailing)
-          .onChange(of: preferences.geminiProxyProviderId) { _ in
-            normalizeProxySelection()
-            if preferences.geminiProxyProviderId == nil {
-              Task { await reloadProxyCatalog(forceRefresh: true) }
+          SimpleProviderPicker(providerId: $preferences.geminiProxyProviderId)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .onChange(of: preferences.geminiProxyProviderId) { _ in
+              normalizeProxySelection()
+              if preferences.geminiProxyProviderId == nil {
+                Task { await reloadProxyCatalog(forceRefresh: true) }
+              }
             }
-          }
-          .onChange(of: preferences.geminiProxyModelId) { _ in
-            // Stored for future use; Gemini CLI model selection stays in Model tab.
-          }
         }
         dividerRow
         GridRow {
           VStack(alignment: .leading, spacing: 2) {
             Label("Model List", systemImage: "list.bullet")
               .font(.subheadline).fontWeight(.medium)
-            Text("Pick a default model and manage the provider’s model list.")
+            Text("Select a default model from the available models.")
               .font(.caption)
               .foregroundStyle(.secondary)
               .fixedSize(horizontal: false, vertical: true)
           }
-          UnifiedProviderPickerView(
-            sections: providerCatalog.sections,
+          SimpleModelPicker(
             models: providerModels,
-            modelSectionTitle: providerCatalog.sectionTitle(for: preferences.geminiProxyProviderId),
-            includeAuto: false,
-            autoTitle: "Auto (CLI built-in)",
-            includeDefaultModel: true,
-            defaultModelTitle: "(default)",
-            providerUnavailableHint: nil,
-            disableModels: preferences.geminiProxyProviderId == nil
+            isDisabled: preferences.geminiProxyProviderId == nil
               || !providerCatalog.isProviderAvailable(preferences.geminiProxyProviderId),
-            showProviderPicker: false,
-            onEditModels: canEditModels ? { presentModelEditor() } : nil,
-            editModelsHelp: "Edit model list",
-            providerId: $preferences.geminiProxyProviderId,
+            providerId: preferences.geminiProxyProviderId,
+            providerCatalog: providerCatalog,
             modelId: $preferences.geminiProxyModelId
           )
           .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        GridRow {
-          Text("")
-          Text("Gemini CLI model selection stays in the Model tab.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, alignment: .trailing)
         }
       }
     }
@@ -481,53 +392,6 @@ struct GeminiSettingsView: View {
               .foregroundStyle(.red)
               .frame(maxWidth: .infinity, alignment: .trailing)
           }
-        }
-      }
-    }
-  }
-
-  private var notificationsTab: some View {
-    SettingsTabContent {
-      Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
-        GridRow {
-          VStack(alignment: .leading, spacing: 2) {
-            Label("System Notifications", systemImage: "bell")
-              .font(.subheadline).fontWeight(.medium)
-            Text("Forward Gemini permission prompts to macOS via codmate://notify.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .fixedSize(horizontal: false, vertical: true)
-          }
-          Toggle("", isOn: $vm.notificationsEnabled)
-            .labelsHidden()
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .onChange(of: vm.notificationsEnabled) { _ in vm.scheduleApplyNotificationSettingsDebounced() }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        dividerRow
-        GridRow {
-          VStack(alignment: .leading, spacing: 2) {
-            Label("Self-test", systemImage: "checkmark.seal")
-              .font(.subheadline).fontWeight(.medium)
-            Text("Send a sample event through the notify bridge.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .fixedSize(horizontal: false, vertical: true)
-          }
-          HStack(spacing: 8) {
-            if vm.notificationBridgeHealthy {
-              Image(systemName: "checkmark.seal.fill").foregroundStyle(.green)
-            } else {
-              Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            }
-            Button("Run Self-test") { Task { await vm.runNotificationSelfTest() } }
-              .controlSize(.small)
-            if let result = vm.notificationSelfTestResult {
-              Text(result).font(.caption).foregroundStyle(.secondary)
-            }
-          }
-          .frame(maxWidth: .infinity, alignment: .trailing)
         }
       }
     }
