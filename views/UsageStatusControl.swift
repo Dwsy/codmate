@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct UsageStatusControl: View {
   var snapshots: [UsageProviderKind: UsageProviderSnapshot]
@@ -298,7 +299,11 @@ private struct UsageStatusPopover: View {
           HStack(spacing: 6) {
             providerIcon(for: provider)
             if let snapshot = snapshots[provider] {
-              UsageProviderTitleView(title: snapshot.title, badge: snapshot.titleBadge)
+              UsageProviderTitleView(
+                title: snapshot.title,
+                badge: snapshot.titleBadge,
+                provider: provider
+              )
             } else {
               Text(provider.displayName)
                 .font(.subheadline.weight(.semibold))
@@ -358,23 +363,53 @@ private struct UsageStatusPopover: View {
 private struct UsageProviderTitleView: View {
   var title: String
   var badge: String?
+  var provider: UsageProviderKind
+
+  @Environment(\.openURL) private var openURL
 
   var body: some View {
     ZStack(alignment: .topTrailing) {
       Text(title)
         .font(.subheadline.weight(.semibold))
-        .padding(.trailing, badge == nil ? 0 : 14)
+        .padding(.trailing, badge == nil ? 0 : badgeWidth)
 
       if let badge, !badge.isEmpty {
         Text(badge)
           .font(.system(size: 9, weight: .semibold, design: .rounded))
           .foregroundStyle(.secondary)
           .baselineOffset(7)
-          .offset(x: 2, y: -1)
+          .padding(.leading, 4)
+          .frame(width: badgeWidth, alignment: .leading)
+          .offset(y: -1)
+          .onTapGesture {
+            guard let url = usageURL else { return }
+            openURL(url)
+          }
+          .onHover { hovering in
+            guard usageURL != nil else { return }
+            if hovering {
+              NSCursor.pointingHand.set()
+            } else {
+              NSCursor.arrow.set()
+            }
+          }
       }
     }
     .fixedSize(horizontal: true, vertical: false)
   }
+
+  private var usageURL: URL? {
+    switch provider {
+    case .codex:
+      return URL(string: "https://chatgpt.com/codex/settings/usage")
+    case .claude:
+      return URL(string: "https://claude.ai/settings/usage")
+    case .gemini:
+      return nil
+    }
+  }
+
+  private var badgeWidth: CGFloat { 44 }
 }
 
 private struct UsageSnapshotView: View {
