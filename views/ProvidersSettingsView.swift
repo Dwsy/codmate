@@ -9,7 +9,7 @@ struct ProvidersSettingsView: View {
   @State private var pendingDeleteId: String?
   @State private var pendingDeleteName: String?
   @State private var pendingDeleteAccount: CLIProxyService.OAuthAccount?
-  @State private var oauthInfoProvider: LocalAuthProvider?
+  @State private var oauthInfoAccount: CLIProxyService.OAuthAccount?
   @State private var oauthLoginProvider: LocalAuthProvider?
   @State private var oauthAutoStartFailed: Bool = false
   @State private var localModels: [CLIProxyService.LocalModel] = []
@@ -72,14 +72,15 @@ struct ProvidersSettingsView: View {
         }
       )
     ) { ProviderEditorSheet(vm: vm) }
-    .sheet(item: $oauthInfoProvider) { provider in
-      let accounts = proxyService.listOAuthAccounts().filter { $0.provider == provider }
+    .sheet(item: $oauthInfoAccount) { account in
+      let accounts = proxyService.listOAuthAccounts().filter { $0.provider == account.provider }
       OAuthProviderInfoSheet(
-        provider: provider,
+        provider: account.provider,
         isLoggedIn: !accounts.isEmpty,
         accounts: accounts,
-        initialModels: modelsForOAuthProvider(provider),
-        onLogin: { oauthLoginProvider = provider },
+        selectedAccount: account,
+        initialModels: modelsForOAuthProvider(account.provider),
+        onLogin: { oauthLoginProvider = account.provider },
         onLogout: { account in
           proxyService.deleteOAuthAccount(account)
           refreshOAuthStatus()
@@ -278,7 +279,7 @@ struct ProvidersSettingsView: View {
 
                     // Right: Info + Toggle
                     Button {
-                      oauthInfoProvider = account.provider
+                      oauthInfoAccount = account
                     } label: {
                       Image(systemName: "info.circle")
                         .font(.body)
@@ -286,7 +287,7 @@ struct ProvidersSettingsView: View {
                     .buttonStyle(.borderless)
                     .help("View details")
 
-                    Toggle("", isOn: bindingForOAuthProvider(provider: account.provider))
+                    Toggle("", isOn: bindingForOAuthAccount(account: account))
                       .toggleStyle(.switch)
                       .labelsHidden()
                       .controlSize(.small)
@@ -296,7 +297,7 @@ struct ProvidersSettingsView: View {
                   .contentShape(Rectangle())
                   .contextMenu {
                     Button {
-                      oauthInfoProvider = account.provider
+                      oauthInfoAccount = account
                     } label: {
                       Text("Info")
                     }
@@ -490,14 +491,17 @@ struct ProvidersSettingsView: View {
               HStack(spacing: 8) {
                 statusPill(proxyService.isRunning ? "Running" : "Stopped",
                            active: proxyService.isRunning)
-                Button("Restart") { restartProxyService() }
+                if proxyService.isRunning {
+                  Button("Restart") {
+                    restartProxyService()
+                  }
                   .buttonStyle(.bordered)
-                if showDebugControls {
-                  Button("Start") { startProxyService() }
-                    .buttonStyle(.bordered)
-                  Button("Stop") { proxyService.stop() }
-                    .buttonStyle(.bordered)
-                    .disabled(!proxyService.isRunning)
+                } else {
+                  Button("Start") {
+                    startProxyService()
+                  }
+                  .buttonStyle(.borderedProminent)
+                  .disabled(!proxyService.isBinaryInstalled)
                 }
               }
               .frame(maxWidth: .infinity, alignment: .trailing)
@@ -696,6 +700,22 @@ struct ProvidersSettingsView: View {
         Text("Advanced").font(.headline).fontWeight(.semibold)
         settingsCard {
           Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+            // Conflict warning (only show if there's a conflict)
+            if let warning = proxyService.conflictWarning {
+              GridRow {
+                HStack(spacing: 8) {
+                  Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(.orange)
+                  Text(warning)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                }
+                .gridCellColumns(3)
+              }
+
+              gridDivider
+            }
+
             GridRow {
               VStack(alignment: .leading, spacing: 0) {
                 Label("Binary Location", systemImage: "app.badge")
@@ -708,11 +728,32 @@ struct ProvidersSettingsView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .trailing)
-              Button(proxyService.isBinaryInstalled ? "Reinstall" : "Install") {
-                Task { try? await proxyService.install() }
+                .onTapGesture(count: 2) {
+                  revealCLIProxyBinaryInFinder()
+                }
+                .help("Double-click to reveal in Finder")
+              HStack(spacing: 8) {
+                if proxyService.isInstalling {
+                  ProgressView()
+                    .scaleEffect(0.6)
+                    .frame(width: 14, height: 14)
+                  Text("Installing")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                } else {
+                  Button(cliProxyActionButtonTitle) {
+                    Task {
+                      if proxyService.binarySource == .homebrew {
+                        try? await proxyService.brewUpgrade()
+                      } else {
+                        try? await proxyService.install()
+                      }
+                    }
+                  }
+                  .buttonStyle(.borderedProminent)
+                  .tint(cliProxyActionButtonColor)
+                }
               }
-              .buttonStyle(.borderedProminent)
-              .tint(proxyService.isBinaryInstalled ? .red : .blue)
               .frame(width: 90, alignment: .trailing)
               .disabled(proxyService.isInstalling)
             }
@@ -847,10 +888,6 @@ struct ProvidersSettingsView: View {
     Task { try? await proxyService.start() }
   }
 
-  private var showDebugControls: Bool {
-    !proxyService.isRunning && oauthAutoStartFailed
-  }
-
   private func statusPill(_ text: String, active: Bool) -> some View {
     Text(text)
       .font(.caption)
@@ -888,6 +925,7 @@ struct ProvidersSettingsView: View {
     case .gemini: return .gemini
     case .antigravity: return .antigravity
     case .qwen: return .qwen
+    case .warp: return .warp
     }
   }
 
@@ -967,6 +1005,71 @@ struct ProvidersSettingsView: View {
     return home.appendingPathComponent(".codmate/auth/logs").path
   }
 
+  private var cliProxyBinarySourceDescription: String {
+    switch proxyService.binarySource {
+    case .none:
+      return "No binary detected"
+    case .homebrew:
+      return "Homebrew installation (managed via brew services)"
+    case .codmate:
+      return "CodMate built-in installation"
+    case .other:
+      return "Other installation (potential conflicts)"
+    }
+  }
+
+  private var cliProxyBinarySourceLabel: String {
+    switch proxyService.binarySource {
+    case .none:
+      return "Not Detected"
+    case .homebrew:
+      return "Homebrew"
+    case .codmate:
+      return "CodMate"
+    case .other:
+      return "Other"
+    }
+  }
+
+  private var cliProxyBinarySourceColor: Color {
+    switch proxyService.binarySource {
+    case .none:
+      return .secondary
+    case .homebrew:
+      return .green
+    case .codmate:
+      return .blue
+    case .other:
+      return .orange
+    }
+  }
+
+  private var cliProxyActionButtonTitle: String {
+    switch proxyService.binarySource {
+    case .none:
+      return "Install"
+    case .homebrew:
+      return proxyService.isBinaryInstalled ? "Upgrade" : "Install"
+    case .codmate:
+      return proxyService.isBinaryInstalled ? "Reinstall" : "Install"
+    case .other:
+      return proxyService.isBinaryInstalled ? "Reinstall" : "Install"
+    }
+  }
+
+  private var cliProxyActionButtonColor: Color {
+    switch proxyService.binarySource {
+    case .none:
+      return .blue
+    case .homebrew:
+      return .green
+    case .codmate:
+      return proxyService.isBinaryInstalled ? .red : .blue
+    case .other:
+      return proxyService.isBinaryInstalled ? .red : .blue
+    }
+  }
+
   private func revealCLIProxyConfigInFinder() {
     let url = URL(fileURLWithPath: cliProxyConfigFilePath)
     NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: url.deletingLastPathComponent().path)
@@ -982,6 +1085,11 @@ struct ProvidersSettingsView: View {
     let home = FileManager.default.homeDirectoryForCurrentUser
     let logsPath = home.appendingPathComponent(".codmate/auth/logs")
     NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: logsPath.path)
+  }
+
+  private func revealCLIProxyBinaryInFinder() {
+    let url = URL(fileURLWithPath: proxyService.binaryFilePath)
+    NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: url.deletingLastPathComponent().path)
   }
 
   // MARK: - Helper Views
@@ -1065,22 +1173,22 @@ struct ProvidersSettingsView: View {
     }
   }
 
-  private func bindingForOAuthProvider(provider: LocalAuthProvider) -> Binding<Bool> {
+  private func bindingForOAuthAccount(account: CLIProxyService.OAuthAccount) -> Binding<Bool> {
     Binding(
-      get: { preferences.oauthProvidersEnabled.contains(provider.rawValue) },
+      get: { preferences.oauthAccountsEnabled.contains(account.id) },
       set: { newValue in
-        var enabled = preferences.oauthProvidersEnabled
+        var enabled = preferences.oauthAccountsEnabled
         if newValue {
-          enabled.insert(provider.rawValue)
+          enabled.insert(account.id)
         } else {
-          enabled.remove(provider.rawValue)
+          enabled.remove(account.id)
         }
-        preferences.oauthProvidersEnabled = enabled
+        preferences.oauthAccountsEnabled = enabled
 
-        // Update CLIProxyAPI configuration via Management API
+        // Update CLIProxyAPI configuration via Management API (per-account)
         Task {
-          await CLIProxyService.shared.updateProviderAuthFilesDisabled(
-            provider: provider,
+          await CLIProxyService.shared.updateAuthFileDisabled(
+            filename: account.filename,
             disabled: !newValue
           )
         }
@@ -1340,6 +1448,7 @@ private struct OAuthProviderInfoSheet: View {
   let provider: LocalAuthProvider
   let isLoggedIn: Bool
   let accounts: [CLIProxyService.OAuthAccount]
+  let selectedAccount: CLIProxyService.OAuthAccount
   let initialModels: [String]
   let onLogin: () -> Void
   let onLogout: (CLIProxyService.OAuthAccount) -> Void
@@ -1503,9 +1612,8 @@ private struct OAuthProviderInfoSheet: View {
       HStack {
         if isLoggedIn {
           Button("Sign Out") {
-            if let account = accounts.first {
-              onLogout(account)
-            }
+            // Use the selected account instead of always using the first one
+            onLogout(selectedAccount)
           }
           .buttonStyle(.bordered)
           .focusable(false)
@@ -1572,6 +1680,7 @@ private struct OAuthProviderInfoSheet: View {
     case .gemini: return .gemini
     case .antigravity: return .antigravity
     case .qwen: return .qwen
+    case .warp: return .warp
     }
   }
 
@@ -1589,10 +1698,8 @@ private struct OAuthProviderInfoSheet: View {
   }
 
   private func loadAccountInfo() {
-    guard let account = accounts.first else {
-      accountInfo = nil
-      return
-    }
+    // Use the selected account instead of always using the first one
+    let account = selectedAccount
 
     // Try to extract more info from the account file
     var email: String? = account.email
@@ -2842,6 +2949,7 @@ private struct ProviderMenuIconView: View {
     case .gemini: return "GeminiIcon"
     case .antigravity: return "AntigravityIcon"
     case .qwen: return "QwenIcon"
+    case .warp: return "WarpIcon"
     }
   }
 

@@ -103,6 +103,7 @@ final class SessionPreferencesStore: ObservableObject {
     static let localServerAutoStart = "codmate.localserver.autostart"     // On-demand/Auto logic
     static let localServerPort = "codmate.localserver.port"
     static let oauthProvidersEnabled = "codmate.providers.oauth.enabled"
+    static let oauthAccountsEnabled = "codmate.providers.oauth.accounts.enabled"
     static let apiKeyProvidersEnabled = "codmate.providers.apikey.enabled"
     // Legacy keys for migration
     static let legacyUseCLIProxy = "codmate.cliproxy.useForInternal"
@@ -376,6 +377,8 @@ final class SessionPreferencesStore: ObservableObject {
 
     let oauthEnabled = defaults.array(forKey: Keys.oauthProvidersEnabled) as? [String] ?? []
     self.oauthProvidersEnabled = Set(oauthEnabled)
+    let oauthAccountsEnabled = defaults.array(forKey: Keys.oauthAccountsEnabled) as? [String] ?? []
+    self.oauthAccountsEnabled = Set(oauthAccountsEnabled)
     let apiKeyEnabled = defaults.array(forKey: Keys.apiKeyProvidersEnabled) as? [String] ?? []
     self.apiKeyProvidersEnabled = Set(apiKeyEnabled)
 
@@ -623,6 +626,9 @@ final class SessionPreferencesStore: ObservableObject {
   }
   @Published var oauthProvidersEnabled: Set<String> {
     didSet { defaults.set(Array(oauthProvidersEnabled), forKey: Keys.oauthProvidersEnabled) }
+  }
+  @Published var oauthAccountsEnabled: Set<String> {
+    didSet { defaults.set(Array(oauthAccountsEnabled), forKey: Keys.oauthAccountsEnabled) }
   }
   @Published var apiKeyProvidersEnabled: Set<String> {
     didSet { defaults.set(Array(apiKeyProvidersEnabled), forKey: Keys.apiKeyProvidersEnabled) }

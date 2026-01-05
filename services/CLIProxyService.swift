@@ -15,6 +15,9 @@ final class CLIProxyService: ObservableObject {
     @Published var installProgress: Double = 0
     @Published var lastError: String?
     @Published var loginPrompt: LoginPrompt?
+    @Published var binarySource: BinarySource = .none
+    @Published var detectedBinaryPath: String?
+    @Published var conflictWarning: String?
 
     struct LoginPrompt: Identifiable, Equatable {
         let id = UUID()
@@ -22,7 +25,7 @@ final class CLIProxyService: ObservableObject {
         let message: String
     }
 
-    struct OAuthAccount: Identifiable, Equatable {
+    struct OAuthAccount: Identifiable, Equatable, Hashable {
         let id: String
         let provider: LocalAuthProvider
         let email: String?
@@ -48,6 +51,13 @@ final class CLIProxyService: ObservableObject {
         }
     }
 
+    enum BinarySource: String, Equatable {
+        case none
+        case homebrew
+        case codmate
+        case other
+    }
+
     // Log streaming
     @Published var logs: String = ""
     private var outputPipe: Pipe?
@@ -71,6 +81,7 @@ final class CLIProxyService: ObservableObject {
     private let configPath: String
     private let authDir: String
     private let managementKey: String
+    private var brewCommandPath: String?
     private static let publicAPIKeyDefaultsKey = "CLIProxyPublicAPIKey"
     private static let publicAPIKeyPrefix = "cm"
     private static let publicAPIKeyLength = 36
@@ -112,6 +123,136 @@ final class CLIProxyService: ObservableObject {
 
         try? FileManager.default.createDirectory(atPath: authDir, withIntermediateDirectories: true)
         ensureConfigExists()
+
+        // Perform initial detection
+        performInitialDetection()
+    }
+
+    // MARK: - Binary Detection
+
+    private func performInitialDetection() {
+        let path = CLIEnvironment.resolvedPATHForCLI()
+
+        // First, check if CodMate's own installation exists
+        if FileManager.default.fileExists(atPath: binaryPath) {
+            detectedBinaryPath = binaryPath
+            binarySource = .codmate
+            appendLog("Using CodMate's built-in installation at: \(binaryPath)\n")
+            return
+        }
+
+        // Then, detect cliproxyapi binary in PATH
+        guard let detectedPath = CLIEnvironment.resolveExecutablePath("cliproxyapi", path: path) else {
+            binarySource = .none
+            detectedBinaryPath = nil
+            appendLog("No cliproxyapi binary detected in PATH or CodMate installation.\n")
+            return
+        }
+
+        // Verify the detected path actually exists
+        guard FileManager.default.fileExists(atPath: detectedPath) else {
+            // Path was found in PATH but file doesn't exist (likely uninstalled)
+            binarySource = .none
+            detectedBinaryPath = nil
+            appendLog("cliproxyapi found in PATH but file does not exist. Using CodMate installation path.\n")
+            return
+        }
+
+        detectedBinaryPath = detectedPath
+        appendLog("Detected cliproxyapi at: \(detectedPath)\n")
+
+        // Check if it's a Homebrew installation
+        if isHomebrewPath(detectedPath) {
+            // Check if brew command is available
+            if let brewPath = detectBrewCommand() {
+                brewCommandPath = brewPath
+                binarySource = .homebrew
+                appendLog("Homebrew installation detected. Using brew services for management.\n")
+            } else {
+                // Path matches Homebrew but brew command not found
+                binarySource = .other
+                conflictWarning = "cliproxyapi found at Homebrew path but brew command not available. Please install Homebrew or use CodMate's built-in management."
+                appendLog("Warning: Homebrew path detected but brew command not found.\n", isError: true)
+            }
+        } else {
+            // Other installation path
+            binarySource = .other
+            conflictWarning = "cliproxyapi found at non-standard path: \(detectedPath). This may cause port conflicts. Consider using Homebrew (brew install cliproxyapi) or CodMate's built-in management."
+            appendLog("Warning: Non-standard installation path detected. Potential conflicts may occur.\n", isError: true)
+
+            // Check for port conflicts
+            checkPortConflicts()
+        }
+    }
+
+    private func isHomebrewPath(_ path: String) -> Bool {
+        path == "/opt/homebrew/bin/cliproxyapi" ||
+        path == "/usr/local/bin/cliproxyapi"
+    }
+
+    private func detectBrewCommand() -> String? {
+        let path = CLIEnvironment.resolvedPATHForCLI()
+        return CLIEnvironment.resolveExecutablePath("brew", path: path)
+    }
+
+    private func checkPortConflicts() {
+        // Check if ports are in use
+        let portsToCheck = [port, internalPort]
+        var conflicts: [UInt16] = []
+
+        for portToCheck in portsToCheck {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+            task.arguments = ["-ti", "tcp:\(portToCheck)"]
+
+            let pipe = Pipe()
+            task.standardOutput = pipe
+
+            try? task.run()
+            task.waitUntilExit()
+
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8),
+               !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                conflicts.append(portToCheck)
+            }
+        }
+
+        if !conflicts.isEmpty {
+            let portsStr = conflicts.map { String($0) }.joined(separator: ", ")
+            appendLog("Warning: Port(s) \(portsStr) may be in use by another process.\n", isError: true)
+        }
+    }
+
+    var resolvedBinaryPath: String {
+        switch binarySource {
+        case .homebrew, .other:
+            // If detected path exists, use it; otherwise fall back to CodMate path
+            if let detected = detectedBinaryPath, FileManager.default.fileExists(atPath: detected) {
+                return detected
+            }
+            return binaryPath
+        case .codmate:
+            return binaryPath
+        case .none:
+            return binaryPath
+        }
+    }
+
+    var isBinaryInstalled: Bool {
+        switch binarySource {
+        case .homebrew, .other:
+            // Verify the detected path actually exists
+            if let detected = detectedBinaryPath {
+                return FileManager.default.fileExists(atPath: detected)
+            }
+            return false
+        case .codmate:
+            return FileManager.default.fileExists(atPath: binaryPath)
+        case .none:
+            // Even if source is none, check if CodMate has installed it
+            return FileManager.default.fileExists(atPath: binaryPath)
+        }
     }
 
     // MARK: - Process Management
@@ -129,6 +270,12 @@ final class CLIProxyService: ObservableObject {
 
         lastError = nil
 
+        // Use Homebrew services if Homebrew installation detected
+        if binarySource == .homebrew, let brewPath = brewCommandPath {
+            try await brewServicesStart()
+            return
+        }
+
         // Cleanup old processes
         cleanupOrphanProcesses()
 
@@ -136,18 +283,21 @@ final class CLIProxyService: ObservableObject {
         updateConfigPort(internalPort)
 
         // --- Diagnostic Section ---
-        appendLog("Inspecting binary at \(binaryPath)...\n")
-        let fileOutput = runShell(command: "/usr/bin/file", args: [binaryPath])
+        let execPath = resolvedBinaryPath
+        appendLog("Inspecting binary at \(execPath)...\n")
+        let fileOutput = runShell(command: "/usr/bin/file", args: [execPath])
         appendLog("-> File type: \(fileOutput.trimmingCharacters(in: .whitespacesAndNewlines))\n")
 
-        let lsOutput = runShell(command: "/bin/ls", args: ["-l", binaryPath])
+        let lsOutput = runShell(command: "/bin/ls", args: ["-l", execPath])
         appendLog("-> Permissions: \(lsOutput.trimmingCharacters(in: .whitespacesAndNewlines))\n")
         // --- End Diagnostic Section ---
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: binaryPath)
+        process.executableURL = URL(fileURLWithPath: execPath)
+
+        // Use CodMate's config path for non-Homebrew installations
         process.arguments = ["-config", configPath]
-        process.currentDirectoryURL = URL(fileURLWithPath: binaryPath).deletingLastPathComponent()
+        process.currentDirectoryURL = URL(fileURLWithPath: execPath).deletingLastPathComponent()
 
         // Environment
         var env = ProcessInfo.processInfo.environment
@@ -243,6 +393,12 @@ final class CLIProxyService: ObservableObject {
     }
 
     func stop() {
+        // Use Homebrew services if Homebrew installation detected
+        if binarySource == .homebrew, let brewPath = brewCommandPath {
+            brewServicesStop()
+            return
+        }
+
         proxyBridge.stop()
 
         if let p = process, p.isRunning {
@@ -269,12 +425,8 @@ final class CLIProxyService: ObservableObject {
 
     // MARK: - Installation
 
-    var isBinaryInstalled: Bool {
-        FileManager.default.fileExists(atPath: binaryPath)
-    }
-
     var binaryFilePath: String {
-        binaryPath
+        resolvedBinaryPath
     }
 
     func install() async throws {
@@ -283,20 +435,32 @@ final class CLIProxyService: ObservableObject {
         defer { isInstalling = false }
 
         do {
+            appendLog("Fetching latest release...\n")
+            installProgress = 0.1
             let release = try await fetchLatestRelease()
             guard let asset = findCompatibleAsset(in: release) else {
                 throw ServiceError.noCompatibleBinary
             }
 
-            installProgress = 0.2
+            appendLog("Downloading binary...\n")
+            installProgress = 0.3
             let data = try await downloadAsset(url: asset.downloadURL)
-            installProgress = 0.7
+            installProgress = 0.6
 
+            appendLog("Extracting and installing...\n")
+            installProgress = 0.7
             try await extractAndInstall(data: data, assetName: asset.name)
+            installProgress = 0.9
+
+            // Re-detect after installation
+            appendLog("Verifying installation...\n")
+            performInitialDetection()
             installProgress = 1.0
 
+            appendLog("Installation completed successfully.\n")
         } catch {
             lastError = error.localizedDescription
+            appendLog("Installation failed: \(error.localizedDescription)\n", isError: true)
             throw error
         }
     }
@@ -734,6 +898,203 @@ final class CLIProxyService: ObservableObject {
         UserDefaults.standard.set(trimmed, forKey: Self.publicAPIKeyDefaultsKey)
     }
 
+    // MARK: - Homebrew Services Management
+
+    private func brewServicesStart() async throws {
+        guard let brewPath = brewCommandPath else {
+            throw ServiceError.binaryNotFound
+        }
+
+        // Check if service is already running
+        if await isHomebrewServiceRunning() {
+            appendLog("Homebrew service is already running.\n")
+            // Start Proxy Bridge if not already running
+            if !proxyBridge.isRunning {
+                proxyBridge.configure(listenPort: port, targetPort: internalPort)
+                proxyBridge.start()
+                try await Task.sleep(nanoseconds: 500_000_000)
+            }
+            isRunning = true
+            return
+        }
+
+        appendLog("Starting cliproxyapi via Homebrew services...\n")
+
+        // Ensure Homebrew config exists
+        if getHomebrewConfigPath() == nil {
+            appendLog("Creating Homebrew config file...\n")
+            createHomebrewConfigIfNeeded()
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: brewPath)
+        process.arguments = ["services", "start", "cliproxyapi"]
+
+        let out = Pipe()
+        let err = Pipe()
+        process.standardOutput = out
+        process.standardError = err
+
+        out.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if let str = String(data: data, encoding: .utf8), !str.isEmpty {
+                Task { @MainActor [weak self] in self?.appendLog(str) }
+            }
+        }
+        err.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if let str = String(data: data, encoding: .utf8), !str.isEmpty {
+                Task { @MainActor [weak self] in self?.appendLog(str, isError: true) }
+            }
+        }
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            if process.terminationStatus == 0 {
+                // Wait a bit for service to start
+                try await Task.sleep(nanoseconds: 1_500_000_000)
+
+                // Verify service is actually running
+                if !(await isHomebrewServiceRunning()) {
+                    appendLog("Service failed to start (not running after start command).\n", isError: true)
+                    throw ServiceError.startupFailed
+                }
+
+                // Start Proxy Bridge
+                proxyBridge.configure(listenPort: port, targetPort: internalPort)
+                proxyBridge.start()
+
+                // Wait for bridge
+                try await Task.sleep(nanoseconds: 500_000_000)
+
+                if !proxyBridge.isRunning {
+                    appendLog("Proxy bridge failed to start.\n", isError: true)
+                    throw ServiceError.startupFailed
+                }
+
+                isRunning = true
+                appendLog("Service started successfully via Homebrew.\n")
+            } else {
+                let errText = "brew services start failed with code \(process.terminationStatus)."
+                appendLog(errText + "\n", isError: true)
+                throw ServiceError.startupFailed
+            }
+        } catch {
+            lastError = error.localizedDescription
+            appendLog("Error starting service via Homebrew: \(error.localizedDescription)\n", isError: true)
+            throw error
+        }
+    }
+
+    private func brewServicesStop() {
+        guard let brewPath = brewCommandPath else { return }
+
+        appendLog("Stopping cliproxyapi via Homebrew services...\n")
+
+        proxyBridge.stop()
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: brewPath)
+        process.arguments = ["services", "stop", "cliproxyapi"]
+
+        let out = Pipe()
+        let err = Pipe()
+        process.standardOutput = out
+        process.standardError = err
+
+        out.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if let str = String(data: data, encoding: .utf8), !str.isEmpty {
+                Task { @MainActor [weak self] in self?.appendLog(str) }
+            }
+        }
+        err.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if let str = String(data: data, encoding: .utf8), !str.isEmpty {
+                Task { @MainActor [weak self] in self?.appendLog(str, isError: true) }
+            }
+        }
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            isRunning = false
+            appendLog("Service stopped via Homebrew.\n")
+        } catch {
+            appendLog("Error stopping service via Homebrew: \(error.localizedDescription)\n", isError: true)
+            isRunning = false
+        }
+    }
+
+    func brewUpgrade() async throws {
+        guard let brewPath = brewCommandPath else {
+            appendLog("brew command not found. Cannot upgrade.\n", isError: true)
+            throw ServiceError.binaryNotFound
+        }
+
+        isInstalling = true
+        installProgress = 0
+        defer { isInstalling = false }
+
+        appendLog("Upgrading cliproxyapi via Homebrew...\n")
+        installProgress = 0.3
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: brewPath)
+        process.arguments = ["upgrade", "cliproxyapi"]
+
+        let out = Pipe()
+        let err = Pipe()
+        process.standardOutput = out
+        process.standardError = err
+
+        out.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if let str = String(data: data, encoding: .utf8), !str.isEmpty {
+                Task { @MainActor [weak self] in
+                    self?.appendLog(str)
+                    // Update progress based on output
+                    if str.contains("Updating") {
+                        self?.installProgress = 0.5
+                    } else if str.contains("Downloading") {
+                        self?.installProgress = 0.7
+                    } else if str.contains("Installing") {
+                        self?.installProgress = 0.9
+                    }
+                }
+            }
+        }
+        err.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if let str = String(data: data, encoding: .utf8), !str.isEmpty {
+                Task { @MainActor [weak self] in self?.appendLog(str, isError: true) }
+            }
+        }
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            installProgress = 1.0
+
+            if process.terminationStatus == 0 {
+                appendLog("cliproxyapi upgraded successfully.\n")
+                // Re-detect after upgrade
+                performInitialDetection()
+            } else {
+                let errText = "brew upgrade failed with code \(process.terminationStatus)."
+                appendLog(errText + "\n", isError: true)
+                throw ServiceError.networkError
+            }
+        } catch {
+            lastError = error.localizedDescription
+            appendLog("Error upgrading via Homebrew: \(error.localizedDescription)\n", isError: true)
+            throw error
+        }
+    }
+
     // MARK: - Helpers
 
     private func cleanupOrphanProcesses() {
@@ -760,6 +1121,88 @@ final class CLIProxyService: ObservableObject {
                 }
             }
         }
+    }
+
+    private func getHomebrewConfigPath() -> String? {
+        // Homebrew installations typically use ~/.cli-proxy-api/config.yaml
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        let homebrewConfigPath = homeDir.appendingPathComponent(".cli-proxy-api/config.yaml").path
+
+        if FileManager.default.fileExists(atPath: homebrewConfigPath) {
+            return homebrewConfigPath
+        }
+
+        // Try alternative location
+        let altPath = homeDir.appendingPathComponent(".config/cli-proxy-api/config.yaml").path
+        if FileManager.default.fileExists(atPath: altPath) {
+            return altPath
+        }
+
+        return nil
+    }
+
+    private func createHomebrewConfigIfNeeded() {
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        let configDir = homeDir.appendingPathComponent(".cli-proxy-api", isDirectory: true)
+        let configPath = configDir.appendingPathComponent("config.yaml")
+
+        // Create directory if needed
+        try? FileManager.default.createDirectory(at: configDir, withIntermediateDirectories: true)
+
+        // Only create if doesn't exist
+        guard !FileManager.default.fileExists(atPath: configPath.path) else { return }
+
+        // Use same config as CodMate for consistency
+        let apiKey = resolvePublicAPIKey()
+        let config = """
+host: \"127.0.0.1\"
+port: \(internalPort)
+auth-dir: \"\(authDir)\"
+
+api-keys:
+  - \"\(apiKey)\"
+
+remote-management:
+  allow-remote: false
+  secret-key: \"\(managementKey)\"
+
+debug: false
+logging-to-file: false
+usage-statistics-enabled: true
+
+routing:
+  strategy: \"round-robin\"
+"""
+
+        try? config.write(toFile: configPath.path, atomically: true, encoding: .utf8)
+        appendLog("Created Homebrew config at: \(configPath.path)\n")
+    }
+
+    private func isHomebrewServiceRunning() async -> Bool {
+        guard let brewPath = brewCommandPath else { return false }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: brewPath)
+        process.arguments = ["services", "list"]
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8) {
+                // Check if cliproxyapi service is listed as started
+                return output.contains("cliproxyapi") && output.contains("started")
+            }
+        } catch {
+            return false
+        }
+
+        return false
     }
 
     private func ensureConfigExists() {
@@ -988,9 +1431,10 @@ claude:
 
     private func runCLI(arguments: [String], loginProvider: LocalAuthProvider? = nil) async throws {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: binaryPath)
+        let execPath = resolvedBinaryPath
+        process.executableURL = URL(fileURLWithPath: execPath)
         process.arguments = arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: binaryPath).deletingLastPathComponent()
+        process.currentDirectoryURL = URL(fileURLWithPath: execPath).deletingLastPathComponent()
 
         var env = ProcessInfo.processInfo.environment
         env["TERM"] = "xterm-256color"
@@ -1296,6 +1740,7 @@ claude:
         case .gemini: return "gemini-cli-auth-url"
         case .antigravity: return "antigravity-auth-url"
         case .qwen: return "qwen-auth-url"
+        case .warp: return "warp-auth-url"
         }
     }
 
