@@ -43,9 +43,9 @@ final class UpdateViewModel: ObservableObject {
 
   func checkNow() {
     checkTask?.cancel()
+    state = .checking
     checkTask = Task { [weak self] in
       guard let self else { return }
-      state = .checking
       let result = await service.checkNow()
       state = result
       lastCheckedAt = await service.lastCheckedAt()

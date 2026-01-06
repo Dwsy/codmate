@@ -12,7 +12,6 @@ struct SettingsView: View {
   @StateObject private var updateViewModel = UpdateViewModel()
   @EnvironmentObject private var viewModel: SessionListViewModel
   @ObservedObject private var permissionsManager = SandboxPermissionsManager.shared
-  @State private var showLicensesSheet = false
   @State private var availableRemoteHosts: [SSHHost] = []
   @State private var isRequestingSSHAccess = false
 
@@ -178,7 +177,8 @@ struct SettingsView: View {
     case .mcpServer:
       extensionsSettings
     case .about:
-      aboutSettings
+      AboutSettingsView(updateViewModel: updateViewModel)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
   }
 
@@ -1215,108 +1215,8 @@ struct SettingsView: View {
     }
   }
 
-  private var aboutSettings: some View {
-    settingsScroll {
-      VStack(alignment: .leading, spacing: 20) {
-        VStack(alignment: .leading, spacing: 6) {
-          Text("About CodMate")
-            .font(.title2)
-            .fontWeight(.bold)
-          Text("CodMate is a macOS SwiftUI app for managing CLI AI sessions: browse, search, organize, resume, and review work produced by Codex, Claude Code, and Gemini CLI.")
-            .font(.subheadline)
-            .foregroundColor(.secondary)
-        }
-
-        VStack(alignment: .leading, spacing: 12) {
-          LabeledContent("Version") { Text(versionString) }
-          LabeledContent("Build Timestamp") { Text(buildTimestampString) }
-          LabeledContent("Latest Release") {
-            Link(releasesURL.absoluteString, destination: releasesURL)
-          }
-          LabeledContent("Repository") {
-            Link(repoURL.absoluteString, destination: repoURL)
-          }
-          LabeledContent("Project URL") {
-            Link(projectURL.absoluteString, destination: projectURL)
-          }
-          LabeledContent("Open Source Licenses") {
-            Button("View…") { showLicensesSheet = true }
-              .buttonStyle(.bordered)
-          }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-
-        AboutUpdateSection(viewModel: updateViewModel)
-          .onAppear {
-            updateViewModel.loadCached()
-            updateViewModel.checkIfNeeded(trigger: .aboutAuto)
-          }
-
-        // Discord Community Card
-        HStack(spacing: 12) {
-          Image(systemName: "bubble.left.and.bubble.right.fill")
-            .font(.title2)
-            .foregroundStyle(.blue)
-            .frame(width: 32)
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Join our Discord community")
-              .font(.headline)
-              .fontWeight(.semibold)
-            Text("Get help, share feedback, and connect with other users")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-            Link("Join Discord", destination: discordURL)
-              .font(.subheadline)
-              .fontWeight(.medium)
-              .padding(.top, 2)
-          }
-          Spacer()
-        }
-        .padding(16)
-        .background(
-          RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color.blue.opacity(0.08))
-        )
-        .overlay(
-          RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .stroke(Color.blue.opacity(0.2), lineWidth: 1)
-        )
-      }
-    }
-    .sheet(isPresented: $showLicensesSheet) {
-      OpenSourceLicensesView(repoURL: repoURL)
-        .frame(minWidth: 600, minHeight: 480)
-    }
-  }
-
-  private var versionString: String {
-    let info = Bundle.main.infoDictionary
-    let version = info?["CFBundleShortVersionString"] as? String ?? "—"
-    let build = info?["CFBundleVersion"] as? String ?? "—"
-    return "\(version) (\(build))"
-  }
-
-  private var buildTimestampString: String {
-    guard let executableURL = Bundle.main.executableURL,
-      let attrs = try? FileManager.default.attributesOfItem(atPath: executableURL.path),
-      let date = attrs[.modificationDate] as? Date
-    else { return "Unavailable" }
-    return Self.buildDateFormatter.string(from: date)
-  }
-
-  private var projectURL: URL { URL(string: "https://umate.ai/codmate")! }
-  private var repoURL: URL { URL(string: "https://github.com/loocor/CodMate")! }
-  private var releasesURL: URL { URL(string: "https://github.com/loocor/CodMate/releases/latest")! }
-  private var discordURL: URL { URL(string: "https://discord.gg/5AcaTpVCcx")! }
   private var mcpMateURL: URL { URL(string: "https://mcpmate.io/")! }
   private let mcpMateTagline = "Dedicated MCP orchestration for Codex workflows."
-
-  private static let buildDateFormatter: DateFormatter = {
-    let df = DateFormatter()
-    df.dateStyle = .medium
-    df.timeStyle = .medium
-    return df
-  }()
 
   private var extensionsSettings: some View {
     ExtensionsSettingsView(
