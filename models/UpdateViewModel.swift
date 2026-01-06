@@ -80,9 +80,14 @@ final class UpdateViewModel: ObservableObject {
 
   private func downloadAsset(info: UpdateService.UpdateInfo) async throws -> URL {
     let (tempURL, _) = try await URLSession.shared.download(from: info.assetURL)
-    let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
     let baseName = info.assetName
-    let targetDir = downloads ?? FileManager.default.temporaryDirectory
+    let targetDir: URL
+    if AppSandbox.isEnabled {
+      targetDir = FileManager.default.temporaryDirectory
+    } else {
+      let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+      targetDir = downloads ?? FileManager.default.temporaryDirectory
+    }
     var targetURL = targetDir.appendingPathComponent(baseName)
     if FileManager.default.fileExists(atPath: targetURL.path) {
       let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
