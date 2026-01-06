@@ -209,9 +209,21 @@ private struct SettingsWindowContainer: View {
     private var suppressResetTask: Task<Void, Never>? = nil
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-      // Hide from Dock to make CodMate a pure menu bar app
-      NSApp.setActivationPolicy(.accessory)
-      
+      // Set activation policy based on saved preference
+      // Default to .visible (show Dock icon) unless user explicitly chose "Menu Bar Only"
+      let defaults = UserDefaults.standard
+      let rawVisibility = defaults.string(forKey: "codmate.systemMenu.visibility") ?? "visible"
+      let visibility = SystemMenuVisibility(rawValue: rawVisibility) ?? .visible
+
+      switch visibility {
+      case .menuOnly:
+        // Menu bar only mode - hide Dock icon
+        NSApp.setActivationPolicy(.accessory)
+      case .hidden, .visible:
+        // Show Dock icon so user can access the app
+        NSApp.setActivationPolicy(.regular)
+      }
+
       // Start CLI Proxy Service if available
       Task { @MainActor in
         if CLIProxyService.shared.isBinaryInstalled {

@@ -25,8 +25,10 @@ final class MainWindowCoordinator: NSObject, NSWindowDelegate {
       window.identifier == settingsWindowId && window.isVisible
     }
 
-    // Only hide Dock icon if no other app windows are visible
-    if !settingsWindowVisible {
+    // Only hide Dock icon if:
+    // 1. No other app windows are visible, AND
+    // 2. User preference is "Menu Bar Only" mode
+    if !settingsWindowVisible && visibility == .menuOnly {
       NSApplication.shared.setActivationPolicy(.accessory)
     }
 

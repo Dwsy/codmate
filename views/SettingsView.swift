@@ -99,8 +99,14 @@ struct SettingsView: View {
         window.identifier == mainWindowId && window.isVisible
       }
 
-      // Only hide Dock icon if no other app windows are visible
-      if !mainWindowVisible {
+      // Only hide Dock icon if:
+      // 1. No other app windows are visible, AND
+      // 2. User preference is "Menu Bar Only" mode
+      let defaults = UserDefaults.standard
+      let rawVisibility = defaults.string(forKey: "codmate.systemMenu.visibility") ?? "visible"
+      let visibility = SystemMenuVisibility(rawValue: rawVisibility) ?? .visible
+
+      if !mainWindowVisible && visibility == .menuOnly {
         NSApplication.shared.setActivationPolicy(.accessory)
       }
 
