@@ -73,7 +73,7 @@ struct ProvidersSettingsView: View {
           }
         }
       )
-    ) { ProviderEditorSheet(vm: vm) }
+    ) { ProviderEditorSheet(vm: vm, preferences: preferences) }
     .sheet(item: $oauthInfoAccount) { account in
       let accounts = proxyService.listOAuthAccounts().filter { $0.provider == account.provider }
       OAuthProviderInfoSheet(
@@ -167,6 +167,10 @@ struct ProvidersSettingsView: View {
       Task { await refreshLocalModels() }
       ensureServiceRunningIfNeeded()
     }
+    .onChange(of: preferences.apiKeyProvidersEnabled) { _ in
+      Task { await refreshLocalModels() }
+      ensureServiceRunningIfNeeded()
+    }
     .onChange(of: proxyService.isRunning) { running in
       if running { oauthAutoStartFailed = false }
       Task { await refreshLocalModels() }
@@ -186,7 +190,7 @@ struct ProvidersSettingsView: View {
     ) {
       Button("Delete", role: .destructive) {
         if let id = pendingDeleteId {
-          Task { await vm.delete(id: id) }
+          Task { await vm.delete(id: id, preferences: preferences) }
         }
       }
       Button("Cancel", role: .cancel) {}
@@ -895,7 +899,7 @@ struct ProvidersSettingsView: View {
   }
 
   private func refreshLocalModels() async {
-    localModels = await proxyService.fetchLocalModels()
+    localModels = await proxyService.fetchLocalModels(forceRefresh: true)
   }
 
 
@@ -1180,13 +1184,9 @@ struct ProvidersSettingsView: View {
         }
         preferences.oauthAccountsEnabled = enabled
 
-        // Update CLIProxyAPI configuration via Management API (per-account)
-        Task {
-          await CLIProxyService.shared.updateAuthFileDisabled(
-            filename: account.filename,
-            disabled: !newValue
-          )
-        }
+        // Note: CLI Proxy API's Management API does not provide an endpoint to enable/disable auth files
+        // The enabled/disabled state is managed locally via oauthAccountsEnabled setting
+        // CLIProxyAPI will load all auth files, and CodMate filters which ones to use based on local settings
       }
     )
   }
@@ -1202,6 +1202,14 @@ struct ProvidersSettingsView: View {
           enabled.remove(providerId)
         }
         preferences.apiKeyProvidersEnabled = enabled
+
+        // Sync third-party providers to CLIProxyAPI config
+        // Only enabled providers will be written to config.yaml
+        Task {
+          await CLIProxyService.shared.syncThirdPartyProviders(enabledProviderIds: enabled)
+          // Refresh local models immediately after config sync
+          await self.refreshLocalModels()
+        }
       }
     )
   }
@@ -1211,6 +1219,7 @@ struct ProvidersSettingsView: View {
 // MARK: - Editor Sheet (Standard vs Advanced)
 private struct ProviderEditorSheet: View {
   @ObservedObject var vm: ProvidersVM
+  @ObservedObject var preferences: SessionPreferencesStore
   @Environment(\.dismiss) private var dismiss
   @State private var selectedTab: EditorTab = .basic
   @State private var isTesting: Bool = false
@@ -1265,7 +1274,7 @@ private struct ProviderEditorSheet: View {
         Button("Cancel") { dismiss() }
         Button("Save") {
           Task {
-            if await vm.saveEditing() {
+            if await vm.saveEditing(preferences: preferences) {
               dismiss()
             }
           }
@@ -1291,6 +1300,17 @@ private struct ProviderEditorSheet: View {
   private var basicTab: some View {
     VStack(alignment: .leading, spacing: 12) {
       Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
+        // Icon picker (only for user-created providers, not bundled/preset providers)
+        // Bundled providers (Anthropic, DeepSeek, GLM, K2, MiniMax, OpenAI, OpenRouter) use preset brand icons
+        if vm.isNewProvider || (!vm.isEditingBundledProvider() && vm.editingProviderBinding()?.managedByCodMate == true) {
+          GridRow {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Icon").font(.subheadline).fontWeight(.medium)
+              Text("SF Symbol icon for this provider").font(.caption).foregroundStyle(.secondary)
+            }
+            iconPickerView
+          }
+        }
         GridRow {
           VStack(alignment: .leading, spacing: 4) {
             Text("Name").font(.subheadline).fontWeight(.medium)
@@ -1347,6 +1367,89 @@ private struct ProviderEditorSheet: View {
     }
     .frame(maxWidth: .infinity, alignment: .topLeading)
   }
+
+  @State private var showIconPicker = false
+
+  private var iconPickerView: some View {
+    HStack(spacing: 8) {
+      // Icon display button
+      Button {
+        showIconPicker = true
+      } label: {
+        HStack(spacing: 6) {
+          if let iconName = vm.customIcon ?? defaultIconForProviderName(vm.providerName) {
+            Image(systemName: iconName)
+              .font(.system(size: 20))
+              .frame(width: 24, height: 24)
+          } else {
+            Circle()
+              .fill(Color.secondary.opacity(0.2))
+              .frame(width: 24, height: 24)
+          }
+          Image(systemName: "chevron.down")
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .cornerRadius(6)
+        .overlay(
+          RoundedRectangle(cornerRadius: 6)
+            .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+        )
+      }
+      .buttonStyle(.plain)
+      .popover(isPresented: $showIconPicker, arrowEdge: .bottom) {
+        iconPickerPopover
+      }
+    }
+  }
+
+  private var iconPickerPopover: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("Select Icon")
+        .font(.headline)
+        .padding(.top, 16)
+
+      Divider()
+
+      LazyVGrid(columns: Array(repeating: GridItem(.fixed(40), spacing: 8), count: 6), spacing: 8) {
+        ForEach(sfSymbolsIndices, id: \.self) { iconName in
+          Button {
+            vm.customIcon = iconName
+            showIconPicker = false
+          } label: {
+            Image(systemName: iconName)
+              .font(.system(size: 24))
+              .frame(width: 40, height: 40)
+              .background(Color(nsColor: .controlBackgroundColor))
+              .cornerRadius(6)
+          }
+          .buttonStyle(.plain)
+        }
+      }
+      .frame(height: 232) // 5 rows: 5 * 40 + 4 * 8 = 200 + 32 = 232
+    }
+    .frame(width: 300)
+    .padding(.bottom, 16)
+    .padding(.horizontal, 16)
+  }
+
+  // SF Symbols indices (letter-based icons)
+  private var sfSymbolsIndices: [String] {
+    let letters = "abcdefghijklmnopqrstuvwxyz"
+    return letters.map { "\($0).circle.fill" }
+  }
+
+  // Generate default icon from first letter of provider name
+  private func defaultIconForProviderName(_ name: String) -> String? {
+    guard let firstChar = name.lowercased().first, firstChar.isLetter else {
+      return nil
+    }
+    return "\(firstChar).circle.fill"
+  }
+
 
   private var modelsTab: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -2034,6 +2137,7 @@ final class ProvidersVM: ObservableObject {
 
   // Connection fields
   @Published var providerName: String = ""
+  @Published var customIcon: String? = nil  // SF Symbol name for custom providers
   @Published var codexBaseURL: String = ""
   @Published var codexEnvKey: String = "OPENAI_API_KEY"
   @Published var codexWireAPI: String = "chat"
@@ -2114,6 +2218,7 @@ final class ProvidersVM: ObservableObject {
     guard let sel = selectedId, let provider = providers.first(where: { $0.id == sel }) else {
       DispatchQueue.main.async {
         self.providerName = ""
+        self.customIcon = nil
         self.codexBaseURL = ""
         self.codexEnvKey = "OPENAI_API_KEY"
         self.codexWireAPI = "chat"
@@ -2124,6 +2229,7 @@ final class ProvidersVM: ObservableObject {
       return
     }
     let name = provider.name ?? ""
+    let icon = provider.customIcon
     let codexConnector = provider.connectors[ProvidersRegistryService.Consumer.codex.rawValue]
     let claudeConnector = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]
     let codexBase = codexConnector?.baseURL ?? ""
@@ -2134,6 +2240,7 @@ final class ProvidersVM: ObservableObject {
 
     DispatchQueue.main.async {
       self.providerName = name
+      self.customIcon = icon
       self.codexBaseURL = codexBase
       self.codexEnvKey = envKey
       self.codexWireAPI = wireAPI
@@ -2147,6 +2254,14 @@ final class ProvidersVM: ObservableObject {
   func editingProviderBinding() -> ProvidersRegistryService.Provider? {
     guard let sel = selectedId else { return nil }
     return providers.first(where: { $0.id == sel })
+  }
+
+  /// Check if the currently editing provider is a bundled (preset) provider
+  /// Bundled providers have preset brand icons and should not allow custom icon selection
+  func isEditingBundledProvider() -> Bool {
+    guard let sel = selectedId else { return false }
+    // Check if this provider ID exists in bundled templates
+    return templates.contains(where: { $0.id == sel })
   }
 
   // MARK: - Models directory editing
@@ -2350,7 +2465,7 @@ final class ProvidersVM: ObservableObject {
   }
 
   @discardableResult
-  func saveEditing() async -> Bool {
+  func saveEditing(preferences: SessionPreferencesStore) async -> Bool {
     lastError = nil
     guard let sel = selectedId else {
       lastError = "No provider selected"
@@ -2359,7 +2474,7 @@ final class ProvidersVM: ObservableObject {
 
     // Handle new provider creation
     if isNewProvider {
-      return await saveNewProvider()
+      return await saveNewProvider(preferences: preferences)
     }
 
     guard var p = providers.first(where: { $0.id == sel }) else {
@@ -2368,6 +2483,10 @@ final class ProvidersVM: ObservableObject {
     }
     let trimmedName = providerName.trimmingCharacters(in: .whitespacesAndNewlines)
     p.name = trimmedName.isEmpty ? nil : trimmedName
+    // Save customIcon (only for user-created providers)
+    if p.managedByCodMate {
+      p.customIcon = customIcon
+    }
     var conn =
       p.connectors[ProvidersRegistryService.Consumer.codex.rawValue]
       ?? .init(
@@ -2442,6 +2561,12 @@ final class ProvidersVM: ObservableObject {
         try await registry.setDefaultModel(.claudeCode, modelId: defaultModel)
       }
       await syncActiveCodexProviderIfNeeded(with: p)
+
+      // Sync to config.yaml if this API Key provider is enabled
+      if preferences.apiKeyProvidersEnabled.contains(p.id) {
+        await CLIProxyService.shared.syncThirdPartyProviders(enabledProviderIds: preferences.apiKeyProvidersEnabled)
+      }
+
       await reload()
       return true
     } catch {
@@ -2450,7 +2575,7 @@ final class ProvidersVM: ObservableObject {
     }
   }
 
-  private func saveNewProvider() async -> Bool {
+  private func saveNewProvider(preferences: SessionPreferencesStore) async -> Bool {
     let trimmedName = providerName.trimmingCharacters(in: .whitespacesAndNewlines)
     let list = await registry.listAllProviders()
     let baseSlug = slugify(trimmedName.isEmpty ? "provider" : trimmedName)
@@ -2519,7 +2644,8 @@ final class ProvidersVM: ObservableObject {
       envKey: trimmedEnv.isEmpty ? nil : trimmedEnv,
       connectors: connectors,
       catalog: catalog,
-      recommended: recommended
+      recommended: recommended,
+      customIcon: customIcon  // User-created providers can have custom icons
     )
     // Clear connector-level envKey to avoid duplication; prefer provider-level envKey
     for key in [
@@ -2535,6 +2661,12 @@ final class ProvidersVM: ObservableObject {
     do {
       try await registry.upsertProvider(provider)
       await syncActiveCodexProviderIfNeeded(with: provider)
+
+      // Sync to config.yaml if this API Key provider is enabled
+      if preferences.apiKeyProvidersEnabled.contains(provider.id) {
+        await CLIProxyService.shared.syncThirdPartyProviders(enabledProviderIds: preferences.apiKeyProvidersEnabled)
+      }
+
       isNewProvider = false
       await reload()
       selectedId = candidate
@@ -2614,13 +2746,20 @@ final class ProvidersVM: ObservableObject {
     await reload()
   }
 
-  func delete(id: String) async {
+  func delete(id: String, preferences: SessionPreferencesStore) async {
     do {
       try await registry.deleteProvider(id: id)
       if activeCodexProviderId == id {
         try await registry.setActiveProvider(.codex, providerId: nil)
         try await registry.setDefaultModel(.codex, modelId: nil)
         await syncActiveCodexProviderIfNeeded(with: nil)
+      }
+
+      // Remove from enabled set and sync to config.yaml
+      var enabled = preferences.apiKeyProvidersEnabled
+      if enabled.remove(id) != nil {
+        preferences.apiKeyProvidersEnabled = enabled
+        await CLIProxyService.shared.syncThirdPartyProviders(enabledProviderIds: enabled)
       }
     } catch {
       lastError = "Delete failed: \(error.localizedDescription)"
@@ -2630,11 +2769,19 @@ final class ProvidersVM: ObservableObject {
 
   func addOther() { startNewProvider() }
 
+  // Randomly select an icon from available SF Symbols
+  private func randomIcon() -> String {
+    let letters = "abcdefghijklmnopqrstuvwxyz"
+    let icons = letters.map { "\($0).circle.fill" }
+    return icons.randomElement() ?? icons[0]
+  }
+
   func startNewProvider() {
     isNewProvider = true
     selectedId = "new-provider-temp"
     // Empty for custom provider
     providerName = ""
+    customIcon = randomIcon()  // Randomly select an icon on initialization
     codexBaseURL = ""
     codexEnvKey = "OPENAI_API_KEY"
     codexWireAPI = "chat"
@@ -2653,6 +2800,7 @@ final class ProvidersVM: ObservableObject {
     isNewProvider = true
     selectedId = "new-provider-temp"
     providerName = t.name ?? t.id
+    customIcon = randomIcon()  // Randomly select an icon on initialization
     let codexConnector = t.connectors[ProvidersRegistryService.Consumer.codex.rawValue]
     let claudeConnector = t.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]
     codexBaseURL = codexConnector?.baseURL ?? ""

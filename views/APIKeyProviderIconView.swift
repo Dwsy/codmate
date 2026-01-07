@@ -11,7 +11,15 @@ struct APIKeyProviderIconView: View {
 
   var body: some View {
     Group {
-      if let image = processedIcon {
+      // Priority 1: Custom SF Symbol icon (for user-created providers)
+      if let customIconName = provider.customIcon {
+        Image(systemName: customIconName)
+          .font(.system(size: size * 0.9))
+          .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+          .frame(width: size, height: size)
+      }
+      // Priority 2: Preset PNG icon from resources
+      else if let image = processedIcon {
         Image(nsImage: image)
           .resizable()
           .interpolation(.high)
@@ -22,7 +30,9 @@ struct APIKeyProviderIconView: View {
             RoundedRectangle(cornerRadius: cornerRadius)
               .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
           )
-      } else {
+      }
+      // Fallback: Default circle icon
+      else {
         Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
           .foregroundStyle(Color.accentColor)
           .frame(width: size, height: size)
