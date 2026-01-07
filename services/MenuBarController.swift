@@ -692,67 +692,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   }
 
   private func iconNameForAPIProvider(_ provider: ProvidersRegistryService.Provider) -> String? {
-    let id = provider.id.lowercased()
-    let name = (provider.name ?? "").lowercased()
-
-    // Match by ID
-    switch id {
-    case "deepseek", "deep-seek":
-      return "DeepSeekIcon"
-    case "minimax", "mini-max":
-      return "MiniMaxIcon"
-    case "openrouter", "open-router":
-      return "OpenRouterIcon"
-    case "zai", "z.ai", "glm":
-      return "ZaiIcon"
-    case "k2", "kimi":
-      return "KimiIcon"
-    case "openai":
-      return "ChatGPTIcon"
-    case "anthropic":
-      return "ClaudeIcon"
-    default:
-      break
-    }
-
-    // Match by name
-    switch name {
-    case let n where n.contains("deepseek") || n.contains("deep-seek"):
-      return "DeepSeekIcon"
-    case let n where n.contains("minimax") || n.contains("mini-max"):
-      return "MiniMaxIcon"
-    case let n where n.contains("openrouter") || n.contains("open-router"):
-      return "OpenRouterIcon"
-    case let n where n.contains("zai") || n.contains("z.ai") || n.contains("glm"):
-      return "ZaiIcon"
-    case let n where n.contains("kimi") || n.contains("k2"):
-      return "KimiIcon"
-    case let n where n.contains("openai"):
-      return "ChatGPTIcon"
-    case let n where n.contains("anthropic") || n.contains("claude"):
-      return "ClaudeIcon"
-    default:
-      break
-    }
-
-    // Match by baseURL
-    let codexBaseURL = provider.connectors[ProvidersRegistryService.Consumer.codex.rawValue]?.baseURL?.lowercased() ?? ""
-    let claudeBaseURL = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]?.baseURL?.lowercased() ?? ""
-    let baseURL = codexBaseURL.isEmpty ? claudeBaseURL : codexBaseURL
-
-    if baseURL.contains("deepseek.com") {
-      return "DeepSeekIcon"
-    } else if baseURL.contains("minimaxi.com") || baseURL.contains("minimax.com") {
-      return "MiniMaxIcon"
-    } else if baseURL.contains("openrouter.ai") {
-      return "OpenRouterIcon"
-    } else if baseURL.contains("zai.com") || baseURL.contains("z.ai") || baseURL.contains("bigmodel.cn") {
-      return "ZaiIcon"
-    } else if baseURL.contains("moonshot.cn") || baseURL.contains("kimi") {
-      return "KimiIcon"
-    }
-
-    return nil
+    // Use unified icon resource library helper
+    return ProviderIconResource.iconName(for: provider)
   }
 
   private func buildMCPServersMenu() -> NSMenu {

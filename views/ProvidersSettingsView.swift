@@ -1,6 +1,6 @@
-import SwiftUI
 import AppKit
 import Network
+import SwiftUI
 
 struct ProvidersSettingsView: View {
   @ObservedObject var preferences: SessionPreferencesStore
@@ -106,10 +106,15 @@ struct ProvidersSettingsView: View {
         }
       )
     }
-    .sheet(item: Binding(
-      get: { proxyService.loginPrompt != nil && oauthLoginProvider != nil ? proxyService.loginPrompt : nil },
-      set: { _ in proxyService.loginPrompt = nil }
-    )) { prompt in
+    .sheet(
+      item: Binding(
+        get: {
+          proxyService.loginPrompt != nil && oauthLoginProvider != nil
+            ? proxyService.loginPrompt : nil
+        },
+        set: { _ in proxyService.loginPrompt = nil }
+      )
+    ) { prompt in
       LoginPromptSheet(
         prompt: prompt,
         onSubmit: { input in
@@ -134,18 +139,19 @@ struct ProvidersSettingsView: View {
         pendingOAuthProvider = nil
       }
     } message: {
-      Text("""
-      Adding OAuth providers requires separate authorization through CLIProxyAPI, which is isolated from CodMate's main CLI authorization.
+      Text(
+        """
+        Adding OAuth providers requires separate authorization through CLIProxyAPI, which is isolated from CodMate's main CLI authorization.
 
-      ⚠️ **Potential Risks:**
-      • Account suspension or termination by the provider
-      • Violation of provider terms of service
-      • Loss of access to services
+        ⚠️ **Potential Risks:**
+        • Account suspension or termination by the provider
+        • Violation of provider terms of service
+        • Loss of access to services
 
-      By proceeding, you acknowledge that you understand these risks and will use this feature at your own discretion.
+        By proceeding, you acknowledge that you understand these risks and will use this feature at your own discretion.
 
-      **Note:** The ability to add OAuth providers may be partially or fully removed in future versions of CodMate.
-      """)
+        **Note:** The ability to add OAuth providers may be partially or fully removed in future versions of CodMate.
+        """)
     }
     .task {
       await vm.loadAll()
@@ -267,8 +273,10 @@ struct ProvidersSettingsView: View {
                   HStack(alignment: .center, spacing: 0) {
                     // Left: Icon + Name
                     HStack(alignment: .center, spacing: 8) {
-                      LocalAuthProviderIconView(provider: account.provider, size: 16, cornerRadius: 4)
-                        .frame(width: 20)
+                      LocalAuthProviderIconView(
+                        provider: account.provider, size: 16, cornerRadius: 4
+                      )
+                      .frame(width: 20)
                       Text(account.provider.displayName)
                         .font(.body.weight(.medium))
                     }
@@ -392,7 +400,8 @@ struct ProvidersSettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                       endpointBlock(
                         label: "Codex",
-                        value: p.connectors[ProvidersRegistryService.Consumer.codex.rawValue]?.baseURL
+                        value: p.connectors[ProvidersRegistryService.Consumer.codex.rawValue]?
+                          .baseURL
                       )
                       endpointBlock(
                         label: "Claude",
@@ -480,7 +489,6 @@ struct ProvidersSettingsView: View {
     }
   }
 
-
   private var proxyCapabilitiesSection: some View {
     VStack(alignment: .leading, spacing: 20) {
       // 1. CLI Proxy API Status
@@ -496,13 +504,16 @@ struct ProvidersSettingsView: View {
                   Text("Service Status")
                     .font(.subheadline).fontWeight(.medium)
                 }
-                Text("All providers are routed through CLI Proxy API when enabled in the Providers list above.")
-                  .font(.caption).foregroundColor(.secondary)
-                  .padding(.leading, 22)
+                Text(
+                  "All providers are routed through CLI Proxy API when enabled in the Providers list above."
+                )
+                .font(.caption).foregroundColor(.secondary)
+                .padding(.leading, 22)
               }
               HStack(spacing: 8) {
-                statusPill(proxyService.isRunning ? "Running" : "Stopped",
-                           active: proxyService.isRunning)
+                statusPill(
+                  proxyService.isRunning ? "Running" : "Stopped",
+                  active: proxyService.isRunning)
                 if proxyService.isRunning {
                   Button("Restart") {
                     restartProxyService()
@@ -563,10 +574,12 @@ struct ProvidersSettingsView: View {
                 HStack(spacing: 4) {
                   Text("http://\(localIP):")
                     .font(.system(.caption, design: .monospaced))
-                  TextField("Port", value: $preferences.localServerPort, formatter: NumberFormatter())
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(width: 80)
+                  TextField(
+                    "Port", value: $preferences.localServerPort, formatter: NumberFormatter()
+                  )
+                  .textFieldStyle(.roundedBorder)
+                  .font(.system(.caption, design: .monospaced))
+                  .frame(width: 80)
                   Button(action: {
                     copyToClipboard("http://\(localIP):\(String(preferences.localServerPort))")
                   }) {
@@ -612,7 +625,9 @@ struct ProvidersSettingsView: View {
                     }
                     .frame(width: 320)
                   }
-                  if publicAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).count < minPublicKeyLength {
+                  if publicAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).count
+                    < minPublicKeyLength
+                  {
                     Text("Minimum \(minPublicKeyLength) characters")
                       .font(.caption)
                       .foregroundColor(.red)
@@ -902,7 +917,6 @@ struct ProvidersSettingsView: View {
     localModels = await proxyService.fetchLocalModels(forceRefresh: true)
   }
 
-
   private func modelsForOAuthProvider(_ provider: LocalAuthProvider) -> [String] {
     guard let target = builtInProvider(for: provider) else { return [] }
     var seen: Set<String> = []
@@ -928,13 +942,18 @@ struct ProvidersSettingsView: View {
     }
   }
 
-  private func builtInProvider(for model: CLIProxyService.LocalModel) -> LocalServerBuiltInProvider? {
+  private func builtInProvider(for model: CLIProxyService.LocalModel) -> LocalServerBuiltInProvider?
+  {
     let hint = model.provider ?? model.source ?? model.owned_by
-    if let hint, let provider = LocalServerBuiltInProvider.allCases.first(where: { $0.matchesOwnedBy(hint) }) {
+    if let hint,
+      let provider = LocalServerBuiltInProvider.allCases.first(where: { $0.matchesOwnedBy(hint) })
+    {
       return provider
     }
     let modelId = model.id
-    if let provider = LocalServerBuiltInProvider.allCases.first(where: { $0.matchesModelId(modelId) }) {
+    if let provider = LocalServerBuiltInProvider.allCases.first(where: {
+      $0.matchesModelId(modelId)
+    }) {
       return provider
     }
     return nil
@@ -958,7 +977,9 @@ struct ProvidersSettingsView: View {
           let name = String(cString: (interface?.ifa_name)!)
           if name == "en0" || name.starts(with: "en") {
             var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            getnameinfo(interface?.ifa_addr, socklen_t((interface?.ifa_addr.pointee.sa_len)!), &hostname, socklen_t(hostname.count), nil, socklen_t(0), NI_NUMERICHOST)
+            getnameinfo(
+              interface?.ifa_addr, socklen_t((interface?.ifa_addr.pointee.sa_len)!), &hostname,
+              socklen_t(hostname.count), nil, socklen_t(0), NI_NUMERICHOST)
             address = String(cString: hostname)
           }
         }
@@ -989,7 +1010,9 @@ struct ProvidersSettingsView: View {
 
   // MARK: - CLI Proxy API Path Helpers
   private var cliProxyConfigFilePath: String {
-    let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+    let appSupport = FileManager.default.urls(
+      for: .applicationSupportDirectory, in: .userDomainMask
+    ).first!
     let configPath = appSupport.appendingPathComponent("CodMate/config.yaml")
     return configPath.path
   }
@@ -1071,7 +1094,8 @@ struct ProvidersSettingsView: View {
 
   private func revealCLIProxyConfigInFinder() {
     let url = URL(fileURLWithPath: cliProxyConfigFilePath)
-    NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: url.deletingLastPathComponent().path)
+    NSWorkspace.shared.selectFile(
+      url.path, inFileViewerRootedAtPath: url.deletingLastPathComponent().path)
   }
 
   private func revealCLIProxyAuthDirInFinder() {
@@ -1088,7 +1112,8 @@ struct ProvidersSettingsView: View {
 
   private func revealCLIProxyBinaryInFinder() {
     let url = URL(fileURLWithPath: proxyService.binaryFilePath)
-    NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: url.deletingLastPathComponent().path)
+    NSWorkspace.shared.selectFile(
+      url.path, inFileViewerRootedAtPath: url.deletingLastPathComponent().path)
   }
 
   // MARK: - Helper Views
@@ -1302,11 +1327,19 @@ private struct ProviderEditorSheet: View {
       Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
         // Icon picker (only for user-created providers, not bundled/preset providers)
         // Bundled providers (Anthropic, DeepSeek, GLM, K2, MiniMax, OpenAI, OpenRouter) use preset brand icons
-        if vm.isNewProvider || (!vm.isEditingBundledProvider() && vm.editingProviderBinding()?.managedByCodMate == true) {
+        if vm.isNewProvider
+          || (!vm.isEditingBundledProvider()
+            && vm.editingProviderBinding()?.managedByCodMate == true)
+        {
           GridRow {
             VStack(alignment: .leading, spacing: 4) {
               Text("Icon").font(.subheadline).fontWeight(.medium)
-              Text("SF Symbol icon for this provider").font(.caption).foregroundStyle(.secondary)
+              Text(
+                vm.presetIconName != nil
+                  ? "Provider configured icon" : "SF Symbol icon for this provider"
+              )
+              .font(.caption)
+              .foregroundStyle(.secondary)
             }
             iconPickerView
           }
@@ -1372,36 +1405,61 @@ private struct ProviderEditorSheet: View {
 
   private var iconPickerView: some View {
     HStack(spacing: 8) {
-      // Icon display button
-      Button {
-        showIconPicker = true
-      } label: {
-        HStack(spacing: 6) {
-          if let iconName = vm.customIcon ?? defaultIconForProviderName(vm.providerName) {
-            Image(systemName: iconName)
-              .font(.system(size: 20))
-              .frame(width: 24, height: 24)
-          } else {
-            Circle()
-              .fill(Color.secondary.opacity(0.2))
-              .frame(width: 24, height: 24)
-          }
-          Image(systemName: "chevron.down")
-            .font(.system(size: 10))
-            .foregroundStyle(.secondary)
+      // If preset icon exists, show read-only icon display
+      if vm.presetIconName != nil {
+        if let presetIconName = vm.presetIconName,
+          let nsImage = ProviderIconThemeHelper.menuImage(
+            named: presetIconName, size: NSSize(width: 18, height: 18))
+        {
+          Image(nsImage: nsImage)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 18, height: 18)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(6)
+            .overlay(
+              RoundedRectangle(cornerRadius: 6)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+            )
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(Color(nsColor: .controlBackgroundColor))
-        .cornerRadius(6)
-        .overlay(
-          RoundedRectangle(cornerRadius: 6)
-            .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-        )
-      }
-      .buttonStyle(.plain)
-      .popover(isPresented: $showIconPicker, arrowEdge: .bottom) {
-        iconPickerPopover
+      } else {
+        // Icon display button (only for custom providers)
+        Button {
+          showIconPicker = true
+        } label: {
+          HStack(spacing: 6) {
+            // Custom SF Symbol icon
+            if let iconName = vm.customIcon ?? defaultIconForProviderName(vm.providerName) {
+              Image(systemName: iconName)
+                .font(.system(size: 18))
+                .frame(width: 18, height: 18)
+            }
+            // Fallback: Empty circle
+            else {
+              Circle()
+                .fill(Color.secondary.opacity(0.2))
+                .frame(width: 18, height: 18)
+            }
+            Image(systemName: "chevron.down")
+              .font(.system(size: 10))
+              .foregroundStyle(.secondary)
+          }
+          .padding(.horizontal, 8)
+          .padding(.vertical, 4)
+          .background(Color(nsColor: .controlBackgroundColor))
+          .cornerRadius(6)
+          .overlay(
+            RoundedRectangle(cornerRadius: 6)
+              .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+          )
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showIconPicker, arrowEdge: .bottom) {
+          iconPickerPopover
+        }
       }
     }
   }
@@ -1418,6 +1476,7 @@ private struct ProviderEditorSheet: View {
         ForEach(sfSymbolsIndices, id: \.self) { iconName in
           Button {
             vm.customIcon = iconName
+            vm.presetIconName = nil  // Clear preset icon when user selects custom SF Symbol
             showIconPicker = false
           } label: {
             Image(systemName: iconName)
@@ -1429,9 +1488,9 @@ private struct ProviderEditorSheet: View {
           .buttonStyle(.plain)
         }
       }
-      .frame(height: 232) // 5 rows: 5 * 40 + 4 * 8 = 200 + 32 = 232
+      .frame(height: 280)
     }
-    .frame(width: 300)
+    .frame(width: 350)
     .padding(.bottom, 16)
     .padding(.horizontal, 16)
   }
@@ -1449,7 +1508,6 @@ private struct ProviderEditorSheet: View {
     }
     return "\(firstChar).circle.fill"
   }
-
 
   private var modelsTab: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -1781,13 +1839,16 @@ private struct OAuthProviderInfoSheet: View {
     }
   }
 
-  private func builtInProvider(for model: CLIProxyService.LocalModel) -> LocalServerBuiltInProvider? {
+  private func builtInProvider(for model: CLIProxyService.LocalModel) -> LocalServerBuiltInProvider?
+  {
     let ownedBy = (model.owned_by ?? "").lowercased()
     let provider = (model.provider ?? "").lowercased()
     let source = (model.source ?? "").lowercased()
 
     for builtIn in LocalServerBuiltInProvider.allCases {
-      if builtIn.matchesOwnedBy(ownedBy) || builtIn.matchesOwnedBy(provider) || builtIn.matchesOwnedBy(source) {
+      if builtIn.matchesOwnedBy(ownedBy) || builtIn.matchesOwnedBy(provider)
+        || builtIn.matchesOwnedBy(source)
+      {
         return builtIn
       }
     }
@@ -1805,11 +1866,13 @@ private struct OAuthProviderInfoSheet: View {
     var organization: String?
 
     if let data = try? Data(contentsOf: URL(fileURLWithPath: account.filePath)),
-       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    {
 
       // Extract email if not already set
       if email == nil {
-        email = json["email"] as? String
+        email =
+          json["email"] as? String
           ?? json["user_email"] as? String
           ?? json["account"] as? String
           ?? json["user"] as? String
@@ -1819,7 +1882,9 @@ private struct OAuthProviderInfoSheet: View {
       switch provider {
       case .claude:
         // Claude might have plan info in the token or account data
-        if let plan = json["plan"] as? String ?? json["plan_type"] as? String ?? json["subscription"] as? String {
+        if let plan = json["plan"] as? String ?? json["plan_type"] as? String ?? json[
+          "subscription"] as? String
+        {
           planType = plan
         }
         if let org = json["organization"] as? String ?? json["org_id"] as? String {
@@ -2045,9 +2110,10 @@ private struct OAuthLoginSheet: View {
   private func startAccountCheck() {
     checkAccountTask = Task {
       // Record initial account files before login starts
-      let initialFiles = Set(proxyService.listOAuthAccounts()
-        .filter { $0.provider == provider }
-        .map { $0.filename })
+      let initialFiles = Set(
+        proxyService.listOAuthAccounts()
+          .filter { $0.provider == provider }
+          .map { $0.filename })
 
       // Wait 1 second to allow hideAuthFiles to execute
       try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -2055,9 +2121,10 @@ private struct OAuthLoginSheet: View {
       while !Task.isCancelled {
         try? await Task.sleep(nanoseconds: 500_000_000)
 
-        let currentFiles = Set(proxyService.listOAuthAccounts()
-          .filter { $0.provider == provider }
-          .map { $0.filename })
+        let currentFiles = Set(
+          proxyService.listOAuthAccounts()
+            .filter { $0.provider == provider }
+            .map { $0.filename })
 
         // Detect new files or account count increase
         let hasNewFiles = !currentFiles.subtracting(initialFiles).isEmpty
@@ -2091,9 +2158,11 @@ private struct LoginPromptSheet: View {
         .font(.subheadline)
         .foregroundColor(.secondary)
       if prompt.provider == .codex {
-        Text("If the browser already shows “Authentication Successful”, you can keep waiting—no paste needed.")
-          .font(.caption)
-          .foregroundColor(.secondary)
+        Text(
+          "If the browser already shows “Authentication Successful”, you can keep waiting—no paste needed."
+        )
+        .font(.caption)
+        .foregroundColor(.secondary)
       }
       TextField("Paste here", text: $input)
         .textFieldStyle(.roundedBorder)
@@ -2138,6 +2207,7 @@ final class ProvidersVM: ObservableObject {
   // Connection fields
   @Published var providerName: String = ""
   @Published var customIcon: String? = nil  // SF Symbol name for custom providers
+  @Published var presetIconName: String? = nil  // Preset PNG icon name for bundled providers (e.g., "DeepSeekIcon")
   @Published var codexBaseURL: String = ""
   @Published var codexEnvKey: String = "OPENAI_API_KEY"
   @Published var codexWireAPI: String = "chat"
@@ -2219,6 +2289,7 @@ final class ProvidersVM: ObservableObject {
       DispatchQueue.main.async {
         self.providerName = ""
         self.customIcon = nil
+        self.presetIconName = nil
         self.codexBaseURL = ""
         self.codexEnvKey = "OPENAI_API_KEY"
         self.codexWireAPI = "chat"
@@ -2237,10 +2308,13 @@ final class ProvidersVM: ObservableObject {
       provider.envKey ?? codexConnector?.envKey ?? claudeConnector?.envKey ?? "OPENAI_API_KEY"
     let wireAPI = normalizedWireAPI(codexConnector?.wireAPI)
     let claudeBase = claudeConnector?.baseURL ?? ""
+    // Check if this provider has a preset icon
+    let presetIcon = ProviderIconResource.iconName(for: provider)
 
     DispatchQueue.main.async {
       self.providerName = name
       self.customIcon = icon
+      self.presetIconName = presetIcon
       self.codexBaseURL = codexBase
       self.codexEnvKey = envKey
       self.codexWireAPI = wireAPI
@@ -2564,7 +2638,8 @@ final class ProvidersVM: ObservableObject {
 
       // Sync to config.yaml if this API Key provider is enabled
       if preferences.apiKeyProvidersEnabled.contains(p.id) {
-        await CLIProxyService.shared.syncThirdPartyProviders(enabledProviderIds: preferences.apiKeyProvidersEnabled)
+        await CLIProxyService.shared.syncThirdPartyProviders(
+          enabledProviderIds: preferences.apiKeyProvidersEnabled)
       }
 
       await reload()
@@ -2664,7 +2739,8 @@ final class ProvidersVM: ObservableObject {
 
       // Sync to config.yaml if this API Key provider is enabled
       if preferences.apiKeyProvidersEnabled.contains(provider.id) {
-        await CLIProxyService.shared.syncThirdPartyProviders(enabledProviderIds: preferences.apiKeyProvidersEnabled)
+        await CLIProxyService.shared.syncThirdPartyProviders(
+          enabledProviderIds: preferences.apiKeyProvidersEnabled)
       }
 
       isNewProvider = false
@@ -2781,6 +2857,7 @@ final class ProvidersVM: ObservableObject {
     selectedId = "new-provider-temp"
     // Empty for custom provider
     providerName = ""
+    presetIconName = nil
     customIcon = randomIcon()  // Randomly select an icon on initialization
     codexBaseURL = ""
     codexEnvKey = "OPENAI_API_KEY"
@@ -2800,7 +2877,16 @@ final class ProvidersVM: ObservableObject {
     isNewProvider = true
     selectedId = "new-provider-temp"
     providerName = t.name ?? t.id
-    customIcon = randomIcon()  // Randomly select an icon on initialization
+    // Use the same icon matching logic as menu items
+    if let presetIcon = ProviderIconResource.iconName(for: t) {
+      // Preset provider with Assets.xcassets icon
+      presetIconName = presetIcon
+      customIcon = nil
+    } else {
+      // Custom provider, use random SF Symbol
+      presetIconName = nil
+      customIcon = randomIcon()
+    }
     let codexConnector = t.connectors[ProvidersRegistryService.Consumer.codex.rawValue]
     let claudeConnector = t.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]
     codexBaseURL = codexConnector?.baseURL ?? ""
@@ -3060,7 +3146,9 @@ private struct ProviderMenuIconView: View {
       switch icon {
       case .oauth(let provider):
         let iconName = iconNameForOAuthProvider(provider)
-        if let nsImage = ProviderIconThemeHelper.menuImage(named: iconName, size: NSSize(width: size, height: size)) {
+        if let nsImage = ProviderIconThemeHelper.menuImage(
+          named: iconName, size: NSSize(width: size, height: size))
+        {
           Image(nsImage: nsImage)
             .resizable()
             .interpolation(.high)
@@ -3071,7 +3159,9 @@ private struct ProviderMenuIconView: View {
         }
       case .apiKey(let provider):
         if let iconName = iconNameForAPIProvider(provider),
-           let nsImage = ProviderIconThemeHelper.menuImage(named: iconName, size: NSSize(width: size, height: size)) {
+          let nsImage = ProviderIconThemeHelper.menuImage(
+            named: iconName, size: NSSize(width: size, height: size))
+        {
           Image(nsImage: nsImage)
             .resizable()
             .interpolation(.high)
@@ -3095,15 +3185,7 @@ private struct ProviderMenuIconView: View {
   }
 
   private func iconNameForAPIProvider(_ provider: ProvidersRegistryService.Provider) -> String? {
-    // Use unified icon resource library
-    let codexBaseURL = provider.connectors[ProvidersRegistryService.Consumer.codex.rawValue]?.baseURL
-    let claudeBaseURL = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue]?.baseURL
-    let baseURL = codexBaseURL ?? claudeBaseURL
-
-    return ProviderIconResource.iconName(
-      forProviderId: provider.id,
-      name: provider.name,
-      baseURL: baseURL
-    )
+    // Use unified icon resource library helper
+    return ProviderIconResource.iconName(for: provider)
   }
 }
