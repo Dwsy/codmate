@@ -227,7 +227,22 @@ private struct SettingsWindowContainer: View {
       // Start CLI Proxy Service if available
       Task { @MainActor in
         if CLIProxyService.shared.isBinaryInstalled {
-            try? await CLIProxyService.shared.start()
+          do {
+            try await CLIProxyService.shared.start()
+            AppLogger.shared.info("CLIProxyAPI started successfully", source: "AppDelegate")
+          } catch {
+            // Get detailed logs from the service
+            let serviceLogs = CLIProxyService.shared.logs
+            let recentLogs = serviceLogs.split(separator: "\n").suffix(10).joined(separator: "\n")
+
+            AppLogger.shared.error("Failed to start CLIProxyAPI: \(error.localizedDescription)", source: "AppDelegate")
+            if !recentLogs.isEmpty {
+              AppLogger.shared.error("Recent service logs:\n\(recentLogs)", source: "AppDelegate")
+            }
+            CLIProxyService.shared.lastError = error.localizedDescription
+          }
+        } else {
+          AppLogger.shared.warning("CLIProxyAPI binary not installed, service will not start", source: "AppDelegate")
         }
       }
     }

@@ -92,6 +92,10 @@ final class CLIProxyService: ObservableObject {
     private var cachedLocalModels: [LocalModel] = []
     private var cachedLocalModelsTimestamp: Date?
 
+    // Cache for model -> provider name mapping (built from config.yaml)
+    // This compensates for CLIProxyAPI not setting provider field correctly
+    private var modelToProviderNameCache: [String: String] = [:]
+
     // Constants
     private static let githubRepo = "router-for-me/CLIProxyAPIPlus"
     private static let binaryName = "CLIProxyAPI"
@@ -101,16 +105,19 @@ final class CLIProxyService: ObservableObject {
     }
 
     init() {
-        // Setup paths in Application Support
+        // Setup paths in Application Support (for binary only)
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let codMateDir = appSupport.appendingPathComponent("CodMate")
         let binDir = codMateDir.appendingPathComponent("bin", isDirectory: true)
         try? FileManager.default.createDirectory(at: binDir, withIntermediateDirectories: true)
 
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        // Config and auth now live in ~/.codmate/cliproxyapi for easier management
+        let cliproxyapiDir = homeDir.appendingPathComponent(".codmate/cliproxyapi", isDirectory: true)
+        try? FileManager.default.createDirectory(at: cliproxyapiDir, withIntermediateDirectories: true)
 
         self.binaryPath = binDir.appendingPathComponent(Self.binaryName).path
-        self.configPath = codMateDir.appendingPathComponent("config.yaml").path
+        self.configPath = cliproxyapiDir.appendingPathComponent("config.yaml").path
         self.authDir = homeDir.appendingPathComponent(".codmate/auth").path
 
         // Persistent Management Key
@@ -270,6 +277,13 @@ final class CLIProxyService: ObservableObject {
 
         lastError = nil
 
+        // Sync third-party providers only on initial startup (when config doesn't exist)
+        // During restart, we rely on the existing config that was already synced
+        if !FileManager.default.fileExists(atPath: configPath) {
+            let enabledProviderIds = loadEnabledAPIKeyProviders()
+            await syncThirdPartyProviders(enabledProviderIds: enabledProviderIds)
+        }
+
         // Use Homebrew services if Homebrew installation detected
         if binarySource == .homebrew, brewCommandPath != nil {
             try await brewServicesStart()
@@ -421,6 +435,16 @@ final class CLIProxyService: ObservableObject {
         }
         let timestamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
         logs.append("[\(timestamp)] \(text)")
+
+        // Also output to AppLogger for better visibility in debug mode
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedText.isEmpty {
+            if isError {
+                AppLogger.shared.error(trimmedText, source: "CLIProxyService")
+            } else {
+                AppLogger.shared.info(trimmedText, source: "CLIProxyService")
+            }
+        }
     }
 
     // MARK: - Installation
@@ -780,6 +804,12 @@ final class CLIProxyService: ObservableObject {
         } catch {
             return fallback ?? []
         }
+    }
+
+    /// Get cached provider name for a model ID (from config.yaml mapping)
+    /// This compensates for CLIProxyAPI not setting provider field correctly
+    func getProviderName(for modelId: String) -> String? {
+        return modelToProviderNameCache[modelId]
     }
 
     private func validCachedModels() -> [LocalModel]? {
@@ -1166,8 +1196,8 @@ remote-management:
   allow-remote: false
   secret-key: \"\(managementKey)\"
 
-debug: false
-logging-to-file: false
+debug: true
+logging-to-file: true
 usage-statistics-enabled: true
 
 routing:
@@ -1205,6 +1235,75 @@ routing:
         return false
     }
 
+    private func loadEnabledAPIKeyProviders() -> Set<String> {
+        let defaults = UserDefaults.standard
+        let enabled = defaults.array(forKey: "codmate.providers.apikey.enabled") as? [String] ?? []
+        return Set(enabled)
+    }
+
+    /// Resolve API key from provider configuration
+    /// The envKey field can contain either:
+    /// 1. The API key itself (if it contains special chars like -, ., etc.)
+    /// 2. An environment variable name (if it looks like an env var)
+    private func resolveAPIKey(provider: ProvidersRegistryService.Provider) -> String? {
+        guard let envKey = provider.envKey, !envKey.isEmpty else {
+            return nil
+        }
+
+        // Check if envKey looks like an API key (contains special chars)
+        // API keys typically contain: -, ., alphanumeric characters
+        let looksLikeAPIKey = envKey.contains("-") || envKey.contains(".") || envKey.count > 40
+
+        if looksLikeAPIKey {
+            // Treat as direct API key
+            return envKey
+        } else {
+            // Treat as environment variable name
+            return ProcessInfo.processInfo.environment[envKey]
+        }
+    }
+
+    /// Fetch available models from a third-party OpenAI-compatible API
+    private func fetchModelsFromProvider(baseURL: String, apiKey: String) async -> [String] {
+        guard let url = URL(string: baseURL)?.appendingPathComponent("models") else {
+            appendLog("Invalid base URL: \(baseURL)\n")
+            return []
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 10
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                appendLog("Failed to fetch models from \(baseURL): No HTTP response\n")
+                return []
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                appendLog("Failed to fetch models from \(baseURL): HTTP \(httpResponse.statusCode)\n")
+                return []
+            }
+
+            struct ModelsResponse: Codable {
+                struct Model: Codable {
+                    let id: String
+                }
+                let data: [Model]
+            }
+
+            let modelsResponse = try JSONDecoder().decode(ModelsResponse.self, from: data)
+            let modelIds = modelsResponse.data.map { $0.id }
+            return modelIds
+        } catch {
+            appendLog("Error fetching models from \(baseURL): \(error.localizedDescription)\n")
+            return []
+        }
+    }
+
     private func ensureConfigExists() {
         guard !FileManager.default.fileExists(atPath: configPath) else { return }
 
@@ -1221,8 +1320,8 @@ remote-management:
   allow-remote: false
   secret-key: \"\(managementKey)\"
 
-debug: false
-logging-to-file: false
+debug: true
+logging-to-file: true
 usage-statistics-enabled: true
 
 routing:
@@ -1232,10 +1331,13 @@ routing:
         try? config.write(toFile: configPath, atomically: true, encoding: .utf8)
     }
 
-    func syncThirdPartyProviders() async {
+    func syncThirdPartyProviders(enabledProviderIds: Set<String>) async {
         let registry = ProvidersRegistryService()
         let providers = await registry.listProviders()
         let apiKey = resolvePublicAPIKey()
+
+        // Filter providers based on enabled status
+        let enabledProviders = providers.filter { enabledProviderIds.contains($0.id) }
 
         var config = """
 host: \"127.0.0.1\"
@@ -1249,8 +1351,8 @@ remote-management:
   allow-remote: false
   secret-key: \"\(managementKey)\"
 
-debug: false
-logging-to-file: false
+debug: true
+logging-to-file: true
 usage-statistics-enabled: true
 
 routing:
@@ -1259,62 +1361,115 @@ routing:
 """
 
         // Append third-party providers configuration
-        var sections: [String] = []
+        // Collect all OpenAI-compatible providers (only enabled ones)
+        var openaiProviders: [(name: String, baseURL: String, apiKey: String, models: [String])] = []
 
-        for provider in providers {
-            // Check for OpenAI-compatible providers (Codex connector)
+        for provider in enabledProviders {
+            // Extract API key (either directly from envKey or from environment variable)
+            guard let apiKey = resolveAPIKey(provider: provider), !apiKey.isEmpty else {
+                continue
+            }
+
+            let providerName = provider.name ?? provider.id
+
+            // Use OpenAI-compatible format for all third-party providers
             if let codexConnector = provider.connectors[ProvidersRegistryService.Consumer.codex.rawValue],
                let baseURL = codexConnector.baseURL,
                !baseURL.isEmpty {
 
-                let envKey = provider.envKey ?? codexConnector.envKey ?? "OPENAI_API_KEY"
-                if let apiKey = ProcessInfo.processInfo.environment[envKey], !apiKey.isEmpty {
-                    let providerName = provider.name ?? provider.id
-                    let section = """
-# Third-party provider: \(providerName)
-openai:
-  - name: "\(providerName)"
-    base-url: "\(baseURL)"
-    api-key: "\(apiKey)"
-"""
-                    sections.append(section)
+                // Priority 1: Use catalog models (user-configured in Edit Provider dialog)
+                var models: [String] = []
+                if let catalog = provider.catalog,
+                   let catalogModels = catalog.models,
+                   !catalogModels.isEmpty {
+                    models = catalogModels.compactMap { $0.vendorModelId }
+                    appendLog("Using \(models.count) models from catalog for \(providerName)\n")
+                } else {
+                    // Priority 2: Fetch from API if catalog is empty (only works for some providers like DeepSeek)
+                    models = await fetchModelsFromProvider(baseURL: baseURL, apiKey: apiKey)
+                    if !models.isEmpty {
+                        appendLog("Fetched \(models.count) models from \(providerName) API (\(baseURL))\n")
+                    } else {
+                        appendLog("No models available for \(providerName) (no catalog and API fetch failed)\n")
+                    }
                 }
-            }
 
-            // Check for Claude-compatible providers
-            if let claudeConnector = provider.connectors[ProvidersRegistryService.Consumer.claudeCode.rawValue],
-               let baseURL = claudeConnector.baseURL,
-               !baseURL.isEmpty {
-
-                let envKey = provider.envKey ?? claudeConnector.envKey ?? "ANTHROPIC_API_KEY"
-                if let apiKey = ProcessInfo.processInfo.environment[envKey], !apiKey.isEmpty {
-                    let providerName = provider.name ?? provider.id
-                    let section = """
-# Third-party provider: \(providerName)
-claude:
-  - name: "\(providerName)"
-    base-url: "\(baseURL)"
-    api-key: "\(apiKey)"
-"""
-                    sections.append(section)
+                if !models.isEmpty {
+                    openaiProviders.append((name: providerName, baseURL: baseURL, apiKey: apiKey, models: models))
                 }
             }
         }
 
-        if !sections.isEmpty {
-            config += sections.joined(separator: "\n\n")
+        // Build openai-compatibility section with models
+        if !openaiProviders.isEmpty {
+            config += "\nopenai-compatibility:\n"
+            for (name, baseURL, apiKey, models) in openaiProviders {
+                config += """
+  - name: "\(name)"
+    base-url: "\(baseURL)"
+    api-key-entries:
+      - api-key: "\(apiKey)"
+
+"""
+                // Add models if available
+                if !models.isEmpty {
+                    config += "    models:\n"
+                    for modelId in models {
+                        config += "      - name: \"\(modelId)\"\n"
+                    }
+                    config += "\n"
+                }
+            }
         }
 
         try? config.write(toFile: configPath, atomically: true, encoding: .utf8)
-        appendLog("Synced \(sections.count) third-party provider(s) to config.\n")
+        appendLog("Synced \(openaiProviders.count) third-party provider(s) to config (openai-compatibility format).\n")
 
-        // Restart service if running to apply new config
-        if isRunning {
-            appendLog("Restarting service to apply configuration changes...\n")
-            stop()
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            try? await start()
+        // Build model -> provider name cache by parsing what we just wrote
+        // This is simpler and more reliable than depending on CLIProxyAPI metadata
+        var newCache: [String: String] = [:]
+        for (name, _, _, models) in openaiProviders {
+            for modelId in models {
+                newCache[modelId] = name
+            }
         }
+        modelToProviderNameCache = newCache
+        appendLog("Built model-to-provider cache: \(newCache.count) models\n")
+
+        // Poll CLIProxyAPI until config is reloaded (with timeout)
+        if isRunning {
+            appendLog("Waiting for CLI Proxy API to reload config...\n")
+            let expectedModelIds = Set(openaiProviders.flatMap { $0.models })
+            await waitForConfigReload(expectedModelIds: expectedModelIds, timeoutSeconds: 5.0)
+        }
+    }
+
+    /// Poll CLIProxyAPI until the expected models appear (indicating config reload is complete)
+    private func waitForConfigReload(expectedModelIds: Set<String>, timeoutSeconds: Double) async {
+        let startTime = Date()
+        let timeoutInterval = timeoutSeconds
+        var attemptCount = 0
+
+        while Date().timeIntervalSince(startTime) < timeoutInterval {
+            attemptCount += 1
+
+            // Fetch current models from CLIProxyAPI
+            let currentModels = await fetchLocalModels(forceRefresh: true)
+            let currentModelIds = Set(currentModels.map { $0.id })
+
+            // Check if all expected models are present
+            let missingModels = expectedModelIds.subtracting(currentModelIds)
+            if missingModels.isEmpty {
+                appendLog("Config reloaded successfully after \(attemptCount) attempt(s) (~\(String(format: "%.1f", Date().timeIntervalSince(startTime)))s)\n")
+                return
+            }
+
+            // Wait before next poll (100ms intervals)
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        // Timeout reached
+        appendLog("Warning: Config reload timeout after \(String(format: "%.1f", timeoutSeconds))s. Some models may not be available yet.\n")
     }
 
     private func updateConfigPort(_ newPort: UInt16) {
@@ -1801,66 +1956,25 @@ claude:
         }
     }
 
-    /// Update the disabled status of an auth file via Management API
+    /// DEPRECATED: CLI Proxy API's Management API does not provide an endpoint to enable/disable auth files
+    /// This function always returns false. Use local oauthAccountsEnabled settings instead.
+    ///
+    /// According to CLI Proxy API documentation (https://help.router-for.me/management/api),
+    /// the Management API only supports: GET, POST, DELETE for auth files, but not PATCH/UPDATE.
+    /// CLIProxyAPI loads all auth files, and applications should filter which ones to use locally.
+    @available(*, deprecated, message: "CLI Proxy API does not support updating auth file disabled status via Management API")
     func updateAuthFileDisabled(filename: String, disabled: Bool) async -> Bool {
-        guard isRunning else {
-            appendLog("Cannot update auth file: service not running\n", isError: true)
-            return false
-        }
-        guard var request = managementRequest(path: "auth-files/\(filename)") else {
-            appendLog("Cannot update auth file: failed to create request\n", isError: true)
-            return false
-        }
-
-        request.httpMethod = "PATCH"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body: [String: Any] = ["disabled": disabled]
-        guard let jsonData = try? JSONSerialization.data(withJSONObject: body) else {
-            appendLog("Cannot update auth file: failed to encode request body\n", isError: true)
-            return false
-        }
-        request.httpBody = jsonData
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-
-            if statusCode == 200 || statusCode == 204 {
-                appendLog("Successfully \(disabled ? "disabled" : "enabled") auth file \(filename)\n")
-                return true
-            } else {
-                if let errorString = String(data: data, encoding: .utf8) {
-                    appendLog("Failed to update auth file: HTTP \(statusCode) - \(errorString)\n", isError: true)
-                } else {
-                    appendLog("Failed to update auth file: HTTP \(statusCode)\n", isError: true)
-                }
-                return false
-            }
-        } catch {
-            appendLog("Failed to update auth file: \(error.localizedDescription)\n", isError: true)
-            return false
-        }
+        // CLI Proxy API's Management API does not provide this endpoint
+        // Always return false and rely on local oauthAccountsEnabled settings
+        return false
     }
 
-    /// Update the disabled status for all auth files of a given provider
+    /// DEPRECATED: CLI Proxy API's Management API does not provide an endpoint to enable/disable auth files
+    /// This function does nothing. Use local oauthAccountsEnabled settings instead.
+    @available(*, deprecated, message: "CLI Proxy API does not support updating auth file disabled status via Management API")
     func updateProviderAuthFilesDisabled(provider: LocalAuthProvider, disabled: Bool) async {
-        let accounts = listOAuthAccounts().filter { $0.provider == provider }
-        guard !accounts.isEmpty else {
-            appendLog("No auth files found for \(provider.displayName)\n")
-            return
-        }
-
-        appendLog("\(disabled ? "Disabling" : "Enabling") \(accounts.count) auth file(s) for \(provider.displayName)...\n")
-
-        for account in accounts {
-            let success = await updateAuthFileDisabled(filename: account.filename, disabled: disabled)
-            if !success {
-                appendLog("Warning: Failed to update auth file \(account.filename)\n", isError: true)
-            }
-        }
-
-        appendLog("Finished updating auth files for \(provider.displayName)\n")
+        // CLI Proxy API's Management API does not provide this endpoint
+        // No-op - rely on local oauthAccountsEnabled settings
     }
 
     private func search(_ dir: URL) -> URL? {

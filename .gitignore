@@ -4,6 +4,7 @@
 artifacts/
 build/
 build-mas/
+logs/
 .xcuserstate
 ._*
 CodMate.app

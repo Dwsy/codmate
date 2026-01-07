@@ -55,6 +55,8 @@ actor ProvidersRegistryService {
         var connectors: [String: Connector] // consumer -> connector
         var catalog: Catalog?
         var recommended: Recommended?
+        // Custom SF Symbol icon name (e.g., "a.circle.fill") - only for user-created providers
+        var customIcon: String?
     }
 
     struct Bindings: Codable, Equatable {
@@ -88,7 +90,7 @@ actor ProvidersRegistryService {
     }
 
     // MARK: - Public API
-    func load() -> Registry {
+    nonisolated func load() -> Registry {
         let url = paths.fileURL
         if let data = try? Data(contentsOf: url),
            let reg = try? JSONDecoder().decode(Registry.self, from: data) {
