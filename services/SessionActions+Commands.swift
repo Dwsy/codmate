@@ -368,7 +368,7 @@ extension SessionActions {
         let providerId = UserDefaults.standard.string(forKey: "codmate.gemini.proxyProviderId")
         if let providerId, !providerId.isEmpty {
             let portValue = UserDefaults.standard.integer(forKey: "codmate.localserver.port")
-            let port = portValue > 0 ? portValue : 8080
+            let port = portValue > 0 ? portValue : Int(CLIProxyService.defaultPort)
             env["CODE_ASSIST_ENDPOINT"] = "http://127.0.0.1:\(port)"
         }
 

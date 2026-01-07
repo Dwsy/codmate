@@ -366,7 +366,7 @@ final class SessionPreferencesStore: ObservableObject {
     let legacyPort = defaults.object(forKey: Keys.legacyCLIProxyPort) as? Int
     let legacyUse = defaults.object(forKey: Keys.legacyUseCLIProxy) as? Bool ?? false
 
-    self.localServerPort = defaults.object(forKey: Keys.localServerPort) as? Int ?? legacyPort ?? 8317
+    self.localServerPort = defaults.object(forKey: Keys.localServerPort) as? Int ?? legacyPort ?? Int(CLIProxyService.defaultPort)
     self.localServerEnabled = defaults.object(forKey: Keys.localServerEnabled) as? Bool ?? false
     self.localServerReroute = defaults.object(forKey: Keys.localServerReroute) as? Bool ?? legacyUse
     // Temporarily disable rerouting API key providers until finalized.

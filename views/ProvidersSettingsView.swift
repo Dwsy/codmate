@@ -529,6 +529,28 @@ struct ProvidersSettingsView: View {
               }
               .frame(maxWidth: .infinity, alignment: .trailing)
             }
+
+            gridDivider
+            GridRow {
+              VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                  Image(systemName: "number")
+                    .frame(width: 16, alignment: .leading)
+                  Text("Port")
+                    .font(.subheadline).fontWeight(.medium)
+                }
+                Text("Server port number for CLI Proxy API")
+                  .font(.caption).foregroundColor(.secondary)
+                  .padding(.leading, 22)
+              }
+              TextField(
+                "Port", value: $preferences.localServerPort, formatter: NumberFormatter()
+              )
+              .textFieldStyle(.roundedBorder)
+              .font(.system(.caption, design: .monospaced))
+              .frame(width: 80)
+              .frame(maxWidth: .infinity, alignment: .trailing)
+            }
           }
         }
       }
@@ -571,15 +593,10 @@ struct ProvidersSettingsView: View {
                     .font(.caption).foregroundColor(.secondary)
                     .padding(.leading, 22)
                 }
-                HStack(spacing: 4) {
-                  Text("http://\(localIP):")
+                HStack(spacing: 6) {
+                  Text("http://\(localIP):\(String(preferences.localServerPort))")
                     .font(.system(.caption, design: .monospaced))
-                  TextField(
-                    "Port", value: $preferences.localServerPort, formatter: NumberFormatter()
-                  )
-                  .textFieldStyle(.roundedBorder)
-                  .font(.system(.caption, design: .monospaced))
-                  .frame(width: 80)
+                    .textSelection(.enabled)
                   Button(action: {
                     copyToClipboard("http://\(localIP):\(String(preferences.localServerPort))")
                   }) {

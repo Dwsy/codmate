@@ -16,10 +16,12 @@ final class CLIProxyBridge: ObservableObject {
     private let stateQueue = DispatchQueue(label: "io.codmate.proxy-bridge-state")
     
     /// The port this proxy listens on (user-facing port)
-    @Published private(set) var listenPort: UInt16 = 8080
-    
+    /// IMPORTANT: This should NOT have a default value. Always call configure() before start().
+    @Published private(set) var listenPort: UInt16 = 0
+
     /// The port CLIProxyAPI runs on (internal port)
-    @Published private(set) var targetPort: UInt16 = 18080
+    /// IMPORTANT: This should NOT have a default value. Always call configure() before start().
+    @Published private(set) var targetPort: UInt16 = 0
     
     /// Target host (always localhost)
     private let targetHost = "127.0.0.1"

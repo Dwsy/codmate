@@ -65,7 +65,7 @@ final class CLIProxyService: ObservableObject {
 
     var port: UInt16 {
         let p = UserDefaults.standard.integer(forKey: "codmate.localserver.port")
-        return p > 0 ? UInt16(p) : 8080
+        return p > 0 ? UInt16(p) : Self.defaultPort
     }
 
     private var process: Process?
@@ -82,6 +82,10 @@ final class CLIProxyService: ObservableObject {
     private let authDir: String
     private let managementKey: String
     private var brewCommandPath: String?
+
+    // Default port configuration (nonisolated because it's a constant that can be safely accessed from any context)
+    nonisolated static let defaultPort: UInt16 = 8317
+
     private static let publicAPIKeyDefaultsKey = "CLIProxyPublicAPIKey"
     private static let publicAPIKeyPrefix = "cm"
     private static let publicAPIKeyLength = 36

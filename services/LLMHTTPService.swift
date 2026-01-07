@@ -273,9 +273,13 @@ actor LLMHTTPService {
         return resolved
     }
 
+    /// Get the CLI Proxy API port from UserDefaults (single source of truth)
+    /// Note: This is a static method that can be called from any context,
+    /// so we read UserDefaults directly instead of using CLIProxyService.shared.port
+    /// which is @MainActor isolated.
     private static func localServerPort() -> Int {
-        let port = UserDefaults.standard.integer(forKey: "codmate.localserver.port")
-        return port > 0 ? port : 8080
+        let p = UserDefaults.standard.integer(forKey: "codmate.localserver.port")
+        return p > 0 ? p : Int(CLIProxyService.defaultPort)
     }
 
     private static func builtinProvider(for auth: LocalAuthProvider) -> LocalServerBuiltInProvider? {
@@ -289,9 +293,9 @@ actor LLMHTTPService {
     }
 
     private static func localServerConfigPath() -> String {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let codMateDir = appSupport.appendingPathComponent("CodMate")
-        return codMateDir.appendingPathComponent("config.yaml").path
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
+        let cliproxyapiDir = homeDir.appendingPathComponent(".codmate/cliproxyapi", isDirectory: true)
+        return cliproxyapiDir.appendingPathComponent("config.yaml").path
     }
 
     private static func loadLocalServerAPIKey() -> String? {
