@@ -31,6 +31,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   private var usageCancellable: AnyCancellable?
   private var isShowingDynamicIcon = false
   private var isMenuOpen = false
+  private let updateViewModel = UpdateViewModel()
 
   private let relativeFormatter: RelativeDateTimeFormatter = {
     let formatter = RelativeDateTimeFormatter()
@@ -385,9 +386,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     let aboutItem = actionItem(title: "About CodMate", action: #selector(handleOpenAbout))
     applySystemImage(aboutItem, name: "info.circle")
     statusMenu.addItem(aboutItem)
-    let updates = NSMenuItem(title: "Check for Updates...", action: nil, keyEquivalent: "")
+    let updates = actionItem(title: "Check for Updates...", action: #selector(handleCheckForUpdates))
     applySystemImage(updates, name: "arrow.triangle.2.circlepath")
-    updates.isEnabled = false
     statusMenu.addItem(updates)
 
     let quitItem = actionItem(title: "Quit", action: #selector(handleQuit))
@@ -1254,6 +1254,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   }
 
   @objc private func handleOpenAbout() {
+    activateApp(raiseWindows: false)
+    NotificationCenter.default.post(
+      name: .codMateOpenSettings,
+      object: nil,
+      userInfo: ["category": SettingCategory.about.rawValue]
+    )
+  }
+
+  @objc private func handleCheckForUpdates() {
+    updateViewModel.checkNow()
     activateApp(raiseWindows: false)
     NotificationCenter.default.post(
       name: .codMateOpenSettings,
