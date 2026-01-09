@@ -1151,101 +1151,16 @@ struct ContentView: View {
     warpTitle: String? = nil,
     projectOverride: Project? = nil
   ) {
-    let target = source == session.source ? session : session.overridingSource(source)
-    viewModel.recordIntentForDetailNew(anchor: target)
-    let dir = workingDirectory(for: target)
-
-    guard viewModel.copyNewSessionCommandsIfEnabled(
-      session: target,
-      destinationApp: profile,
+    let dir = workingDirectory(for: session)
+    viewModel.launchNewSessionWithProfile(
+      session: session,
+      using: source,
+      profile: profile,
+      workingDirectory: dir,
       initialPrompt: initialPrompt,
-      warpTitleOverride: warpTitle,
+      warpTitle: warpTitle,
       projectOverride: projectOverride
-    ) else { return }
-
-    if profile.isNone {
-      if viewModel.shouldCopyCommandsToClipboard {
-        if viewModel.preferences.commandCopyNotificationsEnabled {
-          Task {
-            await SystemNotifier.shared.notify(
-              title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-          }
-        }
-      }
-      return
-    }
-
-    if profile.usesWarpCommands {
-      viewModel.openPreferredTerminalViaScheme(profile: profile, directory: dir)
-      if viewModel.shouldCopyCommandsToClipboard {
-        if viewModel.preferences.commandCopyNotificationsEnabled {
-          Task {
-            await SystemNotifier.shared.notify(
-              title: "CodMate",
-              body: "Command copied. Paste it in the opened terminal.")
-          }
-        }
-      }
-      return
-    }
-
-    if profile.isTerminal {
-      #if APPSTORE
-        _ = viewModel.copyNewSessionCommandsIfEnabled(
-          session: target,
-          destinationApp: profile,
-          initialPrompt: initialPrompt,
-          warpTitleOverride: warpTitle,
-          projectOverride: projectOverride
-        )
-        _ = viewModel.openAppleTerminal(at: dir)
-      #else
-        // Use openNewSessionRespectingProject to handle initialPrompt if supported
-        if let prompt = initialPrompt {
-           viewModel.openNewSessionRespectingProject(session: target, initialPrompt: prompt)
-        } else if !viewModel.openNewSession(session: target) {
-          _ = viewModel.copyNewSessionCommandsIfEnabled(session: target, destinationApp: profile, projectOverride: projectOverride)
-          _ = viewModel.openAppleTerminal(at: dir)
-          if viewModel.shouldCopyCommandsToClipboard {
-            if viewModel.preferences.commandCopyNotificationsEnabled {
-              Task {
-                await SystemNotifier.shared.notify(
-                  title: "CodMate",
-                  body: "Command copied. Paste it in the opened terminal.")
-              }
-            }
-          }
-        }
-      #endif
-      return
-    }
-
-    if !profile.supportsCommandResolved {
-      _ = viewModel.copyNewSessionCommandsIfEnabled(
-        session: target,
-        destinationApp: profile,
-        initialPrompt: initialPrompt,
-        warpTitleOverride: warpTitle,
-        projectOverride: projectOverride
-      )
-    }
-    let cmd = profile.supportsCommandResolved
-      ? viewModel.buildNewSessionCLIInvocationRespectingProject(
-          session: target,
-          initialPrompt: initialPrompt,
-          projectOverride: projectOverride
-        )
-      : nil
-    viewModel.openPreferredTerminalViaScheme(profile: profile, directory: dir, command: cmd)
-    if !profile.supportsCommandResolved, viewModel.shouldCopyCommandsToClipboard,
-      viewModel.preferences.commandCopyNotificationsEnabled
-    {
-      Task {
-        await SystemNotifier.shared.notify(
-          title: "CodMate",
-          body: "Command copied. Paste it in the opened terminal.")
-      }
-    }
+    )
   }
 
   func launchResume(

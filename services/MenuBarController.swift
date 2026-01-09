@@ -999,55 +999,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     profile: ExternalTerminalProfile
   ) {
     guard let viewModel else { return }
-    let target = session.overridingSource(source)
-    viewModel.recordIntentForDetailNew(anchor: target)
-    let dir = target.cwd
-    guard viewModel.copyNewSessionCommandsIfEnabled(session: target, destinationApp: profile)
-    else { return }
-
-    if profile.usesWarpCommands {
-      viewModel.openPreferredTerminalViaScheme(profile: profile, directory: dir)
-      if viewModel.shouldCopyCommandsToClipboard {
-        if viewModel.preferences.commandCopyNotificationsEnabled {
-          Task {
-            await SystemNotifier.shared.notify(
-              title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-          }
-        }
-      }
-      return
-    }
-    if profile.isTerminal {
-      if !viewModel.openNewSession(session: target) {
-        _ = viewModel.openAppleTerminal(at: dir)
-        if viewModel.shouldCopyCommandsToClipboard {
-          if viewModel.preferences.commandCopyNotificationsEnabled {
-            Task {
-              await SystemNotifier.shared.notify(
-                title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-            }
-          }
-        }
-      }
-      return
-    }
-    if profile.isNone {
-      if viewModel.shouldCopyCommandsToClipboard {
-        if viewModel.preferences.commandCopyNotificationsEnabled {
-          Task {
-            await SystemNotifier.shared.notify(
-              title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-          }
-        }
-      }
-      return
-    }
-
-    let cmd =
-      profile.supportsCommandResolved
-      ? viewModel.buildNewSessionCLIInvocationRespectingProject(session: target)
-      : nil
-    viewModel.openPreferredTerminalViaScheme(profile: profile, directory: dir, command: cmd)
+    viewModel.launchNewSessionWithProfile(
+      session: session,
+      using: source,
+      profile: profile,
+      workingDirectory: session.cwd
+    )
   }
 
   private func launchNewSessionWithDefaultTerminal(

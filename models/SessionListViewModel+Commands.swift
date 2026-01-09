@@ -598,6 +598,16 @@ extension SessionListViewModel {
         }
         return defaultValue
     }
+    
+    // MARK: - Notification Helpers
+    
+    /// Notify user that command was copied to clipboard, if notifications are enabled.
+    private func notifyCommandCopiedIfEnabled(message: String = "Command copied. Paste it in the opened terminal.") {
+        guard shouldCopyCommandsToClipboard, preferences.commandCopyNotificationsEnabled else { return }
+        Task {
+            await SystemNotifier.shared.notify(title: "CodMate", body: message)
+        }
+    }
 
 
     func openNewSessionRespectingProject(session: SessionSummary) {
@@ -618,6 +628,196 @@ extension SessionListViewModel {
                 options: preferences.resumeOptions,
                 codexHome: codexHomeOverride(for: session)
             )
+        }
+    }
+
+    // MARK: - Launch New Session From Project (without anchor)
+    
+    /// Launch a new session from a project without requiring an anchor session.
+    /// This is used when right-clicking on a project with no sessions.
+    func launchNewSessionFromProject(
+        project: Project,
+        using source: SessionSource,
+        profile: ExternalTerminalProfile
+    ) {
+        recordIntentForProjectNew(project: project)
+        let dir: String = {
+            let d = (project.directory ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return d.isEmpty ? NSHomeDirectory() : d
+        }()
+
+        if profile.id == "codmate.embedded" {
+            #if APPSTORE
+            newSession(project: project)
+            #else
+            NotificationCenter.default.post(
+                name: .codMateStartEmbeddedNewProject,
+                object: nil,
+                userInfo: ["projectId": project.id]
+            )
+            #endif
+            return
+        }
+
+        // Build command based on source
+        let cmd: String
+        switch source.baseKind {
+        case .codex:
+            cmd = buildNewProjectCLIInvocation(project: project)
+        case .claude:
+            cmd = buildClaudeProjectInvocation(project: project)
+        case .gemini:
+            cmd = buildGeminiProjectInvocation()
+        }
+
+        guard copyNewProjectCommandsIfEnabled(project: project, destinationApp: profile)
+        else { return }
+
+        if profile.usesWarpCommands {
+            openPreferredTerminalViaScheme(profile: profile, directory: dir)
+            notifyCommandCopiedIfEnabled()
+            return
+        }
+
+        if profile.isTerminal {
+            // Create a dummy session for terminal opening
+            let dummySession = SessionSummary(
+                id: UUID().uuidString,
+                fileURL: URL(fileURLWithPath: "/dev/null"),
+                fileSizeBytes: 0,
+                startedAt: Date(),
+                endedAt: nil,
+                activeDuration: nil,
+                cliVersion: "",
+                cwd: dir,
+                originator: "system",
+                instructions: nil,
+                model: nil,
+                approvalPolicy: nil,
+                userMessageCount: 0,
+                assistantMessageCount: 0,
+                toolInvocationCount: 0,
+                responseCounts: [:],
+                turnContextCount: 0,
+                totalTokens: 0,
+                eventCount: 0,
+                lineCount: 0,
+                lastUpdatedAt: Date(),
+                source: source,
+                remotePath: nil
+            )
+            if !openNewSession(session: dummySession) {
+                _ = openAppleTerminal(at: dir)
+                notifyCommandCopiedIfEnabled()
+            }
+            return
+        }
+
+        if profile.isNone {
+            notifyCommandCopiedIfEnabled(message: "Command copied.")
+            return
+        }
+
+        let inlineCmd = profile.supportsCommandResolved ? cmd : nil
+        openPreferredTerminalViaScheme(profile: profile, directory: dir, command: inlineCmd)
+        if !profile.supportsCommandResolved {
+            notifyCommandCopiedIfEnabled()
+        }
+    }
+
+    // MARK: - Unified Launch New Session (extracted from views)
+    
+    /// Unified method to launch a new session with a given profile.
+    /// This consolidates the duplicate logic from multiple view files.
+    func launchNewSessionWithProfile(
+        session: SessionSummary,
+        using source: SessionSource,
+        profile: ExternalTerminalProfile,
+        workingDirectory: String? = nil,
+        initialPrompt: String? = nil,
+        warpTitle: String? = nil,
+        projectOverride: Project? = nil,
+        embeddedHandler: ((SessionSummary, SessionSource) -> Void)? = nil
+    ) {
+        let target = source == session.source ? session : session.overridingSource(source)
+        recordIntentForDetailNew(anchor: target)
+        let dir = workingDirectory ?? resolvedWorkingDirectory(for: target)
+
+        // Handle embedded terminal
+        if profile.id == "codmate.embedded" {
+            if let embeddedHandler {
+                embeddedHandler(target, source)
+            } else {
+                EmbeddedSessionNotification.postEmbeddedNewSession(sessionId: target.id, source: source)
+            }
+            return
+        }
+
+        guard copyNewSessionCommandsIfEnabled(
+            session: target,
+            destinationApp: profile,
+            initialPrompt: initialPrompt,
+            warpTitleOverride: warpTitle,
+            projectOverride: projectOverride
+        ) else { return }
+
+        // Handle None profile (copy only)
+        if profile.isNone {
+            notifyCommandCopiedIfEnabled()
+            return
+        }
+
+        // Handle Warp commands
+        if profile.usesWarpCommands {
+            openPreferredTerminalViaScheme(profile: profile, directory: dir)
+            notifyCommandCopiedIfEnabled()
+            return
+        }
+
+        // Handle Terminal.app
+        if profile.isTerminal {
+            #if APPSTORE
+            _ = copyNewSessionCommandsIfEnabled(
+                session: target,
+                destinationApp: profile,
+                initialPrompt: initialPrompt,
+                warpTitleOverride: warpTitle,
+                projectOverride: projectOverride
+            )
+            _ = openAppleTerminal(at: dir)
+            #else
+            // Use openNewSessionRespectingProject to handle initialPrompt if supported
+            if let prompt = initialPrompt {
+                openNewSessionRespectingProject(session: target, initialPrompt: prompt)
+            } else if !openNewSession(session: target) {
+                _ = copyNewSessionCommandsIfEnabled(session: target, destinationApp: profile, projectOverride: projectOverride)
+                _ = openAppleTerminal(at: dir)
+                notifyCommandCopiedIfEnabled()
+            }
+            #endif
+            return
+        }
+
+        // Handle other terminals with command resolution
+        if !profile.supportsCommandResolved {
+            _ = copyNewSessionCommandsIfEnabled(
+                session: target,
+                destinationApp: profile,
+                initialPrompt: initialPrompt,
+                warpTitleOverride: warpTitle,
+                projectOverride: projectOverride
+            )
+        }
+        let cmd = profile.supportsCommandResolved
+            ? buildNewSessionCLIInvocationRespectingProject(
+                session: target,
+                initialPrompt: initialPrompt,
+                projectOverride: projectOverride
+            )
+            : nil
+        openPreferredTerminalViaScheme(profile: profile, directory: dir, command: cmd)
+        if !profile.supportsCommandResolved {
+            notifyCommandCopiedIfEnabled()
         }
     }
 
