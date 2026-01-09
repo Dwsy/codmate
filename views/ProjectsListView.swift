@@ -467,19 +467,12 @@ private struct ProjectTreeNodeView: View {
 
   @ViewBuilder
   private func contextMenu(for project: Project) -> some View {
-    if let anchor = projectAnchor(for: project) {
-      let items = buildNewMenuItems(anchor: anchor)
-      Menu {
-        SplitMenuItemsView(items: items)
-      } label: {
-        Label("New Session…", systemImage: "plus")
-      }
-    } else {
-      Button {
-        onNewSession(project)
-      } label: {
-        Label("New Session", systemImage: "plus")
-      }
+    let anchor = projectAnchor(for: project)
+    let items = buildNewMenuItems(anchor: anchor, project: project)
+    Menu {
+      SplitMenuItemsView(items: items)
+    } label: {
+      Label("New Session…", systemImage: "plus")
     }
     Button {
       onNewProjectClick()
@@ -544,9 +537,16 @@ private struct ProjectTreeNodeView: View {
     return vm.allSessions.first { vm.projectIdForSession($0.id) == project.id }
   }
 
-  private func buildNewMenuItems(anchor: SessionSummary) -> [SplitMenuItem] {
+  private func buildNewMenuItems(anchor: SessionSummary?, project: Project? = nil) -> [SplitMenuItem] {
     let vm = self.viewModel
-    let allowed = Set(vm.allowedSources(for: anchor))
+    let allowed: Set<ProjectSessionSource>
+    if let anchor {
+      allowed = Set(vm.allowedSources(for: anchor))
+    } else if let project {
+      allowed = project.sources.isEmpty ? ProjectSessionSource.allSet : project.sources
+    } else {
+      allowed = ProjectSessionSource.allSet
+    }
     let requestedOrder: [ProjectSessionSource] = [.claude, .codex, .gemini]
     let enabledRemoteHosts = vm.preferences.enabledRemoteHosts.sorted()
 
@@ -564,7 +564,11 @@ private struct ProjectTreeNodeView: View {
     func launchItems(for source: SessionSource) -> [SplitMenuItem] {
       let key = sourceKey(source)
       var items = externalTerminalMenuItems(idPrefix: key) { profile in
-        launchNewSession(for: anchor, using: source, profile: profile)
+        if let anchor {
+          launchNewSession(for: anchor, using: source, profile: profile)
+        } else if let project {
+          vm.launchNewSessionFromProject(project: project, using: source, profile: profile)
+        }
       }
       if vm.preferences.isEmbeddedTerminalEnabled {
         let embedded = embeddedTerminalProfile()
@@ -574,7 +578,13 @@ private struct ProjectTreeNodeView: View {
             kind: .action(
               title: embedded.displayTitle,
               systemImage: "macwindow",
-              run: { launchNewSession(for: anchor, using: source, profile: embedded) }
+              run: {
+                if let anchor {
+                  launchNewSession(for: anchor, using: source, profile: embedded)
+                } else if let project {
+                  vm.launchNewSessionFromProject(project: project, using: source, profile: embedded)
+                }
+              }
             )
           ),
           at: 0
@@ -628,7 +638,7 @@ private struct ProjectTreeNodeView: View {
         ))
     }
 
-    if menuItems.isEmpty {
+    if menuItems.isEmpty, let anchor {
       let fallbackSource = anchor.source
       menuItems.append(
         SplitMenuItem(
@@ -647,72 +657,15 @@ private struct ProjectTreeNodeView: View {
     using source: SessionSource,
     profile: ExternalTerminalProfile
   ) {
-    let target = session.overridingSource(source)
     let vm = self.viewModel
-    vm.recordIntentForDetailNew(anchor: target)
-    let dir = target.cwd
-
-    if profile.id == "codmate.embedded" {
-      EmbeddedSessionNotification.postEmbeddedNewSession(sessionId: target.id, source: source)
-      return
-    }
-    guard vm.copyNewSessionCommandsIfEnabled(session: target, destinationApp: profile)
-    else { return }
-    if profile.usesWarpCommands {
-      vm.openPreferredTerminalViaScheme(profile: profile, directory: dir)
-      if vm.shouldCopyCommandsToClipboard {
-        if vm.preferences.commandCopyNotificationsEnabled {
-          Task {
-            await SystemNotifier.shared.notify(
-              title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-          }
-        }
-      }
-      return
-    }
-    if profile.isTerminal {
-      if !vm.openNewSession(session: target) {
-        _ = vm.openAppleTerminal(at: dir)
-        if vm.shouldCopyCommandsToClipboard {
-          if vm.preferences.commandCopyNotificationsEnabled {
-            Task {
-              await SystemNotifier.shared.notify(
-                title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-            }
-          }
-        }
-      }
-      return
-    }
-    if profile.isNone {
-      if vm.shouldCopyCommandsToClipboard {
-        if vm.preferences.commandCopyNotificationsEnabled {
-          Task {
-            await SystemNotifier.shared.notify(
-              title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-          }
-        }
-      }
-      return
-    }
-
-    let cmd =
-      profile.supportsCommandResolved
-      ? vm.buildNewSessionCLIInvocationRespectingProject(session: target)
-      : nil
-    if !profile.supportsCommandResolved {
-      // Clipboard already populated when copy preference is enabled.
-    }
-    vm.openPreferredTerminalViaScheme(profile: profile, directory: dir, command: cmd)
-    if !profile.supportsCommandResolved, vm.shouldCopyCommandsToClipboard,
-      vm.preferences.commandCopyNotificationsEnabled
-    {
-      Task {
-        await SystemNotifier.shared.notify(
-          title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-      }
-    }
+    vm.launchNewSessionWithProfile(
+      session: session,
+      using: source,
+      profile: profile,
+      workingDirectory: session.cwd
+    )
   }
+
 }
 
 struct ProjectEditorSheet: View {

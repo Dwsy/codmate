@@ -183,7 +183,7 @@ struct SessionListColumnView: View {
               startExternalNewForProject(project)
             }
           },
-          items: anchor.map { buildNewMenuItems(anchor: $0) } ?? []
+          items: buildNewMenuItems(anchor: anchor, project: project)
         )
         .help("Start a new session in \(projectDisplayName(project))")
       } else if !isOtherProject {
@@ -776,75 +776,13 @@ extension SessionListColumnView {
     using source: SessionSource,
     profile: ExternalTerminalProfile
   ) {
-    let target = source == session.source ? session : session.overridingSource(source)
-    viewModel.recordIntentForDetailNew(anchor: target)
-    let dir = workingDirectory(for: target)
-
-    if profile.id == "codmate.embedded" {
-      EmbeddedSessionNotification.postEmbeddedNewSession(sessionId: target.id, source: source)
-      return
-    }
-
-    guard viewModel.copyNewSessionCommandsIfEnabled(session: target, destinationApp: profile)
-    else { return }
-    if profile.usesWarpCommands {
-      viewModel.openPreferredTerminalViaScheme(profile: profile, directory: dir)
-      if viewModel.shouldCopyCommandsToClipboard
-        && viewModel.preferences.commandCopyNotificationsEnabled
-      {
-        Task {
-          await SystemNotifier.shared.notify(
-            title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-        }
-      }
-      return
-    }
-    if profile.isTerminal {
-      if !viewModel.openNewSession(session: target) {
-        _ = viewModel.openAppleTerminal(at: dir)
-        if viewModel.shouldCopyCommandsToClipboard
-          && viewModel.preferences.commandCopyNotificationsEnabled
-        {
-          Task {
-            await SystemNotifier.shared.notify(
-              title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-          }
-        }
-      }
-      return
-    }
-    if profile.isNone {
-      if viewModel.shouldCopyCommandsToClipboard
-        && viewModel.preferences.commandCopyNotificationsEnabled
-      {
-        Task {
-          await SystemNotifier.shared.notify(
-            title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-        }
-      }
-      return
-    }
-
-    let cmd =
-      profile.supportsCommandResolved
-      ? viewModel.buildNewSessionCLIInvocationRespectingProject(session: target)
-      : nil
-    if !profile.supportsCommandResolved {
-      // Clipboard already populated when copy preference is enabled.
-    }
-    viewModel.openPreferredTerminalViaScheme(
+    let dir = workingDirectory(for: session)
+    viewModel.launchNewSessionWithProfile(
+      session: session,
+      using: source,
       profile: profile,
-      directory: dir,
-      command: cmd
+      workingDirectory: dir
     )
-    if !profile.supportsCommandResolved, viewModel.shouldCopyCommandsToClipboard,
-      viewModel.preferences.commandCopyNotificationsEnabled
-    {
-      Task {
-        await SystemNotifier.shared.notify(
-          title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-      }
-    }
   }
 
   private func copyAbsolutePath(_ session: SessionSummary) {
@@ -943,13 +881,9 @@ extension SessionListColumnView {
   }
 
   private func newSessionMenu(for project: Project, anchor: SessionSummary?) -> some View {
-    Menu {
-      if let anchor {
-        SplitMenuItemsView(items: buildNewMenuItems(anchor: anchor))
-      } else {
-        Button("No recent session to anchor", action: {})
-          .disabled(true)
-      }
+    let items = buildNewMenuItems(anchor: anchor, project: project)
+    return Menu {
+      SplitMenuItemsView(items: items)
     } label: {
       Label("New Session…", systemImage: "plus")
     }

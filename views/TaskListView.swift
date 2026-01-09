@@ -787,13 +787,16 @@ struct TaskListView: View {
 
   @ViewBuilder
   private func projectContextMenu(for project: Project) -> some View {
-    let items = buildNewMenuItems(anchor: latestAnchor(for: project))
+    let anchor = latestAnchor(for: project)
+    let items = buildNewMenuItems(
+      anchor: anchor,
+      project: project,
+      customAction: anchor == nil ? { _, source, profile in
+        viewModel.launchNewSessionFromProject(project: project, using: source, profile: profile)
+      } : nil
+    )
     Menu("New Session…") {
-      if items.isEmpty {
-        Button("No recent session to anchor", action: {}).disabled(true)
-      } else {
-        SplitMenuItemsView(items: items)
-      }
+      SplitMenuItemsView(items: items)
     }
   }
 
@@ -802,13 +805,16 @@ struct TaskListView: View {
     if let projectId = currentProjectId,
       let project = viewModel.projects.first(where: { $0.id == projectId })
     {
-      let items = buildNewMenuItems(anchor: latestAnchor(for: project))
+      let anchor = latestAnchor(for: project)
+      let items = buildNewMenuItems(
+        anchor: anchor,
+        project: project,
+        customAction: anchor == nil ? { _, source, profile in
+          viewModel.launchNewSessionFromProject(project: project, using: source, profile: profile)
+        } : nil
+      )
       Menu {
-        if items.isEmpty {
-          Button("No recent session to anchor", action: {}).disabled(true)
-        } else {
-          SplitMenuItemsView(items: items)
-        }
+        SplitMenuItemsView(items: items)
       } label: {
         Label("New Session…", systemImage: "plus")
       }
@@ -948,6 +954,9 @@ struct TaskListView: View {
           customAction(anchor, source, profile)
         } else if let anchor {
           onNewSession(with: anchor, using: source, profile: profile)
+        } else if let project {
+          // No anchor but we have a project - use project-based new session
+          viewModel.launchNewSessionFromProject(project: project, using: source, profile: profile)
         }
       }
       if viewModel.preferences.isEmbeddedTerminalEnabled {
@@ -963,6 +972,9 @@ struct TaskListView: View {
                   customAction(anchor, source, embedded)
                 } else if let anchor {
                   onNewSession(with: anchor, using: source, profile: embedded)
+                } else if let project {
+                  // No anchor but we have a project - use project-based new session
+                  viewModel.launchNewSessionFromProject(project: project, using: source, profile: embedded)
                 }
               })
           ), at: 0)
@@ -1023,71 +1035,12 @@ struct TaskListView: View {
     using source: SessionSource,
     profile: ExternalTerminalProfile
   ) {
-    let target = anchor.overridingSource(source)
-    viewModel.recordIntentForDetailNew(anchor: target)
-    let dir = target.cwd
-
-    if profile.id == "codmate.embedded" {
-      EmbeddedSessionNotification.postEmbeddedNewSession(sessionId: target.id, source: source)
-      return
-    }
-
-    guard viewModel.copyNewSessionCommandsIfEnabled(session: target, destinationApp: profile)
-    else { return }
-    if profile.usesWarpCommands {
-      viewModel.openPreferredTerminalViaScheme(profile: profile, directory: dir)
-      if viewModel.shouldCopyCommandsToClipboard {
-        if viewModel.preferences.commandCopyNotificationsEnabled {
-          Task {
-            await SystemNotifier.shared.notify(
-              title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-          }
-        }
-      }
-      return
-    }
-    if profile.isTerminal {
-      if !viewModel.openNewSession(session: target) {
-        _ = viewModel.openAppleTerminal(at: dir)
-        if viewModel.shouldCopyCommandsToClipboard {
-          if viewModel.preferences.commandCopyNotificationsEnabled {
-            Task {
-              await SystemNotifier.shared.notify(
-                title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-            }
-          }
-        }
-      }
-      return
-    }
-    if profile.isNone {
-      if viewModel.shouldCopyCommandsToClipboard {
-        if viewModel.preferences.commandCopyNotificationsEnabled {
-          Task {
-            await SystemNotifier.shared.notify(
-              title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-          }
-        }
-      }
-      return
-    }
-
-    let cmd =
-      profile.supportsCommandResolved
-      ? viewModel.buildNewSessionCLIInvocationRespectingProject(session: target)
-      : nil
-    if !profile.supportsCommandResolved {
-      // Clipboard already populated when copy preference is enabled.
-    }
-    viewModel.openPreferredTerminalViaScheme(profile: profile, directory: dir, command: cmd)
-    if !profile.supportsCommandResolved, viewModel.shouldCopyCommandsToClipboard,
-      viewModel.preferences.commandCopyNotificationsEnabled
-    {
-      Task {
-        await SystemNotifier.shared.notify(
-          title: "CodMate", body: "Command copied. Paste it in the opened terminal.")
-      }
-    }
+    viewModel.launchNewSessionWithProfile(
+      session: anchor,
+      using: source,
+      profile: profile,
+      workingDirectory: anchor.cwd
+    )
   }
 
   private func latestAnchor(for project: Project) -> SessionSummary? {
@@ -1097,6 +1050,14 @@ struct TaskListView: View {
       return visible
     }
     return viewModel.allSessions.first { viewModel.projectIdForSession($0.id) == project.id }
+  }
+
+  private func onNewSessionFromProject(
+    project: Project,
+    using source: SessionSource,
+    profile: ExternalTerminalProfile
+  ) {
+    viewModel.launchNewSessionFromProject(project: project, using: source, profile: profile)
   }
 }
 
