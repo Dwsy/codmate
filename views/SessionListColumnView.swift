@@ -125,81 +125,87 @@ struct SessionListColumnView: View {
     let selected = selectedProject()
     let isOtherProject = selected?.id == SessionListViewModel.otherProjectId
 
-    return VStack(spacing: 12) {
-      Spacer(minLength: 12)
+    return ZStack {
+      Color.clear
+      
+      VStack(spacing: 12) {
+        Spacer(minLength: 12)
 
-      // Different message for Other project bucket
-      if isOtherProject {
-        Group {
-          if #available(macOS 14.0, *) {
-            unavailableView(
-              title: "No Unassigned Sessions",
-              systemImage: "tray",
-              description:
-                "Sessions can only be created within a project. Select a project from the sidebar to start a new session."
-            )
-          } else {
-            fallbackUnavailableView(
-              title: "No Unassigned Sessions",
-              systemImage: "tray",
-              description:
-                "Sessions can only be created within a project. Select a project from the sidebar to start a new session."
-            )
-          }
-        }
-        .frame(maxWidth: .infinity)
-      } else {
-        Group {
-          if #available(macOS 14.0, *) {
-            unavailableView(
-              title: "No Sessions",
-              systemImage: "tray",
-              description: "Adjust directories or launch Codex CLI to generate new session logs."
-            )
-          } else {
-            fallbackUnavailableView(
-              title: "No Sessions",
-              systemImage: "tray",
-              description: "Adjust directories or launch Codex CLI to generate new session logs."
-            )
-          }
-        }
-        .frame(maxWidth: .infinity)
-      }
-
-      // Primary action: New (hidden for Other project, shown for regular projects)
-      if let project = selected, !isOtherProject {
-        let embeddedPreferredNew =
-          viewModel.preferences.defaultResumeUseEmbeddedTerminal && !AppSandbox.isEnabled
-        let anchor = projectAnchor(for: project)
-        SplitPrimaryMenuButton(
-          title: "New",
-          systemImage: "plus",
-          primary: {
-            if embeddedPreferredNew {
-              // Defer to shared embedded flow (exactly as detail bar does)
-              viewModel.newSession(project: project)
+        // Different message for Other project bucket
+        if isOtherProject {
+          Group {
+            if #available(macOS 14.0, *) {
+              unavailableView(
+                title: "No Unassigned Sessions",
+                systemImage: "tray",
+                description:
+                  "Sessions can only be created within a project. Select a project from the sidebar to start a new session."
+              )
             } else {
-              startExternalNewForProject(project)
+              fallbackUnavailableView(
+                title: "No Unassigned Sessions",
+                systemImage: "tray",
+                description:
+                  "Sessions can only be created within a project. Select a project from the sidebar to start a new session."
+              )
             }
-          },
-          items: buildNewMenuItems(anchor: anchor, project: project)
-        )
-        .help("Start a new session in \(projectDisplayName(project))")
-      } else if !isOtherProject {
-        SplitPrimaryMenuButton(
-          title: "New",
-          systemImage: "plus",
-          primary: {},
-          items: []
-        )
-        .opacity(0.6)
-        .help("Select a project in the sidebar to start a new session")
-      }
+          }
+          .frame(maxWidth: .infinity)
+        } else {
+          Group {
+            if #available(macOS 14.0, *) {
+              unavailableView(
+                title: "No Sessions",
+                systemImage: "tray",
+                description: "Adjust directories or launch Codex CLI to generate new session logs."
+              )
+            } else {
+              fallbackUnavailableView(
+                title: "No Sessions",
+                systemImage: "tray",
+                description: "Adjust directories or launch Codex CLI to generate new session logs."
+              )
+            }
+          }
+          .frame(maxWidth: .infinity)
+        }
 
-      Spacer()
+        // Primary action: New (hidden for Other project, shown for regular projects)
+        if let project = selected, !isOtherProject {
+          let embeddedPreferredNew =
+            viewModel.preferences.defaultResumeUseEmbeddedTerminal && !AppSandbox.isEnabled
+          let anchor = projectAnchor(for: project)
+          SplitPrimaryMenuButton(
+            title: "New",
+            systemImage: "plus",
+            primary: {
+              if embeddedPreferredNew {
+                // Defer to shared embedded flow (exactly as detail bar does)
+                viewModel.newSession(project: project)
+              } else {
+                startExternalNewForProject(project)
+              }
+            },
+            items: buildNewMenuItems(anchor: anchor, project: project)
+          )
+          .help("Start a new session in \(projectDisplayName(project))")
+        } else if !isOtherProject {
+          SplitPrimaryMenuButton(
+            title: "New",
+            systemImage: "plus",
+            primary: {},
+            items: []
+          )
+          .opacity(0.6)
+          .help("Select a project in the sidebar to start a new session")
+        }
+
+        Spacer()
+      }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .contentShape(Rectangle())
+    .contextMenu { backgroundContextMenu() }
   }
 
   @available(macOS 14.0, *)
@@ -329,7 +335,7 @@ struct SessionListColumnView: View {
     }
 
     if let project, project.id != SessionListViewModel.otherProjectId {
-      let newItems = buildNewMenuItems(anchor: session)
+      let newItems = buildNewMenuItems(anchor: session, project: project)
       if newItems.isEmpty {
         Button {
           viewModel.newSession(project: project)
@@ -792,8 +798,17 @@ extension SessionListColumnView {
   }
 
   // Build menu items matching Timeline “New” split control for a given session anchor.
-  private func buildNewMenuItems(anchor: SessionSummary) -> [SplitMenuItem] {
-    let allowed = Set(viewModel.allowedSources(for: anchor))
+  private func buildNewMenuItems(anchor: SessionSummary?, project: Project? = nil)
+    -> [SplitMenuItem]
+  {
+    let allowed: Set<ProjectSessionSource>
+    if let anchor {
+      allowed = Set(viewModel.allowedSources(for: anchor))
+    } else if let project {
+      allowed = project.sources.isEmpty ? ProjectSessionSource.allSet : project.sources
+    } else {
+      allowed = ProjectSessionSource.allSet
+    }
     let requestedOrder: [ProjectSessionSource] = [.claude, .codex, .gemini]
     let enabledRemoteHosts = viewModel.preferences.enabledRemoteHosts.sorted()
 
@@ -811,7 +826,11 @@ extension SessionListColumnView {
     func launchItems(for source: SessionSource) -> [SplitMenuItem] {
       let key = sourceKey(source)
       var items = externalTerminalMenuItems(idPrefix: key) { profile in
-        launchNewSession(for: anchor, using: source, profile: profile)
+        if let anchor {
+          launchNewSession(for: anchor, using: source, profile: profile)
+        } else if let project {
+          viewModel.launchNewSessionFromProject(project: project, using: source, profile: profile)
+        }
       }
       if viewModel.preferences.isEmbeddedTerminalEnabled {
         let embedded = embeddedTerminalProfile()
@@ -822,7 +841,12 @@ extension SessionListColumnView {
               title: embedded.displayTitle,
               systemImage: "macwindow",
               run: {
-                launchNewSession(for: anchor, using: source, profile: embedded)
+                if let anchor {
+                  launchNewSession(for: anchor, using: source, profile: embedded)
+                } else if let project {
+                  viewModel.launchNewSessionFromProject(
+                    project: project, using: source, profile: embedded)
+                }
               })
           ), at: 0)
       }
@@ -866,15 +890,15 @@ extension SessionListColumnView {
         ))
     }
 
-    if menuItems.isEmpty {
-      let fallbackSource = anchor.source
+    if menuItems.isEmpty, let anchor {
+      let fallback = anchor.source
       menuItems.append(
         .init(
-          id: "fallback-\(sourceKey(fallbackSource))",
+          id: "fallback-\(sourceKey(fallback))",
           kind: .submenu(
-            title: fallbackSource.branding.displayName,
+            title: fallback.branding.displayName,
             systemImage: "terminal",
-            items: launchItems(for: fallbackSource)
+            items: launchItems(for: fallback)
           )))
     }
     return menuItems

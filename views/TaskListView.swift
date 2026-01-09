@@ -46,34 +46,48 @@ struct TaskListView: View {
       let enrichedTasks = workspaceVM.enrichTasksWithSessions()
       let assignedSessionIds = Set(enrichedTasks.flatMap { $0.task.sessionIds })
 
-      // Use the same sections from viewModel, but render tasks inline
-      List(selection: $selection) {
-        ForEach(viewModel.sections) { section in
-          Section {
-            ForEach(
-              enrichedSessionsForSection(
-                section,
-                enrichedTasks: enrichedTasks,
-                assignedSessionIds: assignedSessionIds),
-              id: \.id
-            ) { item in
-              switch item {
-              case .taskHeader(let taskWithSessions):
-                taskRow(taskWithSessions)
-              case .taskSession(let taskWithSessions, let session):
-                sessionRow(session, parentTask: taskWithSessions.task)
-              case .session(let session):
-                sessionRow(session)
+      // Check if sections are empty and show placeholder
+      if viewModel.sections.isEmpty {
+        if viewModel.isLoading {
+          VStack {
+            Spacer()
+            ProgressView("Scanning…")
+            Spacer()
+          }
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+          emptyStateView
+        }
+      } else {
+        // Use the same sections from viewModel, but render tasks inline
+        List(selection: $selection) {
+          ForEach(viewModel.sections) { section in
+            Section {
+              ForEach(
+                enrichedSessionsForSection(
+                  section,
+                  enrichedTasks: enrichedTasks,
+                  assignedSessionIds: assignedSessionIds),
+                id: \.id
+              ) { item in
+                switch item {
+                case .taskHeader(let taskWithSessions):
+                  taskRow(taskWithSessions)
+                case .taskSession(let taskWithSessions, let session):
+                  sessionRow(session, parentTask: taskWithSessions.task)
+                case .session(let session):
+                  sessionRow(session)
+                }
               }
+            } header: {
+              sectionHeader(for: section)
             }
-          } header: {
-            sectionHeader(for: section)
           }
         }
+        .padding(.horizontal, -2)
+        .listStyle(.inset)
+        .contextMenu { taskListBackgroundContextMenu() }
       }
-      .padding(.horizontal, -2)
-      .listStyle(.inset)
-      .contextMenu { taskListBackgroundContextMenu() }
     }
     .sheet(item: $editingTask) { task in
       EditTaskSheet(
@@ -1058,6 +1072,82 @@ struct TaskListView: View {
     profile: ExternalTerminalProfile
   ) {
     viewModel.launchNewSessionFromProject(project: project, using: source, profile: profile)
+  }
+
+  // MARK: - Empty State View
+
+  @ViewBuilder
+  private var emptyStateView: some View {
+    let project = currentProjectId.flatMap { pid in viewModel.projects.first(where: { $0.id == pid }) }
+    let isOtherProject = project?.id == SessionListViewModel.otherProjectId
+
+    ZStack {
+      Color.clear
+      
+      VStack(spacing: 12) {
+        Spacer(minLength: 12)
+
+        // Different message for Other project bucket
+        if isOtherProject {
+          unavailableViewWrapper(
+            title: "No Unassigned Sessions",
+            systemImage: "tray",
+            description: "Sessions can only be created within a project. Select a project from the sidebar to start a new session."
+          )
+        } else {
+          unavailableViewWrapper(
+            title: "No Sessions",
+            systemImage: "tray",
+            description: "Right-click in this area or use the \"+ New\" button to start a new session."
+          )
+        }
+
+        // Primary action: New (hidden for Other project, shown for regular projects)
+        if let project, !isOtherProject {
+          let anchor = latestAnchor(for: project)
+          SplitPrimaryMenuButton(
+            title: "New",
+            systemImage: "plus",
+            primary: {
+              viewModel.newSession(project: project)
+            },
+            items: buildNewMenuItems(anchor: anchor, project: project)
+          )
+          .help("Start a new session in \(project.name.isEmpty ? project.id : project.name)")
+        } else if !isOtherProject {
+          SplitPrimaryMenuButton(
+            title: "New",
+            systemImage: "plus",
+            primary: {},
+            items: []
+          )
+          .opacity(0.6)
+          .help("Select a project in the sidebar to start a new session")
+        }
+
+        Spacer()
+      }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .contentShape(Rectangle())
+    .contextMenu { taskListBackgroundContextMenu() }
+  }
+
+  @ViewBuilder
+  private func unavailableViewWrapper(title: String, systemImage: String, description: String) -> some View {
+    Group {
+      if #available(macOS 14.0, *) {
+        ContentUnavailableView(title, systemImage: systemImage, description: Text(description))
+      } else {
+        UnavailableStateView(
+          title,
+          systemImage: systemImage,
+          description: description,
+          titleColor: .primary
+        )
+      }
+    }
+    .frame(maxWidth: .infinity)
   }
 }
 
