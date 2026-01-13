@@ -154,6 +154,12 @@ extension GitChangesPanel {
                             } label: {
                                 Label("Unstage All", systemImage: "minus.circle")
                             }
+                            Divider()
+                            Button {
+                                Task { await vm.refreshStatus() }
+                            } label: {
+                                Label("Refresh", systemImage: "arrow.clockwise")
+                            }
                         }
                         if !stagedCollapsed {
                             treeRows(nodes: displayedStaged, depth: 1, scope: .staged)
@@ -189,6 +195,12 @@ extension GitChangesPanel {
                             } label: {
                                 Label("Stage All", systemImage: "plus.circle")
                             }
+                            Divider()
+                            Button {
+                                Task { await vm.refreshStatus() }
+                            } label: {
+                                Label("Refresh", systemImage: "arrow.clockwise")
+                            }
                         }
                         if !unstagedCollapsed {
                             treeRows(nodes: displayedUnstaged, depth: 1, scope: .unstaged)
@@ -211,6 +223,12 @@ extension GitChangesPanel {
                     Task { await vm.unstage(paths: paths) }
                 } label: {
                     Label("Unstage All", systemImage: "minus.circle")
+                }
+                Divider()
+                Button {
+                    Task { await vm.refreshStatus() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

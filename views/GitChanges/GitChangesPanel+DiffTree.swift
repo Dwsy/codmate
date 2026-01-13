@@ -119,6 +119,12 @@ extension GitChangesPanel {
                         Label("Reveal in Finder", systemImage: "finder")
                     }
 #endif
+                    Divider()
+                    Button {
+                        Task { await vm.refreshStatus() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
                     if scope == .unstaged {
                         Divider()
                         Button(role: .destructive) {
@@ -280,6 +286,12 @@ extension GitChangesPanel {
                         Label("Reveal in Finder", systemImage: "finder")
                     }
 #endif
+                    Divider()
+                    Button {
+                        Task { await vm.refreshStatus() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
                     if scope == .unstaged {
                         Divider()
                         Button(role: .destructive) {

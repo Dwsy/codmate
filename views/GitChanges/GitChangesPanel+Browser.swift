@@ -161,6 +161,15 @@ extension GitChangesPanel {
                 Label("Reveal in Finder", systemImage: "finder")
             }
 #endif
+            Divider()
+            Button {
+                Task {
+                    await vm.refreshStatus()
+                    await MainActor.run { requestBrowserTreeReload(force: true) }
+                }
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
         }
     }
 
@@ -304,6 +313,15 @@ extension GitChangesPanel {
                 Label("Reveal in Finder", systemImage: "finder")
             }
 #endif
+            Divider()
+            Button {
+                Task {
+                    await vm.refreshStatus()
+                    await MainActor.run { requestBrowserTreeReload(force: true) }
+                }
+            } label: {
+                Label("Refresh", systemImage: "arrow.clockwise")
+            }
             if repoAvailable, let change {
                 if change.staged != nil {
                     Button {
