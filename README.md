@@ -8,6 +8,17 @@ It focuses on speed (incremental indexing + caching), a compact three-column UI,
 
 Status: **macOS 13.5+**, **Swift 6 toolchain**. Universal binary (arm64 + x86_64).
 
+## Project status (Archival note)
+I plan to **archive CodMate** after this update. Here is the reasoning that led me to this decision:
+
+- **Key input channels narrowed**: my Claude Code account was recently suspended, which removes a major learning source for CodMate (roughly one third of the original exploration inputs). Keeping the project balanced across tools has become harder.
+- **Scope drift with limited new insight**: CodMate grew from a simple history viewer into a broader desktop GUI for experience, integration, and workflow consolidation. However, it has not pushed the core exploration of Agents/LLMs as much as I hoped.
+- **GUI weight vs. fast‑moving cores**: the underlying Agent/LLM ecosystem evolves quickly. A heavier GUI layer becomes harder to justify when CLI/TUI approaches can iterate faster with less inertia.
+- **Ecosystem already covers part of the gap**: Codex and Claude Code now offer VS Code/Zed extensions that share history with their CLI sessions, which increasingly addresses the original problem CodMate set out to solve.
+- **Next focus is orchestration, not UI**: I want to invest more in Agent orchestration and CLI‑first experimentation, potentially in a cross‑platform project (e.g., “CLIMate”), and explore open/low‑cost models (Deepseek, Kimi, GLM, etc.) more deeply.
+
+This does not diminish what CodMate achieved. It reflects a shift in focus to where I believe the highest learning and impact now lie.
+
 ## Download
 - **Latest release (DMG)**: [GitHub Releases](https://github.com/loocor/CodMate/releases/latest)
 
