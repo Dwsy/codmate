@@ -68,7 +68,35 @@ mkdir -p "$BUILD_DIR" "$BIN_DIR"
 CODMATE_BINS=()
 NOTIFY_BINS=()
 
+# Note: SwiftPM's --arch flag automatically creates architecture-specific build directories
+# (e.g., .build/arm64-apple-macosx/ and .build/x86_64-apple-macosx/)
+# Each architecture's dependencies are compiled separately, ensuring no cross-architecture contamination.
+
 for arch in "${ARCH_MATRIX[@]}"; do
+  # Map SwiftPM arch names to libghostty arch names
+  GHOSTTY_ARCH=""
+  case "$arch" in
+    arm64) GHOSTTY_ARCH="aarch64" ;;
+    x86_64) GHOSTTY_ARCH="x86_64" ;;
+    *) GHOSTTY_ARCH="$arch" ;;
+  esac
+  
+  # Setup architecture-specific libghostty library for linking
+  VENDOR_LIB_DIR="$ROOT_DIR/ghostty/Vendor/lib"
+  ARCH_LIB="$VENDOR_LIB_DIR/$GHOSTTY_ARCH/libghostty.a"
+  LINK_LIB="$VENDOR_LIB_DIR/libghostty.a"
+  
+  if [ -f "$ARCH_LIB" ]; then
+    # Copy architecture-specific library to the link location
+    cp -f "$ARCH_LIB" "$LINK_LIB"
+    echo "[libghostty] Using $GHOSTTY_ARCH library for $arch build"
+  elif [ -f "$LINK_LIB" ]; then
+    echo "[libghostty] Using existing library at $LINK_LIB (may be wrong architecture)"
+  else
+    echo "[warn] libghostty.a not found at $ARCH_LIB or $LINK_LIB" >&2
+    echo "[warn] Build may fail. Run ./scripts/build-libghostty-local.sh $GHOSTTY_ARCH first" >&2
+  fi
+  
   echo "[build] swift build -c $SWIFT_CONFIG --arch $arch"
   swift build -c "$SWIFT_CONFIG" --arch "$arch" "${SWIFT_FLAGS[@]}"
   BIN_PATH="$(swift build -c "$SWIFT_CONFIG" --arch "$arch" --show-bin-path)"
@@ -89,6 +117,28 @@ for arch in "${ARCH_MATRIX[@]}"; do
       echo "[error] notify binary missing at $NOTIFY_BIN" >&2
       exit 1
     fi
+  fi
+
+  # Verify binary architectures match expected arch (ensures no cross-architecture contamination)
+  if command -v lipo >/dev/null 2>&1; then
+    for BIN_TO_CHECK in "$CODMATE_BIN" "$NOTIFY_BIN"; do
+      if [[ -f "$BIN_TO_CHECK" ]]; then
+        BIN_ARCHS=$(lipo -info "$BIN_TO_CHECK" 2>/dev/null | sed 's/.*: //' || echo "")
+        if [[ -n "$BIN_ARCHS" ]]; then
+          if [[ "$BIN_ARCHS" != *"$arch"* ]]; then
+            echo "[error] Binary $(basename "$BIN_TO_CHECK") architecture mismatch: expected $arch, got $BIN_ARCHS" >&2
+            exit 1
+          fi
+          # Check if binary contains multiple architectures (should only have one)
+          ARCH_COUNT=$(echo "$BIN_ARCHS" | wc -w | tr -d ' ')
+          if [[ "$ARCH_COUNT" -gt 1 ]]; then
+            echo "[error] Binary $(basename "$BIN_TO_CHECK") contains multiple architectures ($BIN_ARCHS), expected only $arch" >&2
+            exit 1
+          fi
+          echo "[verify] $(basename "$BIN_TO_CHECK") architecture: $BIN_ARCHS (expected: $arch)"
+        fi
+      fi
+    done
   fi
 
   CODMATE_BINS+=("$CODMATE_BIN")
