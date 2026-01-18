@@ -8,14 +8,16 @@ struct SessionCommandGenerator {
         executableURL: URL,
         options: ResumeOptions,
         workingDirectory: String? = nil,
-        codexHome: String? = nil
+        codexHome: String? = nil,
+        includeCd: Bool = true
     ) -> String {
         actions.buildEmbeddedResumeCommandLines(
             session: session,
             executableURL: executableURL,
             options: options,
             workingDirectory: workingDirectory,
-            codexHome: codexHome
+            codexHome: codexHome,
+            includeCd: includeCd
         )
     }
 

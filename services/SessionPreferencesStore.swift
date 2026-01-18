@@ -95,6 +95,9 @@ final class SessionPreferencesStore: ObservableObject {
     static let terminalFontName = "terminal.fontName"
     static let terminalFontSize = "terminal.fontSize"
     static let terminalCursorStyle = "terminal.cursorStyle"
+    static let terminalThemeName = "terminalThemeName"
+    static let terminalThemeNameLight = "terminalThemeNameLight"
+    static let terminalUsePerAppearanceTheme = "terminalUsePerAppearanceTheme"
     static let warpPromptEnabled = "codmate.warp.promptTitle"
     // Local AI Server (formerly CLI Proxy)
     static let localServerEnabled = "codmate.localserver.enabled"         // Public server switch
@@ -244,6 +247,9 @@ final class SessionPreferencesStore: ObservableObject {
       defaults.string(forKey: Keys.terminalCursorStyle)
       ?? TerminalCursorStyleOption.blinkBlock.rawValue
     self.terminalCursorStyleRaw = storedCursor
+    self.terminalThemeName = defaults.string(forKey: Keys.terminalThemeName) ?? "Xcode Dark"
+    self.terminalThemeNameLight = defaults.string(forKey: Keys.terminalThemeNameLight) ?? "Xcode Light"
+    self.terminalUsePerAppearanceTheme = defaults.object(forKey: Keys.terminalUsePerAppearanceTheme) as? Bool ?? true
 
     // CLI policy defaults (with legacy value coercion)
     let resolvedSandbox: SandboxMode = {
@@ -864,6 +870,24 @@ final class SessionPreferencesStore: ObservableObject {
   @Published var terminalCursorStyleRaw: String {
     didSet {
       defaults.set(terminalCursorStyleRaw, forKey: Keys.terminalCursorStyle)
+    }
+  }
+
+  @Published var terminalThemeName: String {
+    didSet {
+      defaults.set(terminalThemeName, forKey: Keys.terminalThemeName)
+    }
+  }
+
+  @Published var terminalThemeNameLight: String {
+    didSet {
+      defaults.set(terminalThemeNameLight, forKey: Keys.terminalThemeNameLight)
+    }
+  }
+
+  @Published var terminalUsePerAppearanceTheme: Bool {
+    didSet {
+      defaults.set(terminalUsePerAppearanceTheme, forKey: Keys.terminalUsePerAppearanceTheme)
     }
   }
 

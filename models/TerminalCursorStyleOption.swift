@@ -20,29 +20,26 @@ enum TerminalCursorStyleOption: String, CaseIterable, Identifiable, Codable, Has
         case .steadyBar: return "Steady Bar"
         }
     }
-}
 
-#if canImport(SwiftTerm)
-import SwiftTerm
-
-extension TerminalCursorStyleOption {
-    var cursorStyleValue: CursorStyle {
+    // Ghostty cursor configuration string
+    var ghosttyConfigValue: String {
         switch self {
-        case .blinkBlock: return .blinkBlock
-        case .steadyBlock: return .steadyBlock
-        case .blinkUnderline: return .blinkUnderline
-        case .steadyUnderline: return .steadyUnderline
-        case .blinkBar: return .blinkBar
-        case .steadyBar: return .steadyBar
+        case .blinkBlock: return "block"
+        case .steadyBlock: return "block"
+        case .blinkUnderline: return "underline"
+        case .steadyUnderline: return "underline"
+        case .blinkBar: return "bar"
+        case .steadyBar: return "bar"
         }
     }
 
-    var steadyCursorStyleValue: CursorStyle {
+    var ghosttyBlinkEnabled: Bool {
         switch self {
-        case .blinkBlock, .steadyBlock: return .steadyBlock
-        case .blinkUnderline, .steadyUnderline: return .steadyUnderline
-        case .blinkBar, .steadyBar: return .steadyBar
+        case .blinkBlock, .blinkUnderline, .blinkBar:
+            return true
+        case .steadyBlock, .steadyUnderline, .steadyBar:
+            return false
         }
     }
 }
-#endif
+

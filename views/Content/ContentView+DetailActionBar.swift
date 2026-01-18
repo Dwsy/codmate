@@ -5,48 +5,41 @@ extension ContentView {
   // Sticky detail action bar at the top of the detail column
   var detailActionBar: some View {
     HStack(spacing: 12) {
-      // Left: view mode segmented (Timeline | Git Review | Terminal)
+      // Left: view mode segmented (Timeline | Terminal)
       Group {
-        #if canImport(SwiftTerm) && !APPSTORE
-          if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
-            let items: [SegmentedIconPicker<ContentView.DetailTab>.Item] = [
-              .init(title: "Timeline", systemImage: "clock", tag: .timeline),
-              .init(title: "Terminal", systemImage: "terminal", tag: .terminal),
-            ]
-            let selection = Binding<ContentView.DetailTab>(
-              get: { selectedDetailTab },
-              set: { newValue in
-                if newValue == .terminal {
-                  if hasAvailableEmbeddedTerminal() {
-                    if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
-                      selectedTerminalKey = focused.id
-                    } else if let anchorId = fallbackRunningAnchorId() {
-                      selectedTerminalKey = anchorId
-                    } else {
-                      selectedTerminalKey = runningSessionIDs.first
-                    }
-                    selectedDetailTab = .terminal
-                  } else if let focused = focusedSummary {
-                    pendingTerminalLaunch = PendingTerminalLaunch(session: focused)
+        if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+          let items: [SegmentedIconPicker<ContentView.DetailTab>.Item] = [
+            .init(title: "Timeline", systemImage: "clock", tag: .timeline),
+            .init(title: "Terminal", systemImage: "terminal", tag: .terminal),
+          ]
+          let selection = Binding<ContentView.DetailTab>(
+            get: { selectedDetailTab },
+            set: { newValue in
+              if newValue == .terminal {
+                if hasAvailableEmbeddedTerminal() {
+                  if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
+                    selectedTerminalKey = focused.id
+                  } else if let anchorId = fallbackRunningAnchorId() {
+                    selectedTerminalKey = anchorId
+                  } else {
+                    selectedTerminalKey = runningSessionIDs.first
                   }
-                } else {
-                  selectedDetailTab = newValue
+                  selectedDetailTab = .terminal
+                } else if let focused = focusedSummary {
+                  pendingTerminalLaunch = PendingTerminalLaunch(session: focused)
                 }
+              } else {
+                selectedDetailTab = newValue
               }
-            )
-            SegmentedIconPicker(items: items, selection: selection)
-          } else {
-            let items: [SegmentedIconPicker<ContentView.DetailTab>.Item] = [
-              .init(title: "Timeline", systemImage: "clock", tag: .timeline)
-            ]
-            SegmentedIconPicker(items: items, selection: $selectedDetailTab)
-          }
-        #else
+            }
+          )
+          SegmentedIconPicker(items: items, selection: selection)
+        } else {
           let items: [SegmentedIconPicker<ContentView.DetailTab>.Item] = [
             .init(title: "Timeline", systemImage: "clock", tag: .timeline)
           ]
           SegmentedIconPicker(items: items, selection: $selectedDetailTab)
-        #endif
+        }
       }
 
       Spacer(minLength: 12)
@@ -617,21 +610,23 @@ private extension ContentView {
       let taskIdString = task.id.uuidString
       let pathHint = "~/.codmate/tasks/context-\(taskIdString).md"
       let promptLines: [String] = [
-        "当前 Task 的共享上下文已更新并保存到本地文件：",
+        "The shared context for the current Task has been updated and saved to a local file:",
         pathHint,
         "",
-        "在回答接下来的问题前，如有需要，请先阅读该文件以了解任务历史记录和相关约束。"
+        "Before answering the next question, if needed, please read this file first to understand the task history and related constraints."
       ]
       let text = promptLines.joined(separator: "\n")
 
       if selectedDetailTab == .terminal, runningSessionIDs.contains(focused.id) {
-        #if canImport(SwiftTerm) && !APPSTORE
-          TerminalSessionManager.shared.send(to: focused.id, text: text)
-        #else
+        // Send text directly to the Ghostty terminal
+        if let scrollView = GhosttySessionManager.shared.getScrollView(for: focused.id) {
+          scrollView.surfaceView.sendText(text + "\n")
+        } else {
+          // Fallback to clipboard if terminal not found
           let pb = NSPasteboard.general
           pb.clearContents()
           pb.setString(text + "\n", forType: .string)
-        #endif
+        }
       } else {
         let pb = NSPasteboard.general
         pb.clearContents()
@@ -938,11 +933,13 @@ private struct PromptsPopover: View {
   private func handleSelection(_ value: String) {
     switch mode {
     case .insert(let terminalKey):
-      #if canImport(SwiftTerm) && !APPSTORE
-        TerminalSessionManager.shared.send(to: terminalKey, text: value)
-      #else
+      // Send text directly to the Ghostty terminal
+      if let scrollView = GhosttySessionManager.shared.getScrollView(for: terminalKey) {
+        scrollView.surfaceView.sendText(value)
+      } else {
+        // Fallback to clipboard if terminal not found
         copyToClipboard(value)
-      #endif
+      }
     case .copy:
       copyToClipboard(value)
       Task {

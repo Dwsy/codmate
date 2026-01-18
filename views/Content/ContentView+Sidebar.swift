@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 extension ContentView {
   // Clamp and persist content column width (sessions list / review tree)
@@ -72,7 +73,15 @@ extension ContentView {
       isRunning: { runningSessionIDs.contains($0.id) },
       isUpdating: { viewModel.isActivelyUpdating($0.id) },
       isAwaitingFollowup: { viewModel.isAwaitingFollowup($0.id) },
-      onPrimarySelect: { s in selectionPrimaryId = s.id },
+      onPrimarySelect: { s in
+        selectionPrimaryId = s.id
+        // If the selected session has a running embedded terminal, switch to it
+        if runningSessionIDs.contains(s.id) {
+          selectedTerminalKey = s.id
+          selectedDetailTab = .terminal
+          sessionDetailTabs[s.id] = .terminal
+        }
+      },
       onNewSessionWithTaskContext: newSessionWithTaskContext
     )
     .id(isListHidden ? "list-hidden" : "list-shown")
@@ -275,8 +284,8 @@ extension ContentView {
         onRequestRefresh: { viewModel.requestUsageStatusRefreshThrottled(for: $0) }
       )
 
-      #if canImport(SwiftTerm) && !APPSTORE
-        if viewModel.preferences.defaultResumeUseEmbeddedTerminal {
+      #if !APPSTORE
+        if viewModel.preferences.isEmbeddedTerminalEnabled {
           ActiveTerminalSessionsControl(
             viewModel: viewModel,
             runningSessionIDs: runningSessionIDs
@@ -372,6 +381,269 @@ extension ContentView {
     return true
   }
 }
+
+private struct ActiveTerminalSessionsControl: View {
+  let viewModel: SessionListViewModel
+  let runningSessionIDs: Set<String>
+  @State private var showPopover = false
+  @State private var isHovering = false
+
+  var body: some View {
+    let count = runningSessionIDs.count
+
+    Button {
+      showPopover.toggle()
+    } label: {
+      ZStack {
+        Image(systemName: "chevron.forward.2")
+          .font(.system(size: 14, weight: .medium))
+          .foregroundStyle(iconColor)
+          .offset(x: 1)
+
+        if count > 0 {
+          Text("\(count)")
+            .font(.system(size: 9, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .frame(minWidth: 14, minHeight: 14)
+            .background(
+              Circle()
+                .fill(count > 0 ? Color.accentColor : Color.secondary)
+            )
+            .offset(x: 8, y: -8)
+        }
+      }
+      .frame(width: 14, height: 14)
+      .padding(8)
+      .background(
+        Circle()
+          .fill(backgroundColor)
+      )
+      .overlay(
+        Circle()
+          .stroke(borderColor, lineWidth: 1)
+      )
+      .contentShape(Circle())
+    }
+    .buttonStyle(.plain)
+    .help(count == 0 ? "No active terminal sessions" : "\(count) active terminal session\(count == 1 ? "" : "s")")
+    .onHover { hovering in
+      withAnimation(.easeInOut(duration: 0.15)) {
+        isHovering = hovering
+      }
+    }
+    .popover(isPresented: $showPopover, arrowEdge: .top) {
+      ActiveTerminalSessionsPopover(
+        runningSessionIDs: runningSessionIDs,
+        viewModel: viewModel,
+        isPresented: $showPopover
+      )
+    }
+  }
+
+  private var iconColor: Color {
+    return isHovering ? Color.primary : Color.primary.opacity(0.55)
+  }
+
+  private var backgroundColor: Color {
+    return (isHovering ? Color.primary.opacity(0.12) : Color(nsColor: .separatorColor).opacity(0.18))
+  }
+
+  private var borderColor: Color {
+    return Color(nsColor: .separatorColor).opacity(isHovering ? 0.65 : 0.45)
+  }
+}
+
+private struct ActiveTerminalSessionsPopover: View {
+  let runningSessionIDs: Set<String>
+  let viewModel: SessionListViewModel
+  @Binding var isPresented: Bool
+  @Environment(\.colorScheme) private var colorScheme
+
+  private static let timeFormatter: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.setLocalizedDateFormatFromTemplate("HH:mm:ss")
+    return formatter
+  }()
+
+  private var summaryLookup: [SessionSummary.ID: SessionSummary] {
+    Dictionary(
+      uniqueKeysWithValues: viewModel.sections
+        .flatMap(\.sessions)
+        .map { ($0.id, $0) }
+    )
+  }
+
+  private var sessions: [(id: String, summary: SessionSummary?)] {
+    runningSessionIDs.map { id in
+      (id: id, summary: summaryLookup[id])
+    }
+    .sorted { lhs, rhs in
+      let lhsDate = lhs.summary?.lastUpdatedAt ?? lhs.summary?.startedAt ?? Date.distantPast
+      let rhsDate = rhs.summary?.lastUpdatedAt ?? rhs.summary?.startedAt ?? Date.distantPast
+      return lhsDate > rhsDate
+    }
+  }
+
+  private var listHeight: CGFloat {
+    let rowHeight: CGFloat = 42
+    let dividerHeight: CGFloat = 1
+    let count = CGFloat(sessions.count)
+    let dividers = max(count - 1, 0)
+    return count * rowHeight + dividers * dividerHeight + 6
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      // Sessions list
+      if sessions.isEmpty {
+        VStack(spacing: 12) {
+          Image(systemName: "terminal")
+            .font(.system(size: 32, weight: .light))
+            .foregroundStyle(.tertiary)
+
+          Text("No active terminal sessions")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+      } else {
+        ScrollView {
+          VStack(spacing: 0) {
+            ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
+              SessionRowView(
+                sessionId: session.id,
+                summary: session.summary,
+                viewModel: viewModel,
+                colorScheme: colorScheme,
+                onSelect: { handleSessionSelect(session.id, summary: session.summary) }
+              )
+              if index < sessions.count - 1 {
+                Divider()
+                  .padding(.leading, 28)
+              }
+            }
+          }
+        }
+        .frame(height: listHeight)
+        .padding(.top, 6)
+      }
+    }
+    .frame(width: 320)
+    .padding(16)
+  }
+
+  private func handleSessionSelect(_ sessionId: String, summary: SessionSummary?) {
+    if let summary = summary {
+      focusSession(summary)
+    } else {
+      NotificationCenter.default.post(
+        name: .codMateResumeSession,
+        object: nil,
+        userInfo: ["sessionId": sessionId]
+      )
+    }
+    isPresented = false
+  }
+
+  private func focusSession(_ summary: SessionSummary) {
+    NotificationCenter.default.post(
+      name: .codMateFocusSessionSummary,
+      object: nil,
+      userInfo: ["summary": summary]
+    )
+  }
+
+  private struct SessionRowView: View {
+    let sessionId: String
+    let summary: SessionSummary?
+    let viewModel: SessionListViewModel
+    let colorScheme: ColorScheme
+    let onSelect: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+      Button(action: onSelect) {
+        HStack(spacing: 10) {
+          iconView
+          VStack(alignment: .leading, spacing: 2) {
+            Text(displayName)
+              .font(.subheadline.weight(.medium))
+              .foregroundStyle(.primary)
+              .lineLimit(1)
+            Text("Started \(startTimeText)")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          Spacer()
+          Image(systemName: "chevron.right")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.tertiary)
+            .opacity(isHovering ? 1 : 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .background(
+          RoundedRectangle(cornerRadius: 6)
+            .fill(isHovering ? Color.primary.opacity(0.06) : Color.clear)
+        )
+      }
+      .buttonStyle(.plain)
+      .focusable(false)
+      .onHover { hovering in
+        withAnimation(.easeInOut(duration: 0.1)) {
+          isHovering = hovering
+        }
+      }
+    }
+
+    private var iconView: some View {
+      Group {
+        if let summary = summary {
+          let branding = summary.source.branding
+          if let asset = branding.badgeAssetName {
+            let shouldInvertCodexDark = summary.source.baseKind == .codex && colorScheme == .dark
+            Image(asset)
+              .resizable()
+              .renderingMode(.original)
+              .aspectRatio(contentMode: .fit)
+              .frame(width: 18, height: 18)
+              .modifier(DarkModeInvertModifier(active: shouldInvertCodexDark))
+          } else {
+            Image(systemName: branding.symbolName)
+              .font(.system(size: 13, weight: .semibold))
+              .foregroundStyle(branding.iconColor)
+              .frame(width: 18, height: 18)
+          }
+        } else {
+          Image(systemName: "terminal.fill")
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(Color.secondary)
+            .frame(width: 18, height: 18)
+        }
+      }
+    }
+
+    private var displayName: String {
+      if let summary = summary {
+        return summary.effectiveTitle
+      }
+      if sessionId.hasPrefix("new-anchor:") {
+        return "New session"
+      }
+      return sessionId
+    }
+
+    private var startTimeText: String {
+      if let summary = summary {
+        return ActiveTerminalSessionsPopover.timeFormatter.string(from: summary.startedAt)
+      }
+      return "--:--:--"
+    }
+  }
+}
+
 
 private struct ToolbarCircleButton: View {
   let systemImage: String

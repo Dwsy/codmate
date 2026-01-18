@@ -170,7 +170,7 @@ struct ContentView: View {
     let selectOnSuccess: Bool
     let projectId: String?
   }
-  @State private var pendingEmbeddedRekeys: [PendingEmbeddedRekey] = []
+  @State var pendingEmbeddedRekeys: [PendingEmbeddedRekey] = []
   func makeTerminalFont() -> NSFont {
     TerminalFontResolver.resolvedFont(
       name: viewModel.preferences.terminalFontName,
@@ -205,7 +205,7 @@ struct ContentView: View {
         ZStack(alignment: .bottomLeading) {
           navigationSplitView(geometry: geometry)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-          
+
           // Status bar overlay - positioned to cover only the main content area (content+detail columns)
           // It should start after the sidebar and span to the right edge
           if preferences.statusBarVisibility != .hidden {
@@ -359,9 +359,7 @@ struct ContentView: View {
       await viewModel.delete(summaries: summaries)
       await MainActor.run {
         // Best-effort: stop any embedded terminals for deleted sessions
-        #if canImport(SwiftTerm) && !APPSTORE
-          for s in summaries { TerminalSessionManager.shared.stop(key: s.id) }
-        #endif
+        for s in summaries { GhosttySessionManager.shared.removeScrollView(for: s.id) }
         // Clean up per-session state for deleted sessions
         for id in ids {
           sessionDetailTabs.removeValue(forKey: id)
@@ -405,18 +403,13 @@ struct ContentView: View {
       sessionDetailTabs[target.id] = .terminal
       // User has taken over: clear awaiting follow-up highlight
       viewModel.clearAwaitingFollowup(target.id)
-      // Nudge Codex to redraw cleanly once it starts, by sending "/" then backspace
-      #if canImport(SwiftTerm) && !APPSTORE
-        TerminalSessionManager.shared.scheduleSlashNudge(forKey: target.id, delay: 1.0)
-      #endif
+      // DISABLED: Ghostty doesn't need slash nudge
     #endif
   }
 
   func stopEmbedded(forID id: SessionSummary.ID) {
     // Tear down the embedded terminal view and terminate its child process
-    #if canImport(SwiftTerm) && !APPSTORE
-      TerminalSessionManager.shared.stop(key: id)
-    #endif
+    GhosttySessionManager.shared.removeScrollView(for: id)
     runningSessionIDs.remove(id)
     embeddedInitialCommands.removeValue(forKey: id)
     if selectedTerminalKey == id {
@@ -447,9 +440,7 @@ struct ContentView: View {
       stopEmbedded(forID: key)
       return
     }
-    #if canImport(SwiftTerm) && !APPSTORE
-      TerminalSessionManager.shared.stop(key: key)
-    #endif
+      GhosttySessionManager.shared.removeScrollView(for: key)
     runningSessionIDs.remove(key)
     embeddedInitialCommands.removeValue(forKey: key)
     if selectedTerminalKey == key {
@@ -473,11 +464,9 @@ struct ContentView: View {
   private func isTerminalLikelyRunning(forID id: SessionSummary.ID) -> Bool {
     // Multi-layer detection for more accurate running state:
     // 1. Check if terminal manager reports a running process
-    #if canImport(SwiftTerm) && !APPSTORE
-      if TerminalSessionManager.shared.hasRunningProcess(key: id) {
+      if GhosttySessionManager.shared.hasRunningProcess(for: id) {
         return true
       }
-    #endif
 
     // 2. Check if this is a pending new session (anchor awaiting rekey)
     if pendingEmbeddedRekeys.contains(where: { $0.anchorId == id }) {
@@ -506,17 +495,13 @@ struct ContentView: View {
   }
 
   func requestStopEmbedded(forKey key: String) {
-    #if canImport(SwiftTerm) && !APPSTORE
-      let isRunning = TerminalSessionManager.shared.hasRunningProcess(key: key)
+      let isRunning = GhosttySessionManager.shared.hasRunningProcess(for: key)
       if isRunning {
         let sessionId = summaryLookup[key]?.id ?? key
         confirmStopState = ConfirmStopState(sessionId: sessionId, terminalKey: key)
       } else {
         stopEmbedded(forKey: key)
       }
-    #else
-      stopEmbedded(forKey: key)
-    #endif
   }
 
   private func shellEscapeForCD(_ path: String) -> String {
@@ -550,10 +535,10 @@ struct ContentView: View {
           let taskIdString = task.id.uuidString
           let pathHint = "~/.codmate/tasks/context-\(taskIdString).md"
           let promptLines: [String] = [
-            "当前 Task 的共享上下文已整理并保存到本地文件：",
+            "The shared context for the current Task has been organized and saved to a local file:",
             pathHint,
             "",
-            "在回答本次问题前，如有需要，请先阅读该文件以了解任务历史记录和相关约束。",
+            "Before answering this question, if needed, please read this file first to understand the task history and related constraints.",
           ]
           prompt = promptLines.joined(separator: "\n")
           effectiveAnchor = anchor
@@ -561,9 +546,9 @@ struct ContentView: View {
           // No anchor, find project and create dummy
           guard let project = viewModel.projects.first(where: { $0.id == task.projectId }) else { return }
           projectOverride = project
-          
+
           let cwd = project.directory ?? NSHomeDirectory()
-          
+
           effectiveAnchor = SessionSummary(
             id: UUID().uuidString,
             fileURL: URL(fileURLWithPath: "/dev/null"),
@@ -599,7 +584,7 @@ struct ContentView: View {
       }
 
       #if APPSTORE
-        // App Store 版本不支持嵌入式终端，直接使用外部终端流程。
+        // App Store version does not support embedded terminal, use external terminal flow directly.
         launchNewSession(
           for: effectiveAnchor,
           using: source,
@@ -610,10 +595,10 @@ struct ContentView: View {
         )
       #else
         if profile.id == "codmate.embedded" {
-          // 在内置终端中运行新的会话，并把 Task 上下文作为初始提示注入。
+          // Run a new session in the embedded terminal and inject Task context as the initial prompt.
           startEmbeddedNewWithPrompt(anchor: effectiveAnchor, using: source, prompt: prompt, task: task, projectOverride: projectOverride)
         } else {
-          // 使用选定的外部终端配置
+          // Use the selected external terminal configuration
           launchNewSession(
             for: effectiveAnchor,
             using: source,
@@ -814,78 +799,6 @@ struct ContentView: View {
     return env
   }
 
-  func consoleSpecForResume(_ session: SessionSummary) -> TerminalHostView.ConsoleSpec? {
-    if SecurityScopedBookmarks.shared.isSandboxed {
-      return nil
-    }
-    let overrideURL = preferences.resolvedCommandOverrideURL(for: session.source.baseKind)
-    let exe = preferences.preferredExecutablePath(for: session.source.baseKind)
-    #if canImport(SwiftTerm)
-      if let overrideURL {
-        guard FileManager.default.isExecutableFile(atPath: overrideURL.path) else {
-          NSLog("⚠️ [ContentView] CLI override %@ not executable; falling back to shell", overrideURL.path)
-          return nil
-        }
-      } else {
-        guard TerminalSessionManager.executableExists(exe) else {
-          NSLog("⚠️ [ContentView] CLI executable %@ not found on PATH; falling back to shell", exe)
-          return nil
-        }
-      }
-    #endif
-    let args = viewModel.buildResumeCLIArgs(session: session)
-    let cwd = workingDirectory(for: session)
-    AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
-      directory: URL(fileURLWithPath: cwd, isDirectory: true),
-      purpose: .cliConsoleCwd,
-      message: "Authorize this folder for CLI console to run \(exe)"
-    )
-    var env = consoleEnv(for: session.source)
-    if session.source.baseKind == .gemini {
-      let overrides = viewModel.actions.geminiEnvironmentOverrides(
-        options: viewModel.preferences.resumeOptions)
-      for (key, value) in overrides { env[key] = value }
-    }
-    return TerminalHostView.ConsoleSpec(
-      executable: exe, args: args, cwd: cwd, env: env)
-  }
-
-  func consoleSpecForAnchor(_ anchorId: String) -> TerminalHostView.ConsoleSpec? {
-    if SecurityScopedBookmarks.shared.isSandboxed { return nil }
-    // For the project-level New anchor, we do not know the final session. We start a plain codex with defaults.
-    // Minimal viable: start a login-less shell is not desired; instead start a no-op codex to present UI quickly.
-    // As a preview, run `codex` without args in the project directory if we can infer it.
-    if let pending = pendingEmbeddedRekeys.first(where: { $0.anchorId == anchorId }) {
-      let overrideURL = preferences.resolvedCommandOverrideURL(for: .codex)
-      let exe = preferences.preferredExecutablePath(for: .codex)
-      #if canImport(SwiftTerm)
-        if let overrideURL {
-          guard FileManager.default.isExecutableFile(atPath: overrideURL.path) else {
-            NSLog(
-              "⚠️ [ContentView] CLI override %@ not executable for anchor %@; falling back to shell",
-              overrideURL.path, anchorId)
-            return nil
-          }
-        } else {
-          guard TerminalSessionManager.executableExists(exe) else {
-            NSLog(
-              "⚠️ [ContentView] CLI executable %@ not found on PATH for anchor %@; falling back to shell",
-              exe, anchorId)
-            return nil
-          }
-        }
-      #endif
-      let args: [String] = []
-      AuthorizationHub.shared.ensureDirectoryAccessOrPrompt(
-        directory: URL(fileURLWithPath: pending.expectedCwd, isDirectory: true),
-        purpose: .cliConsoleCwd,
-        message: "Authorize this folder for CLI console to run \(exe)"
-      )
-      return TerminalHostView.ConsoleSpec(
-        executable: exe, args: args, cwd: pending.expectedCwd, env: consoleEnv(for: .codexLocal))
-    }
-    return nil
-  }
 
   /// Schedule a short-lived incremental refresh loop to surface newly created
   /// sessions for auto-assign (project / task) matching. Uses a 2s interval
@@ -1362,9 +1275,7 @@ extension ContentView {
         abs($0.startedAt.timeIntervalSince(pending.t0))
           < abs($1.startedAt.timeIntervalSince(pending.t0))
       }) {
-        #if canImport(SwiftTerm) && !APPSTORE
-          TerminalSessionManager.shared.rekey(from: pending.anchorId, to: winner.id)
-        #endif
+          // DISABLED: rekey not needed for Ghostty
         if runningSessionIDs.contains(pending.anchorId) {
           runningSessionIDs.remove(pending.anchorId)
           runningSessionIDs.insert(winner.id)
@@ -1392,9 +1303,7 @@ extension ContentView {
           remaining.append(pending)
         } else {
           // Timeout: stop the anchor terminal to avoid lingering shells
-          #if canImport(SwiftTerm) && !APPSTORE
-            TerminalSessionManager.shared.stop(key: pending.anchorId)
-          #endif
+            GhosttySessionManager.shared.removeScrollView(for: pending.anchorId)
           runningSessionIDs.remove(pending.anchorId)
           embeddedInitialCommands.removeValue(forKey: pending.anchorId)
           sessionDetailTabs.removeValue(forKey: pending.anchorId)

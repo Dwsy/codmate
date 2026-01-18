@@ -1,197 +1,154 @@
-import AppKit
-import CoreText
 import SwiftUI
+import GhosttyKit
+import CGhostty
 
-#if canImport(SwiftTerm)
-    import SwiftTerm
+/// Embedded Ghostty terminal view
+/// Directly uses TerminalScrollView provided by GhosttyKit
+struct EmbeddedTerminalView: View {
+    let sessionID: String
+    let initialCommands: String
+    let worktreePath: String
 
-    @MainActor
-    final class EmbeddedTerminalCoordinator: NSObject {
-        private let initialCommands: String
-        private var appearanceObserver: NSKeyValueObservation?
-        let sessionKey = "embedded-\(UUID().uuidString)"
+    @EnvironmentObject private var ghosttyApp: Ghostty.App
 
-        init(initialCommands: String) { self.initialCommands = initialCommands }
-
-        fileprivate func bootstrap(_ view: CodMateTerminalView) {
-            // Apply initial theme based on current appearance
-            updateTheme(for: view, appearance: NSApp.effectiveAppearance)
-
-            // Observe appearance changes via KVO on the view's effectiveAppearance
-            appearanceObserver = view.observe(\.effectiveAppearance, options: [.new]) {
-                [weak self] termView, _ in
-                guard let self else { return }
-                Task { @MainActor in
-                    self.updateTheme(for: termView, appearance: termView.effectiveAppearance)
-                }
-            }
-
-            let session = TerminalSessionManager.shared.session(
-                for: sessionKey,
-                initialCommands: initialCommands,
-                consoleSpec: nil
-            )
-            view.sessionID = sessionKey
-            view.attach(to: session, fullRedraw: true)
-            if TerminalSessionManager.shared.shouldBootstrap(key: sessionKey),
-               !initialCommands.isEmpty
-            {
-                TerminalSessionManager.shared.injectInitialCommandsOnce(
-                    key: sessionKey,
-                    view: view,
-                    payload: initialCommands
+    var body: some View {
+        Group {
+            if let ghosttyApp = ghosttyApp.app {
+                GhosttyTerminalViewRepresentable(
+                    sessionID: sessionID,
+                    worktreePath: worktreePath,
+                    initialCommands: initialCommands,
+                    ghosttyApp: ghosttyApp,
+                    appWrapper: self.ghosttyApp
                 )
-            }
-        }
-
-        private func updateTheme(for view: CodMateTerminalView, appearance: NSAppearance) {
-            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-
-            if isDark {
-                // Dark theme
-                view.caretColor = NSColor.white
-                view.nativeForegroundColor = NSColor(white: 0.9, alpha: 1.0)
-                view.nativeBackgroundColor = NSColor(white: 0.1, alpha: 1.0)
-                view.selectedTextBackgroundColor = NSColor(white: 0.3, alpha: 0.6)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear {
+                    NSLog("[EmbeddedTerminalView] ghosttyApp is available")
+                }
             } else {
-                // Light theme
-                view.caretColor = NSColor.black
-                view.nativeForegroundColor = NSColor(white: 0.1, alpha: 1.0)
-                view.nativeBackgroundColor = NSColor(white: 0.98, alpha: 1.0)
-                view.selectedTextBackgroundColor = NSColor(white: 0.7, alpha: 0.4)
-            }
-        }
-
-        deinit {
-            appearanceObserver?.invalidate()
-        }
-    }
-
-    struct EmbeddedTerminalView: NSViewRepresentable {
-        let initialCommands: String
-        @Environment(\.colorScheme) private var colorScheme
-
-        func makeCoordinator() -> EmbeddedTerminalCoordinator {
-            .init(initialCommands: initialCommands)
-        }
-
-        func makeNSView(context: Context) -> CodMateTerminalView {
-            let term = CodMateTerminalView(frame: CGRect.zero)
-            let font = makeTerminalFont(size: 12)
-            term.font = font
-            context.coordinator.bootstrap(term)
-            return term
-        }
-
-        func updateNSView(_ nsView: CodMateTerminalView, context: Context) {
-            // Theme will be updated automatically via appearance observer in coordinator
-        }
-
-        static func dismantleNSView(_ nsView: CodMateTerminalView, coordinator: EmbeddedTerminalCoordinator) {
-            TerminalSessionManager.shared.stop(key: coordinator.sessionKey)
-        }
-    }
-
-    /// Returns a font suitable for terminal display; prefers CJK-capable monospace
-    private func makeTerminalFont(size: CGFloat) -> NSFont {
-        // Prefer CJK-capable monospaced fonts that handle double-width correctly
-        let preferredMonoCandidates = [
-            "Sarasa Mono SC",  // CJK monospace
-            "Sarasa Term SC",
-            "LXGW WenKai Mono",
-            "Noto Sans Mono CJK SC",
-            "NotoSansMonoCJKsc-Regular",
-            "JetBrains Mono", "JetBrainsMono-Regular", "JetBrains Mono NL",
-            "JetBrainsMonoNL Nerd Font Mono",
-            "JetBrainsMono Nerd Font Mono",
-            "SF Mono",
-            "Menlo",
-        ]
-
-        for name in preferredMonoCandidates {
-            if let f = NSFont(name: name, size: size), fontHasCJKGlyphs(f) {
-                return f
-            }
-        }
-
-        // Fallback to system mono if it has CJK
-        let sysMono = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
-        if fontHasCJKGlyphs(sysMono) { return sysMono }
-
-        // Last resort: use PingFang SC if nothing else, to ensure readable Chinese
-        if let pf = NSFont(name: "PingFangSC-Regular", size: size)
-            ?? NSFont(name: "PingFang SC", size: size)
-        {
-            return pf
-        }
-        return sysMono
-    }
-
-    private func fontHasCJKGlyphs(_ font: NSFont) -> Bool {
-        let samples = "CJK width test"
-        let ctFont = font as CTFont
-        for scalar in samples.unicodeScalars {
-            var ch = UniChar(scalar.value)
-            var glyph: CGGlyph = 0
-            let ok = withUnsafePointer(to: &ch) { cPtr -> Bool in
-                withUnsafeMutablePointer(to: &glyph) { gPtr -> Bool in
-                    CTFontGetGlyphsForCharacters(ctFont, cPtr, gPtr, 1)
+                VStack {
+                    Text("Terminal Initializing...")
+                        .foregroundStyle(.secondary)
+                    ProgressView()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear {
+                    NSLog("[EmbeddedTerminalView] ghosttyApp is nil, showing loading state")
                 }
             }
-            if !ok || glyph == 0 { return false }
         }
-        return true
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+}
+
+/// NSViewRepresentable wrapper for Ghostty Terminal
+private struct GhosttyTerminalViewRepresentable: NSViewRepresentable {
+    let sessionID: String
+    let worktreePath: String
+    let initialCommands: String
+    let ghosttyApp: ghostty_app_t
+    let appWrapper: Ghostty.App
+
+    func makeNSView(context: Context) -> TerminalScrollView {
+        if let cached = GhosttySessionManager.shared.getScrollView(for: sessionID) {
+            NSLog("[GhosttyTerminalViewRepresentable] reusing cached TerminalScrollView for %@", sessionID)
+            return cached
+        }
+
+        NSLog("[GhosttyTerminalViewRepresentable] makeNSView called")
+        NSLog("[GhosttyTerminalViewRepresentable]   worktreePath: %@", worktreePath)
+        NSLog("[GhosttyTerminalViewRepresentable]   initialCommands: %@", initialCommands)
+
+        // Use a stable paneId based on worktreePath to ensure the same terminal session
+        // is reused when the view is recreated with the same worktreePath
+        let paneId = "embedded:\(sessionID)"
+
+        let terminalView = GhosttyTerminalView(
+            frame: .zero,
+            worktreePath: worktreePath,
+            ghosttyApp: ghosttyApp,
+            appWrapper: appWrapper,
+            paneId: paneId,
+            command: nil
+        )
+        NSLog("[GhosttyTerminalViewRepresentable] GhosttyTerminalView created with paneId: %@", paneId)
+
+        let scrollView = TerminalScrollView(
+            contentSize: CGSize(width: 800, height: 600),
+            surfaceView: terminalView
+        )
+        NSLog("[GhosttyTerminalViewRepresentable] TerminalScrollView created")
+        GhosttySessionManager.shared.setScrollView(scrollView, for: sessionID)
+
+        // Store the initial commands in the coordinator to track changes
+        context.coordinator.pendingCommands = initialCommands.isEmpty ? nil : initialCommands
+        context.coordinator.worktreePath = worktreePath
+        context.coordinator.didInjectInitialCommands = false
+
+        terminalView.onReady = { [weak terminalView, weak coordinator = context.coordinator] in
+            guard let terminalView, let coordinator else { return }
+            guard !coordinator.didInjectInitialCommands else { return }
+            guard let commands = coordinator.pendingCommands, !commands.isEmpty else { return }
+            let trimmed = commands.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            coordinator.didInjectInitialCommands = true
+            let payload = commands.hasSuffix("\n") || commands.hasSuffix("\r")
+                ? commands
+                : commands + "\n"
+            terminalView.sendText(payload)
+        }
+
+        // Ensure the view is properly retained by setting a non-zero frame
+        // This helps SwiftUI recognize the view as valid
+        scrollView.frame = NSRect(x: 0, y: 0, width: 800, height: 600)
+
+        NSLog("[GhosttyTerminalViewRepresentable] View setup complete, frame=%@", NSStringFromRect(scrollView.frame))
+
+        return scrollView
     }
 
-#else
+    func updateNSView(_ nsView: TerminalScrollView, context: Context) {
+        // Track if this is the first update after view creation
+        let isFirstUpdate = context.coordinator.pendingCommands == nil && context.coordinator.worktreePath.isEmpty
 
-    struct EmbeddedTerminalView: View {
-        let initialCommands: String
-        var body: some View {
-            VStack(spacing: 12) {
-                Text("Embedded terminal unavailable")
-                    .font(.headline)
-                Text("Add the SwiftTerm package to enable the in‑app terminal.")
-                    .foregroundStyle(.secondary)
+        // Only log if something actually changed to reduce noise
+        let commandsChanged = context.coordinator.pendingCommands != initialCommands
+        let pathChanged = context.coordinator.worktreePath != worktreePath
 
-                ScrollView {
-                    Text(initialCommands)
-                        .font(.system(.body, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(8)
-                        .background(Color.secondary.opacity(0.08))
-                        .cornerRadius(6)
-                }
+        if isFirstUpdate {
+            NSLog("[GhosttyTerminalViewRepresentable] updateNSView: first update, window=%@",
+                  nsView.window != nil ? "YES" : "NO")
+        } else if commandsChanged || pathChanged {
+            NSLog("[GhosttyTerminalViewRepresentable] updateNSView: commandsChanged=%@, pathChanged=%@",
+                  commandsChanged ? "YES" : "NO", pathChanged ? "YES" : "NO")
+        }
 
-                HStack(spacing: 12) {
-                    Button("Copy Commands") {
-                        let pb = NSPasteboard.general
-                        pb.clearContents()
-                        pb.setString(initialCommands, forType: .string)
-                        Task {
-                            await SystemNotifier.shared.notify(
-                                title: "CodMate", body: "Commands copied")
-                        }
-                    }
-                    Button("Open Terminal") {
-                        if #available(macOS 10.15, *) {
-                            let terminalURL = NSWorkspace.shared.urlForApplication(
-                                withBundleIdentifier: "com.apple.Terminal")
-                            if let url = terminalURL {
-                                NSWorkspace.shared.open(
-                                    url, configuration: NSWorkspace.OpenConfiguration(),
-                                    completionHandler: nil)
-                            }
-                        } else {
-                            NSWorkspace.shared.launchApplication(
-                                withBundleIdentifier: "com.apple.Terminal", options: [],
-                                additionalEventParamDescriptor: nil, launchIdentifier: nil)
-                        }
-                    }
-                }
+        // Update coordinator state
+        if commandsChanged {
+            if !context.coordinator.didInjectInitialCommands {
+                context.coordinator.pendingCommands = initialCommands.isEmpty ? nil : initialCommands
             }
-            .padding()
         }
+        if pathChanged {
+            context.coordinator.worktreePath = worktreePath
+        }
+
+        // Note: We don't recreate the terminal view here because initialCommands and worktreePath
+        // should only be set once when the view is first created. The view will be recreated
+        // by SwiftUI if the id() changes or if makeNSView is called again.
+
+        // Theme updates are managed by Ghostty.App, no manual updates needed
+        // View size updates are handled by TerminalScrollView's layout() method
+        // We should not skip updates even if the window is not ready yet, as the view may be in the process of being added to the view hierarchy
     }
 
-#endif
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    class Coordinator {
+        var pendingCommands: String? = nil
+        var worktreePath: String = ""
+        var didInjectInitialCommands: Bool = false
+    }
+}

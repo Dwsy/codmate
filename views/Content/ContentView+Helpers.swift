@@ -36,41 +36,33 @@ extension ContentView {
     }
 
     func synchronizeSelectedTerminalKey() {
-        #if canImport(SwiftTerm) && !APPSTORE
+        #if APPSTORE
+            selectedTerminalKey = nil
+        #else
             if let key = selectedTerminalKey, runningSessionIDs.contains(key) { return }
             selectedTerminalKey = runningSessionIDs.first
-        #else
-            selectedTerminalKey = nil
         #endif
     }
 
     func activeTerminalKey() -> String? {
-        #if canImport(SwiftTerm) && !APPSTORE
+        #if APPSTORE
+            return nil
+        #else
             if let key = selectedTerminalKey, runningSessionIDs.contains(key) {
                 return key
             }
             return runningSessionIDs.first
-        #else
-            return nil
         #endif
     }
 
     func syncRunningSessionIDsFromManager() {
-        #if canImport(SwiftTerm) && !APPSTORE
-            let managerKeys = Set(
-                TerminalSessionManager.shared.getActiveSessions().map(\.terminalKey)
-            )
-            if managerKeys != runningSessionIDs {
-                runningSessionIDs = managerKeys
-                if let selected = selectedTerminalKey, !managerKeys.contains(selected) {
-                    selectedTerminalKey = managerKeys.first
-                }
-            }
-        #endif
+        // Ghostty embeds are driven by view state; no external manager sync required.
     }
 
     func hasAvailableEmbeddedTerminal() -> Bool {
-        #if canImport(SwiftTerm) && !APPSTORE
+        #if APPSTORE
+            return false
+        #else
             // Check if there's a terminal available for the focused session
             guard let focused = focusedSummary else {
                 // No focused session, check if there are any anchor terminals (new sessions)
@@ -78,33 +70,31 @@ extension ContentView {
             }
             // Check if focused session has a running terminal
             return runningSessionIDs.contains(focused.id)
-        #else
-            return false
         #endif
     }
 
     func visibleTerminalKeyInDetail() -> String? {
-        #if canImport(SwiftTerm) && !APPSTORE
+        #if APPSTORE
+            return nil
+        #else
             guard selectedDetailTab == .terminal else { return nil }
-            if let active = TerminalSessionManager.shared.currentActiveSessionKey() {
-                return active
+            if let selected = selectedTerminalKey, runningSessionIDs.contains(selected) {
+                return selected
             }
             if let focused = focusedSummary, runningSessionIDs.contains(focused.id) {
                 return focused.id
             }
             return fallbackRunningAnchorId()
-        #else
-            return nil
         #endif
     }
 
     func normalizeDetailTabForTerminalAvailability() {
-        #if canImport(SwiftTerm) && !APPSTORE
-            if selectedDetailTab == .terminal && activeTerminalKey() == nil {
+        #if APPSTORE
+            if selectedDetailTab == .terminal {
                 selectedDetailTab = .timeline
             }
         #else
-            if selectedDetailTab == .terminal {
+            if selectedDetailTab == .terminal && activeTerminalKey() == nil {
                 selectedDetailTab = .timeline
             }
         #endif
@@ -118,6 +108,8 @@ extension ContentView {
         return ""
     }
 
+    // DISABLED: SwiftTerm specific method, not needed for Ghostty
+    /*
     func consoleSpecForTerminalKey(_ key: String) -> TerminalHostView.ConsoleSpec? {
         #if canImport(SwiftTerm) && !APPSTORE
             if key.hasPrefix("new-anchor:"), let spec = consoleSpecForAnchor(key) {
@@ -129,6 +121,7 @@ extension ContentView {
         #endif
         return nil
     }
+    */
 
     func canonicalizePath(_ path: String) -> String {
         let expanded = (path as NSString).expandingTildeInPath

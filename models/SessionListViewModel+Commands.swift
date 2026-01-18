@@ -162,12 +162,15 @@ extension SessionListViewModel {
     func buildResumeCommands(session: SessionSummary) -> String {
         let cwd = resolvedWorkingDirectory(for: session)
         let codexHome = codexHomeOverride(for: session)
+        // For embedded terminal, skip cd command since terminal is already initialized
+        // to the correct working directory via worktreePath parameter
         return commandGenerator.embeddedResume(
             session: session,
             executableURL: preferredExecutableURL(for: session.source),
             options: preferences.resumeOptions,
             workingDirectory: cwd,
-            codexHome: codexHome
+            codexHome: codexHome,
+            includeCd: false
         )
     }
 

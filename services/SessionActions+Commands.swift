@@ -688,7 +688,7 @@ extension SessionActions {
         // MAS sandbox: do not auto-execute external CLI inside the app. Only prepare directory and env.
         // The user can copy or insert the real command via UI prompts.
         let cliName = executableName(for: session.source.baseKind)
-        let notice = "echo \"[CodMate] App Store 沙盒无法直接运行 \(cliName) CLI，请使用右侧按钮复制命令，在外部终端执行。\""
+        let notice = "echo \"[CodMate] App Store sandbox cannot directly run \(cliName) CLI. Please use the button on the right to copy the command and execute it in an external terminal.\""
         return cd + "\n" + exports + "\n" + notice + "\n"
         #else
         if session.isRemote, let host = session.remoteHost {
@@ -731,7 +731,8 @@ extension SessionActions {
         executableURL: URL,
         options: ResumeOptions,
         workingDirectory: String? = nil,
-        codexHome: String? = nil
+        codexHome: String? = nil,
+        includeCd: Bool = true
     ) -> String {
         #if APPSTORE
         return buildResumeCommandLines(
@@ -754,8 +755,6 @@ extension SessionActions {
                 resolvedArguments: sshContext
             ) + "\n"
         }
-        let cwd = self.workingDirectory(for: session, override: workingDirectory)
-        let cd = "cd " + shellEscapedPath(cwd)
         var exportLines = embeddedExportLines(for: session.source)
         if session.source.baseKind == .gemini {
             let envLines = geminiEnvironmentExportLines(
@@ -769,7 +768,17 @@ extension SessionActions {
         )
         let resume = buildResumeCLIInvocation(
             session: session, executablePath: execPath, options: options, codexHome: codexHome)
-        return cd + "\n" + exports + "\n" + resume + "\n"
+        var lines: [String] = []
+        if includeCd {
+            let cwd = self.workingDirectory(for: session, override: workingDirectory)
+            let cd = "cd " + shellEscapedPath(cwd)
+            lines.append(cd)
+        }
+        if !exports.isEmpty {
+            lines.append(exports)
+        }
+        lines.append(resume)
+        return lines.joined(separator: "\n") + "\n"
         #endif
     }
 
@@ -864,7 +873,7 @@ extension SessionActions {
             ? session.cwd : session.fileURL.deletingLastPathComponent().path
         let cd = "cd " + shellEscapedPath(cwd)
         // MAS: do not execute external CLI in embedded terminal; only show a notice.
-        let notice = "echo \"[CodMate] App Store 沙盒无法直接运行 \(session.source.baseKind.cliExecutableName) CLI，请在外部终端执行复制的命令。\""
+        let notice = "echo \"[CodMate] App Store sandbox cannot directly run \(session.source.baseKind.cliExecutableName) CLI. Please execute the copied command in an external terminal.\""
         return cd + "\n" + notice + "\n"
         #else
         if session.isRemote, let host = session.remoteHost {

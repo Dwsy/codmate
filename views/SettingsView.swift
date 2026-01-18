@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import GhosttyKit
 
 struct SettingsView: View {
   @ObservedObject var preferences: SessionPreferencesStore
@@ -14,6 +15,7 @@ struct SettingsView: View {
   @ObservedObject private var permissionsManager = SandboxPermissionsManager.shared
   @State private var availableRemoteHosts: [SSHHost] = []
   @State private var isRequestingSSHAccess = false
+  @State private var availableThemes: [String] = []
 
   init(
     preferences: SessionPreferencesStore, selection: Binding<SettingCategory>,
@@ -603,7 +605,7 @@ struct SettingsView: View {
           }
 
           VStack(alignment: .leading, spacing: 10) {
-            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 18) {
+            Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
               // Row: Copy to clipboard (always relevant)
               // Row: Default external app (still relevant)
               GridRow {
@@ -677,7 +679,7 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: 10) {
             Text("Embedded Terminal").font(.headline).fontWeight(.semibold)
             settingsCard {
-              Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
+              Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                 // Row: Embedded terminal toggle
                 GridRow {
                   VStack(alignment: .leading, spacing: 2) {
@@ -770,6 +772,65 @@ struct SettingsView: View {
                   .gridColumnAlignment(.trailing)
                   .disabled(!preferences.defaultResumeUseEmbeddedTerminal)
                 }
+
+                gridDivider
+
+                // Row: Dark mode theme
+                GridRow {
+                  VStack(alignment: .leading, spacing: 2) {
+                    Label("Dark Mode Theme", systemImage: "moon.fill")
+                      .font(.subheadline).fontWeight(.medium)
+                    Text("Terminal color scheme for dark mode")
+                      .font(.caption)
+                      .foregroundStyle(.secondary)
+                      .fixedSize(horizontal: false, vertical: true)
+                  }
+                  Picker("", selection: Binding(
+                    get: { preferences.terminalThemeName },
+                    set: { preferences.terminalThemeName = $0 }
+                  )) {
+                    ForEach(availableThemes, id: \.self) { theme in
+                      Text(theme).tag(theme)
+                    }
+                  }
+                  .labelsHidden()
+                  .pickerStyle(.menu)
+                  .frame(maxWidth: .infinity, alignment: .trailing)
+                  .gridColumnAlignment(.trailing)
+                  .disabled(!preferences.defaultResumeUseEmbeddedTerminal || availableThemes.isEmpty)
+                }
+
+                gridDivider
+
+                // Row: Light mode theme
+                GridRow {
+                  VStack(alignment: .leading, spacing: 2) {
+                    Label("Light Mode Theme", systemImage: "sun.max.fill")
+                      .font(.subheadline).fontWeight(.medium)
+                    Text("Terminal color scheme for light mode")
+                      .font(.caption)
+                      .foregroundStyle(.secondary)
+                      .fixedSize(horizontal: false, vertical: true)
+                  }
+                  Picker("", selection: Binding(
+                    get: { preferences.terminalThemeNameLight },
+                    set: { preferences.terminalThemeNameLight = $0 }
+                  )) {
+                    ForEach(availableThemes, id: \.self) { theme in
+                      Text(theme).tag(theme)
+                    }
+                  }
+                  .labelsHidden()
+                  .pickerStyle(.menu)
+                  .frame(maxWidth: .infinity, alignment: .trailing)
+                  .gridColumnAlignment(.trailing)
+                  .disabled(!preferences.defaultResumeUseEmbeddedTerminal || availableThemes.isEmpty)
+                }
+              }
+            }
+            .task {
+              if availableThemes.isEmpty {
+                availableThemes = GhosttyThemeLoader.loadAvailableThemes()
               }
             }
           }
@@ -777,7 +838,7 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: 10) {
             Text("External Terminal").font(.headline).fontWeight(.semibold)
             settingsCard {
-              Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
+              Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 12) {
                 GridRow {
                   VStack(alignment: .leading, spacing: 2) {
                     Label("Auto open external terminal", systemImage: "arrow.up.right.square")
