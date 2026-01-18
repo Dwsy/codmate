@@ -4,6 +4,7 @@ import SwiftUI
 struct OpenSourceLicensesView: View {
     let repoURL: URL
     @State private var content: String = ""
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -11,7 +12,8 @@ struct OpenSourceLicensesView: View {
                 Text("Open Source Licenses")
                     .font(.title3).fontWeight(.semibold)
                 Spacer()
-                Button("Open on GitHub") { openOnGitHub() }
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
             }
             .padding(.bottom, 4)
 
@@ -30,12 +32,6 @@ struct OpenSourceLicensesView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    private func openOnGitHub() {
-        // Point to the file in the default branch
-        let url = URL(string: repoURL.absoluteString + "/blob/main/THIRD-PARTY-NOTICES.md")!
-        NSWorkspace.shared.open(url)
     }
 
     private func candidateLocalURLs() -> [URL] {
@@ -290,7 +286,7 @@ struct AboutSettingsView: View {
         }
         .sheet(isPresented: $showLicensesSheet) {
             OpenSourceLicensesView(repoURL: repoURL)
-                .frame(minWidth: 600, minHeight: 480)
+                .frame(minWidth: 900, minHeight: 520)
         }
     }
 
