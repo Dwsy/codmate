@@ -17,8 +17,8 @@ let package = Package(
     ),
   ],
   dependencies: [
-    // Embedded terminal support (use local checkout for development)
-    .package(path: "SwiftTerm"),
+    // Ghostty GPU-accelerated terminal
+    .package(path: "ghostty"),
     // MCP Swift SDK for real MCP client connections
     .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.10.2"),
   ],
@@ -26,19 +26,19 @@ let package = Package(
     .executableTarget(
       name: "CodMate",
       dependencies: [
-        .product(name: "SwiftTerm", package: "SwiftTerm"),
+        .product(name: "GhosttyKit", package: "ghostty"),
         .product(name: "MCP", package: "swift-sdk"),
       ],
       path: ".",
       exclude: [
-        "SwiftTerm",
+        "ghostty",
         "notify",
         "build",
-        "artifacts",
         ".build",
         "scripts",
         "docs",
         "payload",
+        "Tests",
         "AGENTS.md",
         "LICENSE",
         "NOTICE",
@@ -51,6 +51,7 @@ let package = Package(
         "assets/Info.plist",
         "assets/CodMate.entitlements",
         "assets/CodMate-Notify.entitlements",
+        "Ghostty-header.h",
       ],
       sources: [
         "CodMateApp.swift",

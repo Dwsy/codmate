@@ -1,4 +1,5 @@
 import SwiftUI
+import GhosttyKit
 
 #if os(macOS)
   import AppKit
@@ -11,6 +12,7 @@ struct CodMateApp: App {
   #endif
   @StateObject private var listViewModel: SessionListViewModel
   @StateObject private var preferences: SessionPreferencesStore
+  @StateObject private var ghosttyApp = Ghostty.App()
   @State private var settingsSelection: SettingCategory = .general
   @State private var extensionsTabSelection: ExtensionsSettingsTab = .commands
   @Environment(\.openWindow) private var openWindow
@@ -120,6 +122,7 @@ struct CodMateApp: App {
     // Use Window instead of WindowGroup to enforce single instance
     Window("CodMate", id: "main") {
       ContentView(viewModel: listViewModel)
+        .environmentObject(ghosttyApp)
         .frame(minWidth: 880, minHeight: 600)
         .onReceive(NotificationCenter.default.publisher(for: .codMateOpenSettings)) { note in
           let raw = note.userInfo?["category"] as? String
@@ -298,39 +301,14 @@ private struct SettingsWindowContainer: View {
       // Stop CLI Proxy Service
       CLIProxyService.shared.stop()
 
-      #if canImport(SwiftTerm) && !APPSTORE
-        // Synchronously stop all terminal sessions to ensure clean exit
-        // This prevents orphaned codex/claude processes when app quits
-        let manager = TerminalSessionManager.shared
-
-        // Use sync mode to block until all processes are killed
-        // This ensures no orphaned processes when app terminates
-        manager.stopAll(withPrefix: "", sync: true)
-
-      // No sleep needed - sync mode blocks until processes are dead
-      #endif
+      // Clean up Ghostty sessions
+      // Note: Ghostty manages its own cleanup via deinit
+      // No explicit session termination needed here
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-      #if canImport(SwiftTerm) && !APPSTORE
-        // Check if there are any running terminal sessions
-        let manager = TerminalSessionManager.shared
-        if manager.hasAnyRunningProcesses() {
-          // Show confirmation dialog
-          let alert = NSAlert()
-          alert.messageText = "Stop Running Sessions?"
-          alert.informativeText =
-            "There are Codex/Claude Code sessions still running. Quitting now will terminate them."
-          alert.alertStyle = .warning
-          alert.addButton(withTitle: "Quit")
-          alert.addButton(withTitle: "Cancel")
-
-          let response = alert.runModal()
-          if response == .alertSecondButtonReturn {
-            return .terminateCancel
-          }
-        }
-      #endif
+      // Ghostty sessions will be cleaned up automatically
+      // No need for confirmation dialog
       return .terminateNow
     }
 

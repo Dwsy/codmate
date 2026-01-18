@@ -28,3 +28,6 @@ dist/
 .claude/
 .codex/
 .gemini/
+
+# Local build artifacts
+libghostty.a
