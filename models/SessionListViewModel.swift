@@ -1162,6 +1162,49 @@ final class SessionListViewModel: ObservableObject {
     }
   }
 
+  /// Hydrate sessions from cache on launch (lightweight, no filesystem scan or expensive recomputations)
+  /// Used at app startup to quickly populate UI from cached data without triggering full refresh
+  func hydrateFromCacheOnLaunch() async {
+    let scope = currentScope()
+    let enabledRemoteHosts = preferences.enabledRemoteHosts
+    let providers = buildProviders(enabledRemoteHosts: Set(enabledRemoteHosts))
+    let projectDirectories = singleSelectedProjectDirectory()
+    let scopedProjectIds = dateDimension == .created ? singleSelectedProject() : nil
+    let scopedProjectDirectories = dateDimension == .created ? projectDirectories : nil
+    let scopedDateRange = dateDimension == .created ? currentDateRange() : nil
+    // Get ignored paths for Codex (merge all enabled Codex configs)
+    let codexConfigs = preferences.sessionPathConfigs.filter { $0.kind == .codex && $0.enabled }
+    let codexIgnoredPaths = codexConfigs.flatMap { $0.ignoredSubpaths }
+
+    let cacheContext = SessionProviderContext(
+      scope: scope,
+      sessionsRoot: preferences.sessionsRoot,
+      enabledRemoteHosts: Set(enabledRemoteHosts),
+      projectDirectories: scopedProjectDirectories,
+      dateDimension: dateDimension,
+      dateRange: scopedDateRange,
+      projectIds: scopedProjectIds,
+      forceFilesystemScan: false,
+      cachePolicy: .cacheOnly,
+      ignoredPaths: codexIgnoredPaths
+    )
+
+    let cachedResults = await loadProviders(providers, context: cacheContext)
+    let sessions = dedupProviderSessions(cachedResults)
+    let notes = await notesStore.all()
+    notesSnapshot = notes
+
+    var sessionsForApply = sessions
+    apply(notes: notes, to: &sessionsForApply)
+    registerActivityHeartbeat(previous: allSessions, current: sessionsForApply)
+    smartMergeAllSessions(newSessions: sessionsForApply)
+    scheduleFiltersUpdate()
+    
+    diagLogger.log(
+      "hydrateFromCacheOnLaunch done sessions=\(self.allSessions.count, privacy: .public) ts=\(self.ts(), format: .fixed(precision: 3))"
+    )
+  }
+
   /// Refresh sessions from cache only (no filesystem scan)
   /// Used when ignore rules change - applies new rules to cached sessions without rescanning
   /// Cache is preserved - sessions will reappear if ignore rules are removed later
@@ -1575,35 +1618,108 @@ final class SessionListViewModel: ObservableObject {
     var prevMap: [String: Date] = [:]
     for s in previous { if let t = s.lastUpdatedAt { prevMap[s.id] = t } }
     let now = Date()
+    var heartbeatChanged = false
     for s in current {
       guard let newT = s.lastUpdatedAt else { continue }
       if let oldT = prevMap[s.id], newT > oldT {
         activityHeartbeat[s.id] = now
+        heartbeatChanged = true
       }
     }
     recomputeActiveUpdatingIDs()
+    // Reschedule prune task if heartbeats changed
+    if heartbeatChanged {
+      scheduleActivityPruneIfNeeded()
+    }
   }
 
   private var activityHeartbeat: [String: Date] = [:]
   private var activityPruneTask: Task<Void, Never>?
-  private func startActivityPruneTicker() {
+  
+  /// Schedule one-shot prune task based on earliest expiry time
+  private func scheduleActivityPruneIfNeeded() {
     activityPruneTask?.cancel()
+    activityPruneTask = nil
+    
+    guard !activityHeartbeat.isEmpty else { return }
+    
+    let now = Date()
+    let cutoff = now.addingTimeInterval(-3.0)
+    
+    // Find earliest time when any ID would expire (3s after its heartbeat)
+    let earliestExpiry = activityHeartbeat.values
+      .map { $0.addingTimeInterval(3.0) }
+      .filter { $0 > now }
+      .min()
+    
+    guard let nextExpiry = earliestExpiry else {
+      // All heartbeats are already expired, prune immediately
+      recomputeActiveUpdatingIDs()
+      return
+    }
+    
+    let delay = nextExpiry.timeIntervalSince(now)
+    guard delay > 0 else {
+      recomputeActiveUpdatingIDs()
+      return
+    }
+    
     activityPruneTask = Task { [weak self] in
-      while !(Task.isCancelled) {
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
-        await MainActor.run { self?.recomputeActiveUpdatingIDs() }
+      try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+      guard !Task.isCancelled else { return }
+      await MainActor.run {
+        self?.recomputeActiveUpdatingIDs()
+        // Reschedule if there are still active heartbeats
+        self?.scheduleActivityPruneIfNeeded()
       }
     }
   }
+  
+  private func startActivityPruneTicker() {
+    // Legacy method name kept for compatibility - now uses one-shot scheduling
+    scheduleActivityPruneIfNeeded()
+  }
 
-  private func startIntentsCleanupTicker() {
+  /// Schedule one-shot intent cleanup task based on earliest intent expiry
+  func scheduleIntentsCleanupIfNeeded() {
     intentsCleanupTask?.cancel()
+    intentsCleanupTask = nil
+    
+    guard !pendingAssignIntents.isEmpty else { return }
+    
+    let now = Date()
+    // Intents expire 60s after creation
+    let earliestExpiry = pendingAssignIntents
+      .map { $0.t0.addingTimeInterval(60) }
+      .filter { $0 > now }
+      .min()
+    
+    guard let nextExpiry = earliestExpiry else {
+      // All intents are already expired, prune immediately
+      pruneExpiredIntents()
+      return
+    }
+    
+    let delay = nextExpiry.timeIntervalSince(now)
+    guard delay > 0 else {
+      pruneExpiredIntents()
+      return
+    }
+    
     intentsCleanupTask = Task { [weak self] in
-      while !(Task.isCancelled) {
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
-        await MainActor.run { self?.pruneExpiredIntents() }
+      try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+      guard !Task.isCancelled else { return }
+      await MainActor.run {
+        self?.pruneExpiredIntents()
+        // Reschedule if there are still pending intents
+        self?.scheduleIntentsCleanupIfNeeded()
       }
     }
+  }
+  
+  private func startIntentsCleanupTicker() {
+    // Legacy method name kept for compatibility - now uses one-shot scheduling
+    scheduleIntentsCleanupIfNeeded()
   }
 
   private func recomputeActiveUpdatingIDs() {
@@ -1611,6 +1727,8 @@ final class SessionListViewModel: ObservableObject {
     let newIDs = Set(activityHeartbeat.filter { $0.value > cutoff }.keys)
     guard newIDs != activeUpdatingIDs else { return }
     activeUpdatingIDs = newIDs
+    // Reschedule prune task if heartbeats changed
+    scheduleActivityPruneIfNeeded()
   }
 
   func isActivelyUpdating(_ id: String) -> Bool { activeUpdatingIDs.contains(id) }
@@ -3271,14 +3389,20 @@ final class SessionListViewModel: ObservableObject {
       let snapshot = modified
       await MainActor.run {
         let now = Date()
+        var heartbeatChanged = false
         for (id, m) in snapshot {
           let previous = self.fileMTimeCache[id]
           self.fileMTimeCache[id] = m
           if let previous, m > previous {
             self.activityHeartbeat[id] = now
+            heartbeatChanged = true
           }
         }
         self.recomputeActiveUpdatingIDs()
+        // Reschedule prune task if heartbeats changed
+        if heartbeatChanged {
+          self.scheduleActivityPruneIfNeeded()
+        }
       }
     }
   }
@@ -4348,7 +4472,8 @@ extension SessionListViewModel {
   }
   private func performInitialRemoteSyncIfNeeded() async {
     guard !preferences.enabledRemoteHosts.isEmpty else { return }
-    await syncRemoteHosts(force: false, refreshAfter: true)
+    // Don't force refresh on launch - let user trigger refresh via Command+R or filesystem events
+    await syncRemoteHosts(force: false, refreshAfter: false)
   }
 
   func syncRemoteHosts(force: Bool = true, refreshAfter: Bool = true) async {

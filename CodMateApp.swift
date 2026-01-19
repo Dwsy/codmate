@@ -12,7 +12,6 @@ struct CodMateApp: App {
   #endif
   @StateObject private var listViewModel: SessionListViewModel
   @StateObject private var preferences: SessionPreferencesStore
-  @StateObject private var ghosttyApp = Ghostty.App()
   @State private var settingsSelection: SettingCategory = .general
   @State private var extensionsTabSelection: ExtensionsSettingsTab = .commands
   @Environment(\.openWindow) private var openWindow
@@ -122,7 +121,6 @@ struct CodMateApp: App {
     // Use Window instead of WindowGroup to enforce single instance
     Window("CodMate", id: "main") {
       ContentView(viewModel: listViewModel)
-        .environmentObject(ghosttyApp)
         .frame(minWidth: 880, minHeight: 600)
         .onReceive(NotificationCenter.default.publisher(for: .codMateOpenSettings)) { note in
           let raw = note.userInfo?["category"] as? String

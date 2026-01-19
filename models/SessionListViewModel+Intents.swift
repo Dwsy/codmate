@@ -90,6 +90,10 @@ extension SessionListViewModel {
     func pruneExpiredIntents() {
         let now = Date()
         pendingAssignIntents.removeAll { now.timeIntervalSince($0.t0) > 60 }
+        // Reschedule cleanup if intents remain
+        if !pendingAssignIntents.isEmpty {
+            scheduleIntentsCleanupIfNeeded()
+        }
     }
 
     func recordIntent(
@@ -105,5 +109,7 @@ extension SessionListViewModel {
                 hints: hints
             ))
         pruneExpiredIntents()
+        // Schedule cleanup for new intent
+        scheduleIntentsCleanupIfNeeded()
     }
 }

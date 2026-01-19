@@ -233,7 +233,7 @@ extension ContentView {
   }
 
   func applyTaskAndChangeModifiers<V: View>(to view: V) -> some View {
-    let v1 = view.task { await viewModel.refreshSessions(force: true) }
+    let v1 = view.task { await viewModel.hydrateFromCacheOnLaunch() }
     let v2 = v1.onChange(of: viewModel.sections) { _ in
       // Avoid mutating selection while search popover is opening/active to prevent focus loss/auto-dismiss
       if !shouldBlockAutoSelection {

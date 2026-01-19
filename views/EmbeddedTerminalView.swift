@@ -4,12 +4,14 @@ import CGhostty
 
 /// Embedded Ghostty terminal view
 /// Directly uses TerminalScrollView provided by GhosttyKit
+/// Ghostty runtime is lazy-initialized only when this view appears
 struct EmbeddedTerminalView: View {
     let sessionID: String
     let initialCommands: String
     let worktreePath: String
 
-    @EnvironmentObject private var ghosttyApp: Ghostty.App
+    // Lazy-initialize Ghostty only when terminal view is shown
+    @StateObject private var ghosttyApp = Ghostty.App()
 
     var body: some View {
         Group {
@@ -33,7 +35,7 @@ struct EmbeddedTerminalView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear {
-                    NSLog("[EmbeddedTerminalView] ghosttyApp is nil, showing loading state")
+                    NSLog("[EmbeddedTerminalView] ghosttyApp is initializing")
                 }
             }
         }

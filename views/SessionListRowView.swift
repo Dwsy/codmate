@@ -106,14 +106,14 @@ struct SessionListRowView: View {
           }
 
           if isRunning {
-            SpinningBeachballView(spins: true)
+            RainbowSpinnerView(spins: true)
               .padding(2)
               .opacity(
                 reduceMotion ? 1.0 : (awaitingFollowup ? (breathing ? 1.0 : 0.55) : 1.0)
               )
           } else if awaitingFollowup && !isUpdating {
             // Draw a non-spinning beachball and apply a subtle breathing fade
-            SpinningBeachballView(spins: false)
+            RainbowSpinnerView(spins: false)
               .padding(2)
               .opacity(reduceMotion ? 1.0 : (breathing ? 1.0 : 0.55))
           } else if !isUpdating, let asset = branding.badgeAssetName {
@@ -208,8 +208,7 @@ struct SessionListRowView: View {
             .help("Updating…")
         } else if inTaskContainer {
           if isRunning {
-            SpinningBeachballView(spins: true)
-              .frame(width: 18, height: 18)
+            RainbowSpinnerView(spins: !reduceMotion, size: 18)
               .opacity(
                 reduceMotion ? 1.0 : (awaitingFollowup ? (breathing ? 1.0 : 0.55) : 1.0)
               )
@@ -346,50 +345,8 @@ private func metric(icon: String, value: Int) -> some View {
   }
 }
 
-// Spinning macOS-style rainbow beachball indicator
-private struct SpinningBeachballView: View {
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var angle: Double = 0
-  var spins: Bool = true
-
-  var body: some View {
-    ZStack {
-      Circle()
-        .fill(
-          AngularGradient(
-            gradient: Gradient(colors: [
-              .red, .orange, .yellow, .green, .blue, .purple, .red,
-            ]),
-            center: .center))
-      // White center cap
-      Circle()
-        .fill(Color.white.opacity(0.92))
-        .scaleEffect(0.30)
-      // Thin white separators to hint the segments
-      ForEach(0..<6) { i in
-        Rectangle()
-          .fill(Color.white.opacity(0.85))
-          .frame(width: 1.2)
-          .offset(y: -14)
-          .rotationEffect(.degrees(Double(i) * 60))
-      }
-    }
-    .rotationEffect(.degrees(angle))
-    .onAppear { startIfNeeded() }
-    .onChange(of: reduceMotion) { _ in startIfNeeded() }
-    .drawingGroup()
-  }
-
-  private func startIfNeeded() {
-    if reduceMotion || !spins {
-      angle = 0
-      return
-    }
-    withAnimation(.linear(duration: 1.0).repeatForever(autoreverses: false)) {
-      angle = 360
-    }
-  }
-}
+// Legacy SpinningBeachballView replaced by RainbowSpinnerView (CoreAnimation-based)
+// Kept for reference - all usages have been migrated to RainbowSpinnerView
 
 extension SessionListRowView {}
 

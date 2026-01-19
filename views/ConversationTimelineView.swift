@@ -27,129 +27,187 @@ struct ConversationTimelineView: View {
   @State private var lastUserScrollTime: TimeInterval = 0
   private let userScrollWindow: TimeInterval = 0.35
   @State private var stickyTurnID: String? = nil
+  @State private var scrollThrottleTask: Task<Void, Never>? = nil
   @State private var markerHeadFrames: [String: CGRect] = [:]
   @State private var markerHeadHeight: CGFloat = 0
   @State private var viewportHeight: CGFloat = 0
   @State private var previewContext: ImagePreviewContext? = nil
   @State private var timelinePositions: [Int: TimelinePositionData] = [:]
+  // Cached calculations to avoid recomputing on every body call
+  @State private var cachedMarkerOpacities: [String: Double] = [:]
+  // Debounce preference updates
+  @State private var preferenceDebounceTask: Task<Void, Never>? = nil
+  @State private var pendingMarkerFrames: [String: CGRect]? = nil
 
   var body: some View {
+    timelineContent
+      .onChange(of: turns.map(\.id)) { _, _ in
+        if previewContext != nil {
+          previewContext = nil
+        }
+        // Auto-scroll to bottom when Now mode is enabled and content changes
+        if nowModeEnabled {
+          scrollToBottom()
+        }
+      }
+      .onChange(of: refreshToken) { _, _ in
+        if nowModeEnabled {
+          scrollToBottom()
+        }
+      }
+      .onPreferenceChange(MarkerHeadFramePreferenceKey.self) { frames in
+        // Update immediately for timeline line rendering, but throttle sticky marker updates
+        markerHeadFrames = frames
+        if let height = frames.values.first?.height, height > 0, abs(height - markerHeadHeight) > 0.5 {
+          markerHeadHeight = height
+        }
+        // Throttle sticky marker and opacity updates
+        pendingMarkerFrames = frames
+        preferenceDebounceTask?.cancel()
+        preferenceDebounceTask = Task { @MainActor in
+          try? await Task.sleep(nanoseconds: 16_666_667) // ~60fps debounce
+          guard !Task.isCancelled, let frames = pendingMarkerFrames else { return }
+          pendingMarkerFrames = nil
+          updateStickyTurnID(using: frames)
+          updateMarkerOpacities()
+        }
+      }
+      .onPreferenceChange(TimelinePositionPreferenceKey.self) { positions in
+        // Update immediately for timeline line rendering
+        timelinePositions = positions
+      }
+      .onChange(of: nowModeEnabled) { _, isEnabled in
+        // Scroll to bottom when user explicitly enables Now mode
+        if isEnabled {
+          scrollToBottom()
+        }
+      }
+      .onChange(of: stickyTurnID) { _, _ in
+        updateMarkerOpacities()
+      }
+      .onChange(of: markerHeadFrames) { _, _ in
+        updateMarkerOpacities()
+      }
+      .onAppear {
+        updateMarkerOpacities()
+      }
+      .onDisappear {
+        scrollThrottleTask?.cancel()
+        preferenceDebounceTask?.cancel()
+        removeScrollObservers()
+      }
+  }
+  
+  @ViewBuilder
+  private var timelineContent: some View {
+    let topPadding: CGFloat = turns.isEmpty ? 8 : 0
+    // Recompute positions and turnsByID on each render to ensure correctness
     let positions = Dictionary(uniqueKeysWithValues: turns.enumerated().map { index, turn in
       let pos = ascending ? (index + 1) : (turns.count - index)
       return (turn.id, pos)
     })
     let turnsByID = Dictionary(uniqueKeysWithValues: turns.map { ($0.id, $0) })
 
-    let topPadding: CGFloat = turns.isEmpty ? 8 : 0
-
     ZStack {
-    ScrollViewReader { proxy in
+      ScrollViewReader { proxy in
         ScrollView {
           ScrollViewAccessor { sv in
             attachScrollView(sv)
           }
           .frame(width: 0, height: 0)
 
-          LazyVStack(alignment: .leading, spacing: timelineRowSpacing) {
-            ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
-              let pos = ascending ? (index + 1) : (turns.count - index)
-              let markerOpacity = markerOpacity(for: turn.id)
-              ConversationTurnRow(
-                turn: turn,
-                position: pos,
-                isFirst: index == turns.startIndex,
-                isLast: index == turns.count - 1,
-                markerOpacity: markerOpacity,
-                isExpanded: expandedTurnIDs.contains(turn.id),
-                branding: branding,
-                allowToggle: allowManualToggle,
-                autoExpandVisible: autoExpandVisible,
-                toggleExpanded: { toggle(turn) },
-                onSelectAttachment: { attachments, index in
-                  previewContext = ImagePreviewContext(attachments: attachments, index: index)
-                }
-              )
-              .id(turn.id)
-            }
-          }
-          .padding(.horizontal, 12)
-          .padding(.top, topPadding)
-          .padding(.bottom, 8)
+          timelineRowsList(topPadding: topPadding)
+            .padding(.horizontal, 12)
+            .padding(.top, topPadding)
+            .padding(.bottom, 8)
         }
         .coordinateSpace(name: "timelineScroll")
         .background(alignment: .topLeading) {
           timelineVerticalLine
         }
         .overlay(alignment: .topLeading) {
-          if let stickyTurnID,
-             let turn = turnsByID[stickyTurnID],
-             let position = positions[stickyTurnID] {
-            let extraLineHeight = extraStickyLineHeight()
-            HStack(alignment: .top, spacing: 8) {
-              StickyTimelineMarker(
-                position: position,
-                timeText: timelineTimeFormatter.string(from: turn.timestamp),
-                isActive: isActive,
-                extraLineHeight: extraLineHeight
-              )
-              .contentShape(Rectangle())
-              .onTapGesture {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                  proxy.scrollTo(stickyTurnID, anchor: .top)
-                }
-              }
-              .hoverHand()
-              Spacer(minLength: 0)
-            }
-            .padding(.leading, 12)
-            .padding(.top, topPadding)
-          }
+          stickyMarkerOverlay(positions: positions, turnsByID: turnsByID, topPadding: topPadding, proxy: proxy)
         }
       }
 
       ImagePreviewOverlay(context: $previewContext)
     }
-    .onChange(of: turns.map(\.id)) { _, _ in
-      if previewContext != nil {
-        previewContext = nil
-      }
-      // Auto-scroll to bottom when Now mode is enabled and content changes
-      if nowModeEnabled {
-        scrollToBottom()
-      }
-    }
-    .onChange(of: refreshToken) { _, _ in
-      if nowModeEnabled {
-        scrollToBottom()
+  }
+  
+  @ViewBuilder
+  private func timelineRowsList(topPadding: CGFloat) -> some View {
+    LazyVStack(alignment: .leading, spacing: timelineRowSpacing) {
+      ForEach(Array(turns.enumerated()), id: \.element.id) { index, turn in
+        timelineRow(for: turn, at: index)
       }
     }
-    .onPreferenceChange(MarkerHeadFramePreferenceKey.self) { frames in
-      markerHeadFrames = frames
-      if let height = frames.values.first?.height, height > 0, abs(height - markerHeadHeight) > 0.5 {
-        markerHeadHeight = height
+  }
+  
+  private func timelineRow(for turn: ConversationTurn, at index: Int) -> some View {
+    // Always compute position directly from index to avoid cache staleness
+    let pos = ascending ? (index + 1) : (turns.count - index)
+    let markerOpacity = cachedMarkerOpacities[turn.id] ?? 1.0
+    let isExpanded = expandedTurnIDs.contains(turn.id)
+    let isFirst = index == turns.startIndex
+    let isLast = index == turns.count - 1
+    
+    // Use EquatableView to prevent unnecessary re-renders, but ensure position is always correct
+    return EquatableView(content: 
+      ConversationTurnRow(
+        turn: turn,
+        position: pos,
+        isFirst: isFirst,
+        isLast: isLast,
+        markerOpacity: markerOpacity,
+        isExpanded: isExpanded,
+        branding: branding,
+        allowToggle: allowManualToggle,
+        autoExpandVisible: autoExpandVisible,
+        toggleExpanded: { toggle(turn) },
+        onSelectAttachment: { attachments, index in
+          previewContext = ImagePreviewContext(attachments: attachments, index: index)
+        }
+      )
+    )
+    .id("\(turn.id)-\(pos)") // Include position in ID to force update when position changes
+  }
+  
+  @ViewBuilder
+  private func stickyMarkerOverlay(positions: [String: Int], turnsByID: [String: ConversationTurn], topPadding: CGFloat, proxy: ScrollViewProxy) -> some View {
+    if let stickyTurnID,
+       let turn = turnsByID[stickyTurnID],
+       let position = positions[stickyTurnID] {
+      let extraLineHeight = extraStickyLineHeight()
+      HStack(alignment: .top, spacing: 8) {
+        StickyTimelineMarker(
+          position: position,
+          timeText: timelineTimeFormatter.string(from: turn.timestamp),
+          isActive: isActive,
+          extraLineHeight: extraLineHeight
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+          withAnimation(.easeInOut(duration: 0.2)) {
+            proxy.scrollTo(stickyTurnID, anchor: .top)
+          }
+        }
+        .hoverHand()
+        Spacer(minLength: 0)
       }
-      updateStickyTurnID(using: frames)
-    }
-    .onPreferenceChange(TimelinePositionPreferenceKey.self) { positions in
-      timelinePositions = positions
-    }
-    .onChange(of: nowModeEnabled) { _, isEnabled in
-      // Scroll to bottom when user explicitly enables Now mode
-      if isEnabled {
-        scrollToBottom()
-      }
-    }
-    .onDisappear {
-      removeScrollObservers()
+      .padding(.leading, 12)
+      .padding(.top, topPadding)
     }
   }
 
   @ViewBuilder
   private var timelineVerticalLine: some View {
     // Draw vertical timeline line (behind all markers)
-    if let lineParams = calculateTimelineLineParams() {
+    // Always recompute to ensure connection lines are visible
+    let lineParams = calculateTimelineLineParams()
+    if let lineParams = lineParams {
+      let segments = timelineLineSegments(for: lineParams)
       ZStack(alignment: .topLeading) {
-        ForEach(timelineLineSegments(for: lineParams)) { segment in
+        ForEach(segments) { segment in
           Rectangle()
             .fill(Color.secondary.opacity(0.5))
             .frame(width: 1, height: segment.height)
@@ -306,6 +364,20 @@ struct ConversationTimelineView: View {
   private func didScroll() {
     guard let scrollView else { return }
     if suppressNowModeCallback { return }
+    
+    // Throttle scroll updates to ~60fps (16.67ms)
+    scrollThrottleTask?.cancel()
+    scrollThrottleTask = Task { @MainActor in
+      try? await Task.sleep(nanoseconds: 16_666_667) // ~60fps
+      guard !Task.isCancelled else { return }
+      performScrollUpdate()
+    }
+  }
+  
+  @MainActor
+  private func performScrollUpdate() {
+    guard let scrollView else { return }
+    if suppressNowModeCallback { return }
 
     let offsetY = scrollView.contentView.bounds.origin.y
     let viewportHeight = scrollView.contentView.bounds.height
@@ -361,13 +433,22 @@ struct ConversationTimelineView: View {
     }
   }
 
+  // Cached sticky turn ID calculation to avoid recomputing on every scroll
+  @State private var lastStickyFramesHash: Int = 0
+  
   private func updateStickyTurnID(using frames: [String: CGRect]) {
     guard !frames.isEmpty else {
       if stickyTurnID != nil {
         stickyTurnID = nil
+        lastStickyFramesHash = 0
       }
       return
     }
+    
+    // Quick hash check to avoid unnecessary computation
+    let currentHash = frames.keys.sorted().joined().hashValue
+    guard currentHash != lastStickyFramesHash else { return }
+    lastStickyFramesHash = currentHash
 
     // Find all markers that have scrolled past the top (minY <= 0)
     let scrolledPast = frames.filter { $0.value.minY <= 0 }
@@ -387,15 +468,6 @@ struct ConversationTimelineView: View {
     }
   }
 
-  private func markerOpacity(for id: String) -> Double {
-    guard id == stickyTurnID else { return 1 }
-    guard let frame = markerHeadFrames[id], frame.height > 0 else { return 1 }
-    let minY = frame.minY
-    if minY <= 0 { return 0 }
-    if minY >= frame.height { return 1 }
-    return Double(minY / frame.height)
-  }
-
   private func extraStickyLineHeight() -> CGFloat {
     guard viewportHeight > 0, markerHeadHeight > 0 else { return 0 }
     let nextVisibleHeadMinY = markerHeadFrames.values
@@ -413,6 +485,31 @@ struct ConversationTimelineView: View {
     } else {
       expandedTurnIDs.insert(turn.id)
     }
+  }
+  
+  // Update cached marker opacities when stickyTurnID or markerHeadFrames change
+  private func updateMarkerOpacities() {
+    var newOpacities: [String: Double] = [:]
+    for turn in turns {
+      let opacity = computeMarkerOpacity(for: turn.id)
+      newOpacities[turn.id] = opacity
+    }
+    cachedMarkerOpacities = newOpacities
+  }
+  
+  // Compute marker opacity (extracted from markerOpacity method for caching)
+  private func computeMarkerOpacity(for id: String) -> Double {
+    guard id == stickyTurnID else { return 1 }
+    guard let frame = markerHeadFrames[id], frame.height > 0 else { return 1 }
+    let minY = frame.minY
+    if minY <= 0 { return 0 }
+    if minY >= frame.height { return 1 }
+    return Double(minY / frame.height)
+  }
+  
+  // Keep original method for backward compatibility (now uses cache)
+  private func markerOpacity(for id: String) -> Double {
+    return cachedMarkerOpacities[id] ?? 1.0
   }
 }
 
@@ -484,7 +581,7 @@ private struct TimelinePositionPreferenceKey: PreferenceKey {
   }
 }
 
-private struct ConversationTurnRow: View {
+private struct ConversationTurnRow: View, Equatable {
   let turn: ConversationTurn
   let position: Int
   let isFirst: Bool
@@ -497,6 +594,19 @@ private struct ConversationTurnRow: View {
   let toggleExpanded: () -> Void
   let onSelectAttachment: ([TimelineAttachment], Int) -> Void
   @State private var isVisible = false
+  
+  static func == (lhs: ConversationTurnRow, rhs: ConversationTurnRow) -> Bool {
+    // Always return false if position changes to force layout update
+    guard lhs.position == rhs.position else { return false }
+    return lhs.turn.id == rhs.turn.id &&
+    lhs.isFirst == rhs.isFirst &&
+    lhs.isLast == rhs.isLast &&
+    abs(lhs.markerOpacity - rhs.markerOpacity) < 0.01 &&
+    lhs.isExpanded == rhs.isExpanded &&
+    lhs.branding.providerKind == rhs.branding.providerKind &&
+    lhs.allowToggle == rhs.allowToggle &&
+    lhs.autoExpandVisible == rhs.autoExpandVisible
+  }
 
   var body: some View {
     let expanded = autoExpandVisible ? isVisible : isExpanded
