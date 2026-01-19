@@ -48,16 +48,16 @@ actor SessionsDiagnosticsService {
         geminiCurrentRoot: URL?,
         geminiDefaultRoot: URL
     ) async -> SessionsDiagnostics {
-        let currentProbe = probe(root: currentRoot, fileExtension: "jsonl")
-        let defaultProbe = probe(root: defaultRoot, fileExtension: "jsonl")
-        let notesCurrent = probe(root: notesCurrentRoot, fileExtension: "json")
-        let notesDefault = probe(root: notesDefaultRoot, fileExtension: "json")
-        let projectsCurrent = probe(root: projectsCurrentRoot, fileExtension: "json")
-        let projectsDefault = probe(root: projectsDefaultRoot, fileExtension: "json")
-        let claudeCurrent = claudeCurrentRoot.map { probe(root: $0, fileExtension: "jsonl") }
-        let claudeDefault = probe(root: claudeDefaultRoot, fileExtension: "jsonl")
-        let geminiCurrent = geminiCurrentRoot.map { probe(root: $0, fileExtension: "json") }
-        let geminiDefault = probe(root: geminiDefaultRoot, fileExtension: "json")
+        let currentProbe = await probe(root: currentRoot, fileExtension: "jsonl")
+        let defaultProbe = await probe(root: defaultRoot, fileExtension: "jsonl")
+        let notesCurrent = await probe(root: notesCurrentRoot, fileExtension: "json")
+        let notesDefault = await probe(root: notesDefaultRoot, fileExtension: "json")
+        let projectsCurrent = await probe(root: projectsCurrentRoot, fileExtension: "json")
+        let projectsDefault = await probe(root: projectsDefaultRoot, fileExtension: "json")
+        let claudeCurrent = claudeCurrentRoot != nil ? await probe(root: claudeCurrentRoot!, fileExtension: "jsonl") : nil
+        let claudeDefault = await probe(root: claudeDefaultRoot, fileExtension: "jsonl")
+        let geminiCurrent = geminiCurrentRoot != nil ? await probe(root: geminiCurrentRoot!, fileExtension: "json") : nil
+        let geminiDefault = await probe(root: geminiDefaultRoot, fileExtension: "json")
 
         var suggestions: [String] = []
         if currentProbe.enumeratedCount == 0, defaultProbe.enumeratedCount > 0,
@@ -131,7 +131,7 @@ actor SessionsDiagnosticsService {
     }
 
     // MARK: - Helpers
-    private func probe(root: URL, fileExtension: String) -> SessionsDiagnostics.Probe {
+    func probe(root: URL, fileExtension: String) async -> SessionsDiagnostics.Probe {
         var isDir: ObjCBool = false
         let exists = fm.fileExists(atPath: root.path, isDirectory: &isDir)
         var count = 0
@@ -144,7 +144,10 @@ actor SessionsDiagnosticsService {
                 includingPropertiesForKeys: [.isRegularFileKey],
                 options: [.skipsHiddenFiles, .skipsPackageDescendants]
             ) {
-                for case let url as URL in enumerator {
+                // Collect URLs synchronously first to avoid Swift 6 async/iterator issues
+                let urls = enumerator.compactMap { $0 as? URL }
+                
+                for url in urls {
                     if url.pathExtension.lowercased() == fileExtension.lowercased() {
                         count += 1
                         if samples.count < 10 { samples.append(url.path) }

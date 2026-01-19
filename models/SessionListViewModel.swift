@@ -694,6 +694,37 @@ final class SessionListViewModel: ObservableObject {
         Task { await self.syncRemoteHosts(force: true, refreshAfter: true) }
       }
       .store(in: &cancellables)
+    
+    // Observe session path configs changes (ignore rules, enabled state)
+    // When enabled state changes, trigger full refresh to rebuild providers
+    // When only ignore rules change, trigger refresh but only from cache (no filesystem scan)
+    // Cache is preserved - sessions will reappear if ignore rules are removed later
+    var previousConfigs: [SessionPathConfig] = preferences.sessionPathConfigs
+    preferences.$sessionPathConfigs
+      .dropFirst()
+      .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
+      .sink { [weak self] newConfigs in
+        guard let self else { return }
+        // Check if enabled state changed (requires provider rebuild)
+        let previousEnabled = Set(previousConfigs.filter { $0.enabled }.map { "\($0.kind.rawValue):\($0.id)" })
+        let currentEnabled = Set(newConfigs.filter { $0.enabled }.map { "\($0.kind.rawValue):\($0.id)" })
+        previousConfigs = newConfigs
+        
+        if previousEnabled != currentEnabled {
+          // Enabled state changed - need full refresh to rebuild providers
+          // Important: toggling providers can overlap with manual refresh (Cmd+R). Cancel pending work
+          // and clear in-flight markers to avoid getting stuck in a "refresh already running" state.
+          self.cancelHeavyWork()
+          self.activeScopeRefreshes.removeAll()
+          // Force a filesystem-backed refresh with .all scope to fully restore sessions for re-enabled providers.
+          Task { await self.refreshSessionsForProviderChange(force: true) }
+        } else {
+          // Only ignore rules changed - refresh from cache only (no filesystem scan)
+          // This applies new ignore rules to cached sessions without rescanning
+          Task { await self.refreshSessionsFromCacheOnly() }
+        }
+      }
+      .store(in: &cancellables)
     // Pre-seed usage snapshots based on current Active Provider selection to avoid initial flicker
     Task { [weak self] in
       guard let self else { return }
@@ -816,20 +847,21 @@ final class SessionListViewModel: ObservableObject {
     let refreshBegan = Date()
     defer {
       let elapsed = Date().timeIntervalSince(refreshBegan)
+      // Always clear the in-flight marker for this scope if it's ours.
+      // Important: a refresh can be superseded (e.g. settings toggle -> Cmd+R),
+      // and if we only clear on "current token" we can leave a stale marker behind,
+      // causing future refreshes to be skipped indefinitely.
+      if activeScopeRefreshes[scopeKeyValue] == token {
+        activeScopeRefreshes.removeValue(forKey: scopeKeyValue)
+      }
       if token == activeRefreshToken {
         isLoading = false
         lastRefreshAt = Date()
         lastRefreshScope = currentScope()
-        // Clean up active refresh tracker
-        if activeScopeRefreshes[scopeKeyValue] == token {
-          activeScopeRefreshes.removeValue(forKey: scopeKeyValue)
-        }
         endRefreshStatus(elapsed: elapsed, isCurrent: true)
         diagLogger.log(
           "refreshSessions done in \(elapsed, format: .fixed(precision: 3))s sessions=\(self.allSessions.count, privacy: .public) ts=\(self.ts(), format: .fixed(precision: 3))"
         )
-      } else {
-        endRefreshStatus(elapsed: elapsed, isCurrent: false)
       }
     }
 
@@ -846,6 +878,10 @@ final class SessionListViewModel: ObservableObject {
     let scopedProjectIds = dateDimension == .created ? singleSelectedProject() : nil
     let scopedProjectDirectories = dateDimension == .created ? projectDirectories : nil
     let scopedDateRange = dateDimension == .created ? currentDateRange() : nil
+    // Get ignored paths for Codex (merge all enabled Codex configs)
+    let codexConfigs = preferences.sessionPathConfigs.filter { $0.kind == .codex && $0.enabled }
+    let codexIgnoredPaths = codexConfigs.flatMap { $0.ignoredSubpaths }
+    
     let cacheContext = SessionProviderContext(
       scope: scope,
       sessionsRoot: preferences.sessionsRoot,
@@ -855,7 +891,8 @@ final class SessionListViewModel: ObservableObject {
       dateRange: scopedDateRange,
       projectIds: scopedProjectIds,
       forceFilesystemScan: false,
-      cachePolicy: .cacheOnly
+      cachePolicy: .cacheOnly,
+      ignoredPaths: codexIgnoredPaths
     )
     let refreshContext = SessionProviderContext(
       scope: scope,
@@ -866,7 +903,8 @@ final class SessionListViewModel: ObservableObject {
       dateRange: scopedDateRange,
       projectIds: scopedProjectIds,
       forceFilesystemScan: force,
-      cachePolicy: .refresh
+      cachePolicy: .refresh,
+      ignoredPaths: codexIgnoredPaths
     )
 
     let cachedResults = await loadProviders(providers, context: cacheContext)
@@ -961,6 +999,203 @@ final class SessionListViewModel: ObservableObject {
     if !selectedSessionIDs.isEmpty {
       Task { await self.refreshSelectedSessions(sessionIds: self.selectedSessionIDs, force: force) }
     }
+  }
+  
+  /// Refresh sessions when provider enabled state changes
+  /// Loads all sessions (scope: .all) to ensure complete restoration when re-enabling a provider
+  private func refreshSessionsForProviderChange(force: Bool = false) async {
+    scheduledFilterRefresh?.cancel()
+    scheduledFilterRefresh = nil
+    let token = UUID()
+    activeRefreshToken = token
+    
+    // Use .all scope to load all sessions when provider state changes
+    let scope: SessionLoadScope = .all
+    let scopeKeyValue = scopeKey(scope)
+    
+    isLoading = true
+    beginRefreshStatus(force: force)
+    activeScopeRefreshes[scopeKeyValue] = token
+    if force {
+      invalidateEnrichmentCache(for: selectedDay)
+    }
+    let refreshBegan = Date()
+    defer {
+      let elapsed = Date().timeIntervalSince(refreshBegan)
+      // Always clear the in-flight marker for this scope if it's ours.
+      if activeScopeRefreshes[scopeKeyValue] == token {
+        activeScopeRefreshes.removeValue(forKey: scopeKeyValue)
+      }
+      if token == activeRefreshToken {
+        isLoading = false
+        lastRefreshAt = Date()
+        lastRefreshScope = scope
+        endRefreshStatus(elapsed: elapsed, isCurrent: true)
+        diagLogger.log(
+          "refreshSessionsForProviderChange done in \(elapsed, format: .fixed(precision: 3))s sessions=\(self.allSessions.count, privacy: .public) ts=\(self.ts(), format: .fixed(precision: 3))"
+        )
+      }
+    }
+    
+    await ensureSessionsAccess()
+    
+    let enabledRemoteHosts = preferences.enabledRemoteHosts
+    diagLogger.log(
+      "refreshSessionsForProviderChange start force=\(force, privacy: .public) scope=all ts=\(self.ts(), format: .fixed(precision: 3))"
+    )
+    
+    let providers = buildProviders(enabledRemoteHosts: Set(enabledRemoteHosts))
+    // Load all sessions, not scoped to current selection
+    let codexConfigs = preferences.sessionPathConfigs.filter { $0.kind == .codex && $0.enabled }
+    let codexIgnoredPaths = codexConfigs.flatMap { $0.ignoredSubpaths }
+    
+    let cacheContext = SessionProviderContext(
+      scope: scope,
+      sessionsRoot: preferences.sessionsRoot,
+      enabledRemoteHosts: Set(enabledRemoteHosts),
+      projectDirectories: nil,  // Load all
+      dateDimension: dateDimension,
+      dateRange: nil,  // Load all
+      projectIds: nil,  // Load all
+      forceFilesystemScan: false,
+      cachePolicy: .cacheOnly,
+      ignoredPaths: codexIgnoredPaths
+    )
+    let refreshContext = SessionProviderContext(
+      scope: scope,
+      sessionsRoot: preferences.sessionsRoot,
+      enabledRemoteHosts: Set(enabledRemoteHosts),
+      projectDirectories: nil,  // Load all
+      dateDimension: dateDimension,
+      dateRange: nil,  // Load all
+      projectIds: nil,  // Load all
+      forceFilesystemScan: force,
+      cachePolicy: .refresh,
+      ignoredPaths: codexIgnoredPaths
+    )
+    
+    let cachedResults = await loadProviders(providers, context: cacheContext)
+    let cachedSessions = dedupProviderSessions(cachedResults)
+    let notes = await notesStore.all()
+    notesSnapshot = notes
+    
+    if token == activeRefreshToken, !cachedSessions.isEmpty {
+      var cachedForApply = cachedSessions
+      apply(notes: notes, to: &cachedForApply)
+      registerActivityHeartbeat(previous: allSessions, current: cachedForApply)
+      smartMergeAllSessions(newSessions: cachedForApply)
+      scheduleFiltersUpdate()
+    }
+    
+    let refreshedResults = await loadProviders(providers, context: refreshContext)
+    var sessions = dedupProviderSessions(cachedSessions + refreshedResults)
+    
+    guard token == activeRefreshToken else { return }
+    let previousIDs = Set(allSessions.map { $0.id })
+    Task { @MainActor in
+      await self.loadProjects()
+      await self.importMembershipsFromNotesIfNeeded(notes: notes)
+    }
+    apply(notes: notes, to: &sessions)
+    let newlyAppeared = sessions.filter { !previousIDs.contains($0.id) }
+    if !newlyAppeared.isEmpty {
+      for s in newlyAppeared { self.handleAutoAssignIfMatches(s) }
+    }
+    registerActivityHeartbeat(previous: allSessions, current: sessions)
+    smartMergeAllSessions(newSessions: sessions)
+    persistProjectAssignmentsToCache(sessions)
+    recomputeProjectCounts()
+    rebuildCanonicalCwdCache()
+    await computeCalendarCaches()
+    scheduleFiltersUpdate()
+    currentMonthDimension = dateDimension
+    currentMonthKey = monthKey(for: selectedDay, dimension: dateDimension)
+    Task { await self.refreshGlobalCount() }
+    let enabledRemoteHostsForCounts = enabledRemoteHosts
+    let sessionsRootForCounts = sessionsRoot
+    Task {
+      var counts = await indexer.collectCWDCounts(root: sessionsRootForCounts)
+      let claudeCounts = await claudeProvider.collectCWDCounts()
+      let geminiCounts = await geminiProvider.collectCWDCounts()
+      for (key, value) in claudeCounts {
+        counts[key, default: 0] += value
+      }
+      for (key, value) in geminiCounts {
+        counts[key, default: 0] += value
+      }
+      if !enabledRemoteHostsForCounts.isEmpty {
+        let remoteCodex = await remoteProvider.collectCWDAggregates(
+          kind: .codex, enabledHosts: enabledRemoteHostsForCounts)
+        for (key, value) in remoteCodex {
+          counts[key, default: 0] += value
+        }
+        let remoteClaude = await remoteProvider.collectCWDAggregates(
+          kind: .claude, enabledHosts: enabledRemoteHostsForCounts)
+        for (key, value) in remoteClaude {
+          counts[key, default: 0] += value
+        }
+      }
+      let tree = counts.buildPathTreeFromCounts()
+      await MainActor.run { self.pathTreeRootPublished = tree }
+    }
+    Task { [weak self] in
+      guard let self else { return }
+      self.indexMeta = await self.indexer.currentMeta()
+      self.cacheCoverage = await self.indexer.currentCoverage()
+      self.diagLogger.log(
+        "refreshSessionsForProviderChange meta/coverage updated metaCount=\(self.indexMeta?.sessionCount ?? -1, privacy: .public) coverageCount=\(self.cacheCoverage?.sessionCount ?? -1, privacy: .public) ts=\(self.ts(), format: .fixed(precision: 3))"
+      )
+    }
+    refreshCodexUsageStatus()
+    if claudeUsageAutoRefreshEnabled {
+      refreshClaudeUsageStatus(silent: false)
+    }
+    refreshGeminiUsageStatus(silent: false)
+    schedulePathTreeRefresh()
+    
+    if !selectedSessionIDs.isEmpty {
+      Task { await self.refreshSelectedSessions(sessionIds: self.selectedSessionIDs, force: force) }
+    }
+  }
+  
+  /// Refresh sessions from cache only (no filesystem scan)
+  /// Used when ignore rules change - applies new rules to cached sessions without rescanning
+  /// Cache is preserved - sessions will reappear if ignore rules are removed later
+  /// When re-enabling a provider, loads all sessions (scope: .all) to ensure complete restoration
+  private func refreshSessionsFromCacheOnly() async {
+    // When ignore rules change or provider is re-enabled, load ALL sessions from cache
+    // to ensure previously filtered sessions are restored
+    let scope: SessionLoadScope = .all
+    let enabledRemoteHosts = preferences.enabledRemoteHosts
+    let providers = buildProviders(enabledRemoteHosts: Set(enabledRemoteHosts))
+    
+    // Get ignored paths (merge all enabled configs)
+    let codexConfigs = preferences.sessionPathConfigs.filter { $0.kind == .codex && $0.enabled }
+    let codexIgnoredPaths = codexConfigs.flatMap { $0.ignoredSubpaths }
+    
+    let cacheContext = SessionProviderContext(
+      scope: scope,
+      sessionsRoot: preferences.sessionsRoot,
+      enabledRemoteHosts: Set(enabledRemoteHosts),
+      projectDirectories: nil,  // Load all, not scoped to current selection
+      dateDimension: dateDimension,
+      dateRange: nil,  // Load all, not scoped to current date range
+      projectIds: nil,  // Load all, not scoped to current project
+      forceFilesystemScan: false,
+      cachePolicy: .cacheOnly,
+      ignoredPaths: codexIgnoredPaths
+    )
+    
+    let cachedResults = await loadProviders(providers, context: cacheContext)
+    let sessions = dedupProviderSessions(cachedResults)
+    let notes = await notesStore.all()
+    notesSnapshot = notes
+    
+    var sessionsForApply = sessions
+    apply(notes: notes, to: &sessionsForApply)
+    registerActivityHeartbeat(previous: allSessions, current: sessionsForApply)
+    smartMergeAllSessions(newSessions: sessionsForApply)
+    scheduleFiltersUpdate()
   }
 
   // MARK: - Selected Sessions Incremental Refresh
@@ -1144,28 +1379,48 @@ final class SessionListViewModel: ObservableObject {
   }
 
   private func buildProviders(enabledRemoteHosts: Set<String>) -> [any SessionProvider] {
-    var providers: [any SessionProvider] = [
-      indexer,
-      claudeProvider,
-      geminiProvider,
-    ]
+    var providers: [any SessionProvider] = []
+
+    // Check if each kind is enabled in session path configs
+    let codexEnabled = preferences.sessionPathConfigs.contains { $0.kind == .codex && $0.enabled }
+    let claudeEnabled = preferences.sessionPathConfigs.contains { $0.kind == .claude && $0.enabled }
+    let geminiEnabled = preferences.sessionPathConfigs.contains { $0.kind == .gemini && $0.enabled }
+
+    diagLogger.log(
+      "buildProviders: codex=\(codexEnabled, privacy: .public) claude=\(claudeEnabled, privacy: .public) gemini=\(geminiEnabled, privacy: .public) remoteHosts=\(enabledRemoteHosts.count, privacy: .public)"
+    )
+    
+    if codexEnabled {
+      providers.append(indexer)
+    }
+    if claudeEnabled {
+      providers.append(claudeProvider)
+    }
+    if geminiEnabled {
+      providers.append(geminiProvider)
+    }
+    
     if !enabledRemoteHosts.isEmpty {
-      providers.append(
-        RemoteSessionProviderAdapter(
-          kind: .codex,
-          remoteKind: .codex,
-          provider: remoteProvider,
-          label: "CodexRemote"
+      if codexEnabled {
+        providers.append(
+          RemoteSessionProviderAdapter(
+            kind: .codex,
+            remoteKind: .codex,
+            provider: remoteProvider,
+            label: "CodexRemote"
+          )
         )
-      )
-      providers.append(
-        RemoteSessionProviderAdapter(
-          kind: .claude,
-          remoteKind: .claude,
-          provider: remoteProvider,
-          label: "ClaudeRemote"
+      }
+      if claudeEnabled {
+        providers.append(
+          RemoteSessionProviderAdapter(
+            kind: .claude,
+            remoteKind: .claude,
+            provider: remoteProvider,
+            label: "ClaudeRemote"
+          )
         )
-      )
+      }
     }
     return providers
   }
@@ -1185,8 +1440,28 @@ final class SessionListViewModel: ObservableObject {
     ) { group in
       for provider in providers {
         group.addTask { [self] in
+          // Get ignored paths for this provider's kind (merge all configs of same kind, must access on MainActor)
+          let ignoredPaths = await MainActor.run {
+            let configs = preferences.sessionPathConfigs.filter { $0.kind == provider.kind && $0.enabled }
+            return configs.flatMap { $0.ignoredSubpaths }
+          }
+          
+          // Create context with provider-specific ignored paths
+          let providerContext = SessionProviderContext(
+            scope: context.scope,
+            sessionsRoot: context.sessionsRoot,
+            enabledRemoteHosts: context.enabledRemoteHosts,
+            projectDirectories: context.projectDirectories,
+            dateDimension: context.dateDimension,
+            dateRange: context.dateRange,
+            projectIds: context.projectIds,
+            forceFilesystemScan: context.forceFilesystemScan,
+            cachePolicy: context.cachePolicy,
+            ignoredPaths: ignoredPaths
+          )
+          
           do {
-            let result = try await provider.load(context: context)
+            let result = try await provider.load(context: providerContext)
             let label = result.summaries.first?.source.baseKind.rawValue ?? provider.kind.rawValue
             logger.log(
               "provider load success kind=\(label, privacy: .public) count=\(result.summaries.count, privacy: .public) cacheHit=\(result.cacheHit, privacy: .public)"
@@ -3132,12 +3407,15 @@ final class SessionListViewModel: ObservableObject {
 
   func refreshIncrementalForNewCodexToday() async {
     do {
+      let codexConfigs = preferences.sessionPathConfigs.filter { $0.kind == .codex && $0.enabled }
+      let codexIgnoredPaths = codexConfigs.flatMap { $0.ignoredSubpaths }
       let subset = try await indexer.refreshSessions(
         root: preferences.sessionsRoot,
         scope: .day(dayOfToday()),
         dateRange: currentDateRange(),
         projectIds: singleSelectedProject(),
-        dateDimension: dateDimension)
+        dateDimension: dateDimension,
+        ignoredPaths: codexIgnoredPaths)
       await MainActor.run { self.mergeAndApply(subset) }
     } catch {
       // Swallow errors for incremental path; full refresh will recover if needed.
@@ -3146,7 +3424,9 @@ final class SessionListViewModel: ObservableObject {
 
   func refreshIncrementalForGeminiToday() async {
     do {
-      let subset = try await geminiProvider.sessions(scope: .day(dayOfToday()))
+      let geminiConfigs = preferences.sessionPathConfigs.filter { $0.kind == .gemini && $0.enabled }
+      let geminiIgnoredPaths = geminiConfigs.flatMap { $0.ignoredSubpaths }
+      let subset = try await geminiProvider.sessions(scope: .day(dayOfToday()), ignoredPaths: geminiIgnoredPaths)
       await MainActor.run { self.mergeAndApply(subset) }
     } catch {
       diagLogger.error(
@@ -3156,7 +3436,9 @@ final class SessionListViewModel: ObservableObject {
 
   func refreshIncrementalForClaudeToday() async {
     do {
-      let subset = try await claudeProvider.sessions(scope: .day(dayOfToday()))
+      let claudeConfigs = preferences.sessionPathConfigs.filter { $0.kind == .claude && $0.enabled }
+      let claudeIgnoredPaths = claudeConfigs.flatMap { $0.ignoredSubpaths }
+      let subset = try await claudeProvider.sessions(scope: .day(dayOfToday()), ignoredPaths: claudeIgnoredPaths)
       await MainActor.run { self.mergeAndApply(subset) }
     } catch {
       diagLogger.error(
@@ -3259,8 +3541,12 @@ extension SessionListViewModel {
       return
     }
 
-    let claudeSummaries = (try? await claudeProvider.sessions(scope: .all)) ?? []
-    let geminiSummaries = (try? await geminiProvider.sessions(scope: .all)) ?? []
+    let claudeConfigs = preferences.sessionPathConfigs.filter { $0.kind == .claude && $0.enabled }
+    let claudeIgnoredPaths = claudeConfigs.flatMap { $0.ignoredSubpaths }
+    let claudeSummaries = (try? await claudeProvider.sessions(scope: .all, ignoredPaths: claudeIgnoredPaths)) ?? []
+    let geminiConfigs = preferences.sessionPathConfigs.filter { $0.kind == .gemini && $0.enabled }
+    let geminiIgnoredPaths = geminiConfigs.flatMap { $0.ignoredSubpaths }
+    let geminiSummaries = (try? await geminiProvider.sessions(scope: .all, ignoredPaths: geminiIgnoredPaths)) ?? []
 
     var idSet = Set<String>()
     for s in codexSummaries { idSet.insert(s.id) }

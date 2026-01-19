@@ -25,6 +25,11 @@ struct AdvancedSettingsView: View {
                                 AdvancedPathPane(preferences: preferences)
                             }
                         }
+                        Tab("Sessions", systemImage: "folder.badge.gearshape") {
+                            SettingsTabContent {
+                                SessionsPathPane(preferences: preferences)
+                            }
+                        }
                         Tab("Dialectics", systemImage: "doc.text.magnifyingglass") {
                             SettingsTabContent {
                                 DialecticsPane(preferences: preferences)
@@ -37,6 +42,10 @@ struct AdvancedSettingsView: View {
                             AdvancedPathPane(preferences: preferences)
                         }
                         .tabItem { Label("Path", systemImage: "folder") }
+                        SettingsTabContent {
+                            SessionsPathPane(preferences: preferences)
+                        }
+                        .tabItem { Label("Sessions", systemImage: "folder.badge.gearshape") }
                         SettingsTabContent {
                             DialecticsPane(preferences: preferences)
                         }
