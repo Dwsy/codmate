@@ -543,9 +543,10 @@ private struct ProjectTreeNodeView: View {
     if let anchor {
       allowed = Set(vm.allowedSources(for: anchor))
     } else if let project {
-      allowed = project.sources.isEmpty ? ProjectSessionSource.allSet : project.sources
+      let sources = project.sources.isEmpty ? ProjectSessionSource.allSet : project.sources
+      allowed = Set(sources.filter { vm.preferences.isCLIEnabled($0.baseKind) })
     } else {
-      allowed = ProjectSessionSource.allSet
+      allowed = Set(ProjectSessionSource.allCases.filter { vm.preferences.isCLIEnabled($0.baseKind) })
     }
     let requestedOrder: [ProjectSessionSource] = [.claude, .codex, .gemini]
     let enabledRemoteHosts = vm.preferences.enabledRemoteHosts.sorted()
@@ -787,6 +788,7 @@ struct ProjectEditorSheet: View {
             ForEach(ProjectSessionSource.allCases) { source in
               Toggle(source.displayName, isOn: binding(for: source))
                 .toggleStyle(.checkbox)
+                .disabled(!viewModel.preferences.isCLIEnabled(source.baseKind))
             }
           }
           .frame(width: fieldColWidth, alignment: .leading)
@@ -968,7 +970,7 @@ struct ProjectEditorSheet: View {
                         extensionsVM.updateMCPTarget(id: entry.id, target: .codex, value: value)
                       }
                     ),
-                    disabled: !entry.isSelected
+                    disabled: !entry.isSelected || !viewModel.preferences.isCLIEnabled(.codex)
                   )
                   MCPServerTargetToggle(
                     provider: .claude,
@@ -978,7 +980,7 @@ struct ProjectEditorSheet: View {
                         extensionsVM.updateMCPTarget(id: entry.id, target: .claude, value: value)
                       }
                     ),
-                    disabled: !entry.isSelected
+                    disabled: !entry.isSelected || !viewModel.preferences.isCLIEnabled(.claude)
                   )
                   MCPServerTargetToggle(
                     provider: .gemini,
@@ -988,7 +990,7 @@ struct ProjectEditorSheet: View {
                         extensionsVM.updateMCPTarget(id: entry.id, target: .gemini, value: value)
                       }
                     ),
-                    disabled: !entry.isSelected
+                    disabled: !entry.isSelected || !viewModel.preferences.isCLIEnabled(.gemini)
                   )
                 }
               }
@@ -1080,7 +1082,7 @@ struct ProjectEditorSheet: View {
                         extensionsVM.updateSkillTarget(id: skill.id, target: .codex, value: value)
                       }
                     ),
-                    disabled: !skill.isSelected
+                    disabled: !skill.isSelected || !viewModel.preferences.isCLIEnabled(.codex)
                   )
                   MCPServerTargetToggle(
                     provider: .claude,
@@ -1090,7 +1092,7 @@ struct ProjectEditorSheet: View {
                         extensionsVM.updateSkillTarget(id: skill.id, target: .claude, value: value)
                       }
                     ),
-                    disabled: !skill.isSelected
+                    disabled: !skill.isSelected || !viewModel.preferences.isCLIEnabled(.claude)
                   )
                   MCPServerTargetToggle(
                     provider: .gemini,
@@ -1100,7 +1102,7 @@ struct ProjectEditorSheet: View {
                         extensionsVM.updateSkillTarget(id: skill.id, target: .gemini, value: value)
                       }
                     ),
-                    disabled: !skill.isSelected
+                    disabled: !skill.isSelected || !viewModel.preferences.isCLIEnabled(.gemini)
                   )
                 }
               }
@@ -1273,7 +1275,10 @@ struct ProjectEditorSheet: View {
       overview = p.overview ?? ""
       profileId = p.profileId ?? ""
       let initialSources = p.sources.isEmpty ? ProjectSessionSource.allSet : p.sources
-      sources = initialSources
+      let enabledSources = initialSources.filter { viewModel.preferences.isCLIEnabled($0.baseKind) }
+      sources = enabledSources.isEmpty
+        ? Set(ProjectSessionSource.allCases.filter { viewModel.preferences.isCLIEnabled($0.baseKind) })
+        : enabledSources
       if let pr = p.profile {
         profileSandbox = pr.sandbox
         profileApproval = pr.approval
@@ -1289,7 +1294,7 @@ struct ProjectEditorSheet: View {
         }
       }
     case .new:
-      sources = ProjectSessionSource.allSet
+      sources = Set(ProjectSessionSource.allCases.filter { viewModel.preferences.isCLIEnabled($0.baseKind) })
       if let pf = prefill {
         if let v = pf.name { name = v }
         if let v = pf.directory { directory = v }
@@ -1344,7 +1349,9 @@ struct ProjectEditorSheet: View {
       let d = directory.trimmingCharacters(in: .whitespacesAndNewlines)
       return d.isEmpty ? nil : directory
     }()
-    let finalSources = sources.isEmpty ? ProjectSessionSource.allSet : sources
+    let enabledSources = sources.filter { viewModel.preferences.isCLIEnabled($0.baseKind) }
+    let fallbackSources = Set(ProjectSessionSource.allCases.filter { viewModel.preferences.isCLIEnabled($0.baseKind) })
+    let finalSources = enabledSources.isEmpty ? fallbackSources : enabledSources
 
     switch mode {
     case .new:
@@ -1404,8 +1411,9 @@ struct ProjectEditorSheet: View {
 
   private func binding(for source: ProjectSessionSource) -> Binding<Bool> {
     Binding<Bool>(
-      get: { sources.contains(source) },
+      get: { sources.contains(source) && viewModel.preferences.isCLIEnabled(source.baseKind) },
       set: { newValue in
+        guard viewModel.preferences.isCLIEnabled(source.baseKind) else { return }
         if newValue {
           sources.insert(source)
         } else {

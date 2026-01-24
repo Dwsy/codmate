@@ -3,6 +3,7 @@ import AppKit
 
 struct UsageStatusControl: View {
   var snapshots: [UsageProviderKind: UsageProviderSnapshot]
+  var preferences: SessionPreferencesStore
   @Binding var selectedProvider: UsageProviderKind
   var onRequestRefresh: (UsageProviderKind) -> Void
 
@@ -39,19 +40,16 @@ struct UsageStatusControl: View {
   @ViewBuilder
   private func content(referenceDate: Date) -> some View {
     HStack(spacing: 8) {
-      let rows = providerRows(at: referenceDate)
-      let outerState = ringState(for: .gemini, relativeTo: referenceDate)
-      let middleState = ringState(for: .claude, relativeTo: referenceDate)
-      let innerState = ringState(for: .codex, relativeTo: referenceDate)
+      let enabledProviders = orderedEnabledProviders()
+      let rows = providerRows(at: referenceDate, enabledProviders: enabledProviders)
+      let ringStates = enabledProviders.map { ringState(for: $0, relativeTo: referenceDate) }
 
       Button {
         showPopover.toggle()
       } label: {
         HStack(spacing: isHovering ? 8 : 0) {
           TripleUsageDonutView(
-            outerState: outerState,
-            middleState: middleState,
-            innerState: innerState
+            states: ringStates
           )
           VStack(alignment: .leading, spacing: -1.5) {
             if rows.isEmpty {
@@ -114,8 +112,10 @@ struct UsageStatusControl: View {
         hoverPhase = 0
       }
       .popover(isPresented: $showPopover, arrowEdge: .top) {
+        let enabledProviders = orderedEnabledProviders()
         UsageStatusPopover(
           snapshots: snapshots,
+          enabledProviders: enabledProviders,
           selectedProvider: $selectedProvider,
           onRequestRefresh: onRequestRefresh
         )
@@ -124,14 +124,19 @@ struct UsageStatusControl: View {
   }
 
   private var shouldHideAllProviders: Bool {
-    UsageProviderKind.allCases.allSatisfy { provider in
+    let enabledProviders = orderedEnabledProviders()
+    guard !enabledProviders.isEmpty else { return true }
+    return enabledProviders.allSatisfy { provider in
       guard let snapshot = snapshots[provider] else { return true }
       return snapshot.origin == .thirdParty
     }
   }
 
-  private func providerRows(at date: Date) -> [(provider: UsageProviderKind, text: String)] {
-    UsageProviderKind.allCases.compactMap { provider in
+  private func providerRows(
+    at date: Date,
+    enabledProviders: [UsageProviderKind]
+  ) -> [(provider: UsageProviderKind, text: String)] {
+    enabledProviders.compactMap { provider in
       guard let snapshot = snapshots[provider] else { return nil }
       if snapshot.origin == .thirdParty {
         return (provider, "\(provider.displayName) · Custom provider (usage unavailable)")
@@ -159,6 +164,7 @@ struct UsageStatusControl: View {
   }
 
   private func autoRefreshCodexIfNeeded() {
+    guard preferences.isCLIEnabled(.codex) else { return }
     let shouldRefresh: Bool = {
       guard let snapshot = snapshots[.codex] else { return true }
       if snapshot.origin == .thirdParty { return false }
@@ -198,9 +204,9 @@ struct UsageStatusControl: View {
   }
 
   private func refreshAllProviders() {
-    onRequestRefresh(.codex)
-    onRequestRefresh(.claude)
-    onRequestRefresh(.gemini)
+    for provider in orderedEnabledProviders() {
+      onRequestRefresh(provider)
+    }
   }
 
   private func providerColor(_ provider: UsageProviderKind) -> Color {
@@ -212,6 +218,11 @@ struct UsageStatusControl: View {
     case .gemini:
       return Color(nsColor: .systemTeal)
     }
+  }
+
+  private func orderedEnabledProviders() -> [UsageProviderKind] {
+    let ordered: [UsageProviderKind] = [.gemini, .claude, .codex]
+    return ordered.filter { preferences.isCLIEnabled($0.baseKind) }
   }
 
   private static let resetFormatter: DateFormatter = {
@@ -271,6 +282,7 @@ extension View {
 
 private struct UsageStatusPopover: View {
   var snapshots: [UsageProviderKind: UsageProviderSnapshot]
+  var enabledProviders: [UsageProviderKind]
   @Binding var selectedProvider: UsageProviderKind
   var onRequestRefresh: (UsageProviderKind) -> Void
 
@@ -292,9 +304,8 @@ private struct UsageStatusPopover: View {
 
   @ViewBuilder
   private func content(referenceDate: Date) -> some View {
-    let providers: [UsageProviderKind] = [.codex, .claude, .gemini]
     VStack(alignment: .leading, spacing: 12) {
-      ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
+      ForEach(Array(enabledProviders.enumerated()), id: \.element.id) { index, provider in
         VStack(alignment: .leading, spacing: 8) {
           HStack(spacing: 6) {
             providerIcon(for: provider)
@@ -324,7 +335,7 @@ private struct UsageStatusPopover: View {
           }
         }
 
-        if index < providers.count - 1 {
+        if index < enabledProviders.count - 1 {
           Divider()
             .padding(.vertical, 6)
         }
@@ -333,6 +344,7 @@ private struct UsageStatusPopover: View {
   }
 
   private func maybeTriggerClaudeAutoRefresh(now: Date) {
+    guard enabledProviders.contains(.claude) else { return }
     guard !didTriggerClaudeAutoRefresh else { return }
     guard let claude = snapshots[.claude],
       claude.origin == .builtin,

@@ -278,11 +278,26 @@ extension ContentView {
         .help("Some directories need authorization to access sessions data")
       }
 
-      EquatableUsageContainer(
-        snapshots: viewModel.usageSnapshots,
-        selectedProvider: $selectedUsageProvider,
-        onRequestRefresh: { viewModel.requestUsageStatusRefreshThrottled(for: $0) }
-      )
+      let enabledSnapshots = viewModel.usageSnapshots.filter {
+        viewModel.preferences.isCLIEnabled($0.key.baseKind)
+      }
+      if enabledSnapshots.isEmpty == false {
+        EquatableUsageContainer(
+          snapshots: enabledSnapshots,
+          preferences: viewModel.preferences,
+          selectedProvider: Binding(
+            get: { selectedUsageProvider },
+            set: { newValue in
+              if viewModel.preferences.isCLIEnabled(newValue.baseKind) {
+                selectedUsageProvider = newValue
+              } else if let fallback = enabledSnapshots.keys.sorted(by: { $0.rawValue < $1.rawValue }).first {
+                selectedUsageProvider = fallback
+              }
+            }
+          ),
+          onRequestRefresh: { viewModel.requestUsageStatusRefreshThrottled(for: $0) }
+        )
+      }
 
       #if !APPSTORE
         if viewModel.preferences.isEmbeddedTerminalEnabled {

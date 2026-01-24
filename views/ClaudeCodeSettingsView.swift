@@ -9,6 +9,7 @@ struct ClaudeCodeSettingsView: View {
     @State private var providerModels: [String] = []
     @State private var modelMappingData: ModelMappingData?
     @State private var lastProviderId: String?
+    @State private var showDisableBlockedAlert = false
 
     private struct ModelMappingData: Identifiable {
         let id = UUID()
@@ -36,6 +37,23 @@ struct ClaudeCodeSettingsView: View {
                 .buttonStyle(.plain)
             }
 
+            GroupBox {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Enable Claude Code", systemImage: "power")
+                            .font(.subheadline).fontWeight(.medium)
+                    Text("Turning this off hides Claude UI, stops session scans, and makes settings read-only.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Toggle("", isOn: claudeEnabledBinding)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                }
+                .padding(10)
+            }
             Group {
                 if #available(macOS 15.0, *) {
                     TabView {
@@ -55,6 +73,8 @@ struct ClaudeCodeSettingsView: View {
                 }
             }
             .padding(.bottom, 16)
+            .disabled(!preferences.cliClaudeEnabled)
+            .opacity(preferences.cliClaudeEnabled ? 1.0 : 0.6)
         }
         .task {
             await vm.loadAll()
@@ -86,6 +106,20 @@ struct ClaudeCodeSettingsView: View {
                 }
             )
         }
+        .alert("At least one CLI must remain enabled.", isPresented: $showDisableBlockedAlert) {
+            Button("OK", role: .cancel) {}
+        }
+    }
+
+    private var claudeEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { preferences.cliClaudeEnabled },
+            set: { newValue in
+                if preferences.setCLIEnabled(.claude, enabled: newValue) == false {
+                    showDisableBlockedAlert = true
+                }
+            }
+        )
     }
 
     // MARK: - Provider

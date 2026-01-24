@@ -1071,6 +1071,8 @@ struct SettingsView: View {
               }
             }
           }
+          .disabled(!preferences.cliCodexEnabled)
+          .opacity(preferences.cliCodexEnabled ? 1.0 : 0.6)
         }
 
         VStack(alignment: .leading, spacing: 10) {
@@ -1124,6 +1126,8 @@ struct SettingsView: View {
               }
             }
           }
+          .disabled(!preferences.cliClaudeEnabled)
+          .opacity(preferences.cliClaudeEnabled ? 1.0 : 0.6)
         }
 
         VStack(alignment: .leading, spacing: 10) {
@@ -1177,6 +1181,8 @@ struct SettingsView: View {
               }
             }
           }
+          .disabled(!preferences.cliGeminiEnabled)
+          .opacity(preferences.cliGeminiEnabled ? 1.0 : 0.6)
         }
       }
       .padding(.bottom, 16)
@@ -1281,7 +1287,9 @@ struct SettingsView: View {
 
   private var extensionsSettings: some View {
     ExtensionsSettingsView(
-      selectedTab: $selectedExtensionsTab, openMCPMateDownload: openMCPMateDownload
+      selectedTab: $selectedExtensionsTab,
+      preferences: preferences,
+      openMCPMateDownload: openMCPMateDownload
     )
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .padding(.top, 24)
@@ -1290,7 +1298,8 @@ struct SettingsView: View {
   }
 
   private var remoteHostsSettings: some View {
-    settingsScroll {
+    let enabled = preferences.isCLIEnabled(.codex) || preferences.isCLIEnabled(.claude)
+    return settingsScroll {
       VStack(alignment: .leading, spacing: 20) {
         VStack(alignment: .leading, spacing: 6) {
           Text("Remote Hosts")
@@ -1455,6 +1464,8 @@ struct SettingsView: View {
         }
       }
     }
+    .disabled(!enabled)
+    .opacity(enabled ? 1.0 : 0.6)
   }
 
   @MainActor

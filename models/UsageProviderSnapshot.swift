@@ -23,6 +23,14 @@ enum UsageProviderKind: String, CaseIterable, Identifiable {
     }
   }
 
+  var baseKind: SessionSource.Kind {
+    switch self {
+    case .codex: return .codex
+    case .claude: return .claude
+    case .gemini: return .gemini
+    }
+  }
+
 }
 
 public struct UsageMetricSnapshot: Identifiable, Equatable {

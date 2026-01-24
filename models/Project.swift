@@ -43,6 +43,14 @@ enum ProjectSessionSource: String, CaseIterable, Codable, Sendable, Identifiable
 extension ProjectSessionSource {
     static var allSet: Set<ProjectSessionSource> { Set(allCases) }
 
+    var baseKind: SessionSource.Kind {
+        switch self {
+        case .codex: return .codex
+        case .claude: return .claude
+        case .gemini: return .gemini
+        }
+    }
+
     var sessionSource: SessionSource {
         switch self {
         case .codex: return .codexLocal

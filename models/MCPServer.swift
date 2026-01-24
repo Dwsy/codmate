@@ -21,6 +21,14 @@ public enum MCPServerTarget: String, Codable, CaseIterable, Sendable {
     case codex
     case claude
     case gemini
+
+    var baseKind: SessionSource.Kind {
+        switch self {
+        case .codex: return .codex
+        case .claude: return .claude
+        case .gemini: return .gemini
+        }
+    }
 }
 
 public struct MCPServerTargets: Codable, Equatable, Hashable, Sendable {

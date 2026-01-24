@@ -40,39 +40,29 @@ public struct UsageRingState {
 }
 
 public struct TripleUsageDonutView: View {
-  public var outerState: UsageRingState
-  public var middleState: UsageRingState
-  public var innerState: UsageRingState
+  public var states: [UsageRingState]
   public var trackColor: Color
 
   public init(
-    outerState: UsageRingState,
-    middleState: UsageRingState,
-    innerState: UsageRingState,
+    states: [UsageRingState],
     trackColor: Color = .secondary
   ) {
-    self.outerState = outerState
-    self.middleState = middleState
-    self.innerState = innerState
+    self.states = states
     self.trackColor = trackColor
   }
 
   public var body: some View {
-    ZStack {
-      Circle()
-        .stroke(trackColor.opacity(0.25), lineWidth: 1.5)
-        .frame(width: 22, height: 22)
-      ring(for: outerState, lineWidth: 1.5, size: 22)
-
-      Circle()
-        .stroke(trackColor.opacity(0.22), lineWidth: 1.5)
-        .frame(width: 16, height: 16)
-      ring(for: middleState, lineWidth: 1.5, size: 16)
-
-      Circle()
-        .stroke(trackColor.opacity(0.2), lineWidth: 1.5)
-        .frame(width: 10, height: 10)
-      ring(for: innerState, lineWidth: 1.5, size: 10)
+    let layout = ringLayout(for: states.count)
+    return ZStack {
+      ForEach(Array(states.enumerated()), id: \.offset) { index, state in
+        let size = layout.sizes[index]
+        let lineWidth = layout.lineWidth
+        let opacity = layout.trackOpacities[index]
+        Circle()
+          .stroke(trackColor.opacity(opacity), lineWidth: lineWidth)
+          .frame(width: size, height: size)
+        ring(for: state, lineWidth: lineWidth, size: size)
+      }
     }
   }
 
@@ -90,5 +80,30 @@ public struct TripleUsageDonutView: View {
         .rotationEffect(.degrees(-90))
         .frame(width: size, height: size)
     }
+  }
+
+  private func ringLayout(for count: Int) -> (sizes: [CGFloat], lineWidth: CGFloat, trackOpacities: [Double]) {
+    let outerDiameter: CGFloat = 22
+    let outerRadius = outerDiameter / 2
+    let innerClearRadius: CGFloat = 4.25
+    let availableSpan = max(outerRadius - innerClearRadius, 1)
+    let ringCount = max(count, 1)
+    let units = CGFloat(ringCount * 2 - 1)
+    let unit = availableSpan / units
+    let minLineWidth: CGFloat = 1.2
+    let maxLineWidth: CGFloat = 2.8
+    let lineWidth = min(maxLineWidth, max(minLineWidth, unit))
+    let gap = lineWidth
+
+    var sizes: [CGFloat] = []
+    var opacities: [Double] = []
+    let startRadius = outerRadius - lineWidth / 2
+    for index in 0..<ringCount {
+      let radius = startRadius - CGFloat(index) * (lineWidth + gap)
+      sizes.append(max(0, radius * 2))
+      opacities.append(max(0.12, 0.25 - (Double(index) * 0.03)))
+    }
+
+    return (sizes: sizes, lineWidth: lineWidth, trackOpacities: opacities)
   }
 }

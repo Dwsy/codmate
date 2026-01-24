@@ -155,9 +155,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
   private func updateStatusItemIcon(with snapshots: [UsageProviderKind: UsageProviderSnapshot]) {
     guard let button = statusItem?.button else { return }
+    let enabledProviders = orderedEnabledProviders()
 
     // Check if we have any valid usage data to show
-    let hasData = snapshots.values.contains { $0.availability == .ready || $0.origin == .thirdParty }
+    let hasData = enabledProviders.contains { provider in
+      guard let snapshot = snapshots[provider] else { return false }
+      return snapshot.availability == .ready || snapshot.origin == .thirdParty
+    }
 
     guard hasData else {
         // If no data, keep or revert to static icon
@@ -172,14 +176,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     // Use fixed black color for template image generation
     // System automatically handles coloring (white/black) based on menu bar context
     let menuBarColor = Color.black
-    let outerState = ringState(for: .gemini, relativeTo: referenceDate, snapshots: snapshots, colorOverride: menuBarColor)
-    let middleState = ringState(for: .claude, relativeTo: referenceDate, snapshots: snapshots, colorOverride: menuBarColor)
-    let innerState = ringState(for: .codex, relativeTo: referenceDate, snapshots: snapshots, colorOverride: menuBarColor)
+    let ringStates = enabledProviders.map {
+      ringState(for: $0, relativeTo: referenceDate, snapshots: snapshots, colorOverride: menuBarColor)
+    }
 
     let view = TripleUsageDonutView(
-      outerState: outerState,
-      middleState: middleState,
-      innerState: innerState,
+      states: ringStates,
       trackColor: menuBarColor
     )
     .scaleEffect(0.7)
@@ -342,9 +344,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     statusMenu.addItem(.separator())
 
     // 3) Providers
-    statusMenu.addItem(providerMenuItem(for: .codex))
-    statusMenu.addItem(providerMenuItem(for: .claude))
-    statusMenu.addItem(providerMenuItem(for: .gemini))
+    for provider in orderedEnabledProviders() {
+      statusMenu.addItem(providerMenuItem(for: provider))
+    }
 
     statusMenu.addItem(.separator())
 
@@ -466,7 +468,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
   // MARK: - Usage Helpers
 
   private func usageOrder() -> [UsageProviderKind] {
-    [.codex, .claude, .gemini]
+    [.codex, .claude, .gemini].filter { isCLIEnabled($0) }
+  }
+
+  private func orderedEnabledProviders() -> [UsageProviderKind] {
+    let ordered: [UsageProviderKind] = [.gemini, .claude, .codex]
+    return ordered.filter { isCLIEnabled($0) }
+  }
+
+  private func isCLIEnabled(_ provider: UsageProviderKind) -> Bool {
+    guard let preferences else { return true }
+    return preferences.isCLIEnabled(provider.baseKind)
   }
 
   private func makeUsageMenuItem(for provider: UsageProviderKind) -> NSMenuItem {

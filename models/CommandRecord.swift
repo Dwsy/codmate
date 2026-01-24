@@ -109,6 +109,14 @@ enum CommandTarget: String, CaseIterable {
     case .gemini: return "commands" // Gemini uses ~/.gemini/commands/
     }
   }
+
+  var baseKind: SessionSource.Kind {
+    switch self {
+    case .codex: return .codex
+    case .claude: return .claude
+    case .gemini: return .gemini
+    }
+  }
 }
 
 // MARK: - Command Extensions

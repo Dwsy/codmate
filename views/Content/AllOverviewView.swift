@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AllOverviewView: View {
   @ObservedObject var viewModel: AllOverviewViewModel
+  var preferences: SessionPreferencesStore
   var onSelectSession: (SessionSummary) -> Void
   var onResumeSession: (SessionSummary) -> Void
   var onFocusToday: () -> Void
@@ -35,7 +36,11 @@ struct AllOverviewView: View {
             OverviewLoadingPlaceholder()
           } else {
             if !snapshot.activityChartData.points.isEmpty {
-               OverviewActivityChart(data: snapshot.activityChartData, onSelectDate: onSelectDate)
+               OverviewActivityChart(
+                 data: snapshot.activityChartData,
+                 enabledSources: enabledSources,
+                 onSelectDate: onSelectDate
+               )
             }
             heroSection(columns: cols)
             efficiencySection(columns: cols)
@@ -50,6 +55,13 @@ struct AllOverviewView: View {
   }
 
   private var snapshot: AllOverviewSnapshot { viewModel.snapshot }
+  private var enabledSources: Set<SessionSource.Kind> {
+    Set([
+      preferences.isCLIEnabled(.codex) ? SessionSource.Kind.codex : nil,
+      preferences.isCLIEnabled(.claude) ? SessionSource.Kind.claude : nil,
+      preferences.isCLIEnabled(.gemini) ? SessionSource.Kind.gemini : nil,
+    ].compactMap { $0 })
+  }
 
   private var headerSection: some View {
     VStack(alignment: .leading, spacing: 6) {

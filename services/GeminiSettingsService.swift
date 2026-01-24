@@ -123,6 +123,7 @@ actor GeminiSettingsService {
   // MARK: - MCP Servers
 
   func applyMCPServers(_ servers: [MCPServer]) throws {
+    if !SessionPreferencesStore.isCLIEnabled(.gemini) { return }
     var object = loadJSONObject()
     let enabled = servers.enabledServers(for: .gemini)
     

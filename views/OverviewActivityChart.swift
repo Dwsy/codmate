@@ -3,6 +3,7 @@ import SwiftUI
 
 struct OverviewActivityChart: View {
     let data: ActivityChartData
+    let enabledSources: Set<SessionSource.Kind>
     var onSelectDate: ((Date) -> Void)?
 
     @State private var selectedMetric: Metric = .count
@@ -29,6 +30,18 @@ struct OverviewActivityChart: View {
     // All available sources for the legend
     private let allSources: [SessionSource.Kind] = [.codex, .claude, .gemini]
 
+    init(
+      data: ActivityChartData,
+      enabledSources: Set<SessionSource.Kind>,
+      onSelectDate: ((Date) -> Void)? = nil
+    ) {
+      self.data = data
+      self.enabledSources = enabledSources
+      self.onSelectDate = onSelectDate
+      let disabledSources = Set(allSources).subtracting(enabledSources)
+      _hiddenSources = State(initialValue: disabledSources)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             headerView
@@ -40,6 +53,10 @@ struct OverviewActivityChart: View {
             }
         }
         .zIndex(1)
+        .onChange(of: enabledSourcesHash) { _ in
+          let disabledSources = Set(allSources).subtracting(enabledSources)
+          hiddenSources.formUnion(disabledSources)
+        }
     }
 
     // MARK: - Header
@@ -97,7 +114,7 @@ struct OverviewActivityChart: View {
 
             // Right: Legend
             HStack(spacing: 12) {
-                ForEach(allSources, id: \.self) { source in
+                ForEach(legendSources, id: \.self) { source in
                     HStack(spacing: 4) {
                         Circle()
                             .fill(color(for: source))
@@ -412,6 +429,15 @@ struct OverviewActivityChart: View {
     }
 
     // MARK: - Helpers
+    private var legendSources: [SessionSource.Kind] {
+        allSources.filter { enabledSources.contains($0) }
+    }
+
+    private var enabledSourcesHash: Int {
+        var hasher = Hasher()
+        enabledSources.sorted { $0.rawValue < $1.rawValue }.forEach { hasher.combine($0.rawValue) }
+        return hasher.finalize()
+    }
 
     private var visiblePoints: [ActivityChartDataPoint] {
         data.points.filter { !hiddenSources.contains($0.source) }

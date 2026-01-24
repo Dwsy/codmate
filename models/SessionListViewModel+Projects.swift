@@ -18,7 +18,9 @@ extension SessionListViewModel {
         let memberships = await projectsStore.membershipsSnapshot()
         await MainActor.run {
             self.projects = list
-            self.rebuildGeminiProjectHashLookup()
+            if self.preferences.isCLIEnabled(.gemini) {
+                self.rebuildGeminiProjectHashLookup()
+            }
             self.projectStructureVersion &+= 1
             self.projectCounts = counts
             self.setProjectMemberships(memberships)
@@ -26,7 +28,9 @@ extension SessionListViewModel {
             self.invalidateProjectVisibleCountsCache()
             self.scheduleApplyFilters()
         }
-        await geminiProvider.invalidateProjectMappings()
+        if preferences.isCLIEnabled(.gemini) {
+            await geminiProvider.invalidateProjectMappings()
+        }
     }
 
     func setSelectedProject(_ id: String?) {

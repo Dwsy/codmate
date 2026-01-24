@@ -6,12 +6,30 @@ struct GeminiSettingsView: View {
   @StateObject private var providerCatalog = UnifiedProviderCatalogModel()
   @State private var providerModels: [String] = []
   @State private var lastProviderId: String?
+  @State private var showDisableBlockedAlert = false
 
   private let docsURL = URL(string: "https://geminicli.com/docs/cli/settings/")!
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
       header
+      GroupBox {
+        HStack(spacing: 12) {
+          VStack(alignment: .leading, spacing: 2) {
+            Label("Enable Gemini CLI", systemImage: "power")
+              .font(.subheadline).fontWeight(.medium)
+            Text("Turning this off hides Gemini UI, stops session scans, and makes settings read-only.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+          Spacer()
+          Toggle("", isOn: geminiEnabledBinding)
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
+        .padding(10)
+      }
       Group {
         if #available(macOS 15.0, *) {
           TabView {
@@ -37,6 +55,8 @@ struct GeminiSettingsView: View {
         }
       }
       .controlSize(.regular)
+      .disabled(!preferences.cliGeminiEnabled)
+      .opacity(preferences.cliGeminiEnabled ? 1.0 : 0.6)
     }
     .padding(.bottom, 16)
     .task {
@@ -53,6 +73,20 @@ struct GeminiSettingsView: View {
     .onChange(of: CLIProxyService.shared.isRunning) { _ in
       Task { await reloadProxyCatalog() }
     }
+    .alert("At least one CLI must remain enabled.", isPresented: $showDisableBlockedAlert) {
+      Button("OK", role: .cancel) {}
+    }
+  }
+
+  private var geminiEnabledBinding: Binding<Bool> {
+    Binding(
+      get: { preferences.cliGeminiEnabled },
+      set: { newValue in
+        if preferences.setCLIEnabled(.gemini, enabled: newValue) == false {
+          showDisableBlockedAlert = true
+        }
+      }
+    )
   }
 
   private var header: some View {

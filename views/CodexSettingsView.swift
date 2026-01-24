@@ -8,6 +8,7 @@ struct CodexSettingsView: View {
     @StateObject private var providerCatalog = UnifiedProviderCatalogModel()
     @State private var providerModels: [String] = []
     @State private var lastProviderId: String?
+    @State private var showDisableBlockedAlert = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -33,6 +34,23 @@ struct CodexSettingsView: View {
                 .buttonStyle(.plain)
             }
 
+            GroupBox {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Enable Codex CLI", systemImage: "power")
+                            .font(.subheadline).fontWeight(.medium)
+                        Text("Turning this off hides Codex UI, stops session scans, and makes settings read-only.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Toggle("", isOn: codexEnabledBinding)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                }
+                .padding(10)
+            }
             // Tabs (Remote Hosts is a top-level page, not a Codex sub-tab)
             Group {
                 if #available(macOS 15.0, *) {
@@ -60,7 +78,23 @@ struct CodexSettingsView: View {
             }
             .controlSize(.regular)
             .padding(.bottom, 16)
+            .disabled(!preferences.cliCodexEnabled)
+            .opacity(preferences.cliCodexEnabled ? 1.0 : 0.6)
         }
+        .alert("At least one CLI must remain enabled.", isPresented: $showDisableBlockedAlert) {
+            Button("OK", role: .cancel) {}
+        }
+    }
+
+    private var codexEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { preferences.cliCodexEnabled },
+            set: { newValue in
+                if preferences.setCLIEnabled(.codex, enabled: newValue) == false {
+                    showDisableBlockedAlert = true
+                }
+            }
+        )
     }
 
     // MARK: - Provider Pane

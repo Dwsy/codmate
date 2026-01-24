@@ -362,7 +362,7 @@ struct ConversationTimelineView: View {
 
   @MainActor
   private func didScroll() {
-    guard let scrollView else { return }
+    guard scrollView != nil else { return }
     if suppressNowModeCallback { return }
     
     // Throttle scroll updates to ~60fps (16.67ms)

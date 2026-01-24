@@ -19,10 +19,16 @@ actor CommandsSyncService {
     let geminiDir = home.appendingPathComponent(".gemini", isDirectory: true)
       .appendingPathComponent("commands", isDirectory: true)
 
+    let targets: [(CommandTarget, URL)] = [
+      (.codex, codexDir),
+      (.claude, claudeDir),
+      (.gemini, geminiDir)
+    ]
     var warnings: [CommandSyncWarning] = []
-    warnings.append(contentsOf: syncCommands(commands: commands, target: .codex, destination: codexDir))
-    warnings.append(contentsOf: syncCommands(commands: commands, target: .claude, destination: claudeDir))
-    warnings.append(contentsOf: syncCommands(commands: commands, target: .gemini, destination: geminiDir))
+    for (target, destination) in targets
+    where SessionPreferencesStore.isCLIEnabled(target.baseKind) {
+      warnings.append(contentsOf: syncCommands(commands: commands, target: target, destination: destination))
+    }
     return warnings
   }
 
@@ -130,13 +136,7 @@ actor CommandsSyncService {
 
   // MARK: - Marker Management
   private func writeMarker(to directory: URL, id: String, target: CommandTarget) throws {
-    let markerFile: URL
-    switch target {
-    case .codex, .claude:
-      markerFile = directory.appendingPathComponent(".\(id).codmate", isDirectory: false)
-    case .gemini:
-      markerFile = directory.appendingPathComponent(".\(id).codmate", isDirectory: false)
-    }
+    let markerFile = directory.appendingPathComponent(".\(id).codmate", isDirectory: false)
 
     let marker: [String: Any] = [
       "managedByCodMate": true,

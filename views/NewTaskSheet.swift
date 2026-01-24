@@ -54,7 +54,7 @@ struct NewTaskSheet: View {
 
       Section("Provider") {
         Picker("Default Provider", selection: $selectedProvider) {
-          ForEach(ProjectSessionSource.allCases) { provider in
+          ForEach(ProjectSessionSource.allCases.filter { viewModel.preferences.isCLIEnabled($0.baseKind) }) { provider in
             Text(provider.displayName)
               .tag(provider)
           }
@@ -88,6 +88,10 @@ struct NewTaskSheet: View {
       }
     }
     .onAppear {
+      let enabled = ProjectSessionSource.allCases.filter { viewModel.preferences.isCLIEnabled($0.baseKind) }
+      if !enabled.contains(selectedProvider), let first = enabled.first {
+        selectedProvider = first
+      }
       // Set default project if one is selected
       if let firstSelected = viewModel.selectedProjectIDs.first {
         selectedProjectId = firstSelected

@@ -86,7 +86,15 @@ enum MCPImportService {
           }),
       ]
     }
-    return scan(sources: sources)
+    let filtered = sources.filter { source in
+      switch source.label {
+      case "Codex": return SessionPreferencesStore.isCLIEnabled(.codex)
+      case "Claude": return SessionPreferencesStore.isCLIEnabled(.claude)
+      case "Gemini": return SessionPreferencesStore.isCLIEnabled(.gemini)
+      default: return true
+      }
+    }
+    return scan(sources: filtered)
   }
 
   private static func scan(sources: [SourceDescriptor]) -> [MCPImportCandidate] {

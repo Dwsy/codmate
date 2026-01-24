@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct CommandsSettingsView: View {
+  @ObservedObject var preferences: SessionPreferencesStore
   @StateObject private var vm = CommandsViewModel()
   @State private var searchFocused = false
   @State private var pendingAction: PendingCommandAction?
@@ -157,7 +158,7 @@ struct CommandsSettingsView: View {
                       vm.updateCommandTarget(id: command.id, target: .codex, value: value)
                     }
                   ),
-                  disabled: false
+                  disabled: !preferences.isCLIEnabled(.codex)
                 )
                 MCPServerTargetToggle(
                   provider: .claude,
@@ -167,7 +168,7 @@ struct CommandsSettingsView: View {
                       vm.updateCommandTarget(id: command.id, target: .claude, value: value)
                     }
                   ),
-                  disabled: false
+                  disabled: !preferences.isCLIEnabled(.claude)
                 )
                 MCPServerTargetToggle(
                   provider: .gemini,
@@ -177,7 +178,7 @@ struct CommandsSettingsView: View {
                       vm.updateCommandTarget(id: command.id, target: .gemini, value: value)
                     }
                   ),
-                  disabled: false
+                  disabled: !preferences.isCLIEnabled(.gemini)
                 )
               }
             }

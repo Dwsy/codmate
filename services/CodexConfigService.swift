@@ -308,6 +308,7 @@ actor CodexConfigService {
     private let mcpEndMarker = "# codmate-mcp end"
 
     func applyMCPServers(_ servers: [MCPServer]) throws {
+        if !SessionPreferencesStore.isCLIEnabled(.codex) { return }
         var text = (try? String(contentsOf: paths.configURL, encoding: .utf8)) ?? ""
         // Strip previous managed region if present
         if let begin = text.range(of: mcpBeginMarker), let end = text.range(of: mcpEndMarker) {

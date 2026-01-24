@@ -28,13 +28,15 @@ actor ProjectExtensionsApplier {
     let claudeServers = selected.filter { $0.targets.claude }.map { $0.server }
     let geminiServers = selected.filter { $0.targets.gemini }.map { $0.server }
 
-    let codexDir = projectDirectory.appendingPathComponent(".codex", isDirectory: true)
-    let configURL = codexDir.appendingPathComponent("config.toml", isDirectory: false)
-    if !codexServers.isEmpty || fm.fileExists(atPath: configURL.path) {
-      let ensured = ensureCodexConfig(projectDirectory: projectDirectory)
-      ensureCodexAuthSymlink(projectDirectory: ensured.deletingLastPathComponent())
-      let service = CodexConfigService(paths: .init(home: codexDir, configURL: ensured))
-      try? await service.applyMCPServers(codexServers)
+    if SessionPreferencesStore.isCLIEnabled(.codex) {
+      let codexDir = projectDirectory.appendingPathComponent(".codex", isDirectory: true)
+      let configURL = codexDir.appendingPathComponent("config.toml", isDirectory: false)
+      if !codexServers.isEmpty || fm.fileExists(atPath: configURL.path) {
+        let ensured = ensureCodexConfig(projectDirectory: projectDirectory)
+        ensureCodexAuthSymlink(projectDirectory: ensured.deletingLastPathComponent())
+        let service = CodexConfigService(paths: .init(home: codexDir, configURL: ensured))
+        try? await service.applyMCPServers(codexServers)
+      }
     }
 
     // Claude Code official path: project_root/.mcp.json
@@ -43,28 +45,32 @@ actor ProjectExtensionsApplier {
     let claudeLegacyDir = projectDirectory.appendingPathComponent(".claude", isDirectory: true)
     let claudeLegacyFile = claudeLegacyDir.appendingPathComponent(".mcp.json", isDirectory: false)
 
-    if !claudeServers.isEmpty {
-      // Write to Claude Code official path (project root)
-      writeClaudeMCPFile(servers: claudeServers, file: claudeRootFile)
-      // Remove legacy file if it exists to avoid conflicts
-      if fm.fileExists(atPath: claudeLegacyFile.path) {
-        try? fm.removeItem(at: claudeLegacyFile)
-      }
-    } else {
-      // Remove both files when clearing
-      if fm.fileExists(atPath: claudeRootFile.path) {
-        try? fm.removeItem(at: claudeRootFile)
-      }
-      if fm.fileExists(atPath: claudeLegacyFile.path) {
-        try? fm.removeItem(at: claudeLegacyFile)
+    if SessionPreferencesStore.isCLIEnabled(.claude) {
+      if !claudeServers.isEmpty {
+        // Write to Claude Code official path (project root)
+        writeClaudeMCPFile(servers: claudeServers, file: claudeRootFile)
+        // Remove legacy file if it exists to avoid conflicts
+        if fm.fileExists(atPath: claudeLegacyFile.path) {
+          try? fm.removeItem(at: claudeLegacyFile)
+        }
+      } else {
+        // Remove both files when clearing
+        if fm.fileExists(atPath: claudeRootFile.path) {
+          try? fm.removeItem(at: claudeRootFile)
+        }
+        if fm.fileExists(atPath: claudeLegacyFile.path) {
+          try? fm.removeItem(at: claudeLegacyFile)
+        }
       }
     }
 
-    let geminiDir = projectDirectory.appendingPathComponent(".gemini", isDirectory: true)
-    let geminiSettings = geminiDir.appendingPathComponent("settings.json", isDirectory: false)
-    if !geminiServers.isEmpty || fm.fileExists(atPath: geminiSettings.path) {
-      let service = GeminiSettingsService(paths: .init(directory: geminiDir, file: geminiSettings))
-      try? await service.applyMCPServers(geminiServers)
+    if SessionPreferencesStore.isCLIEnabled(.gemini) {
+      let geminiDir = projectDirectory.appendingPathComponent(".gemini", isDirectory: true)
+      let geminiSettings = geminiDir.appendingPathComponent("settings.json", isDirectory: false)
+      if !geminiServers.isEmpty || fm.fileExists(atPath: geminiSettings.path) {
+        let service = GeminiSettingsService(paths: .init(directory: geminiDir, file: geminiSettings))
+        try? await service.applyMCPServers(geminiServers)
+      }
     }
   }
 

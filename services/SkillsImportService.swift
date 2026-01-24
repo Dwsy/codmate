@@ -47,7 +47,15 @@ enum SkillsImportService {
         ),
       ]
     }
-    return await scan(sources: sources, fileManager: fileManager)
+    let filtered = sources.filter { source in
+      switch source.label {
+      case "Codex": return SessionPreferencesStore.isCLIEnabled(.codex)
+      case "Claude": return SessionPreferencesStore.isCLIEnabled(.claude)
+      case "Gemini": return SessionPreferencesStore.isCLIEnabled(.gemini)
+      default: return true
+      }
+    }
+    return await scan(sources: filtered, fileManager: fileManager)
   }
 
   private static func scan(sources: [SourceDescriptor], fileManager: FileManager) async -> [SkillImportCandidate] {

@@ -76,6 +76,7 @@ actor MCPServersStore {
     // - Creates backup before writing
     // - Uses atomic write to prevent partial corruption
     func exportEnabledForClaudeConfig(servers: [MCPServer]? = nil) throws {
+        if !SessionPreferencesStore.isCLIEnabled(.claude) { return }
         let list: [MCPServer]
         if let servers {
             list = servers.enabledServers(for: .claude)

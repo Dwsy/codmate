@@ -5,6 +5,7 @@ import AppKit
 #endif
 
 struct SkillsSettingsView: View {
+  @ObservedObject var preferences: SessionPreferencesStore
   @StateObject private var vm = SkillsLibraryViewModel()
   @State private var searchFocused = false
   @State private var pendingAction: PendingSkillAction?
@@ -152,7 +153,7 @@ struct SkillsSettingsView: View {
                       vm.updateSkillTarget(id: skill.id, target: .codex, value: value)
                     }
                   ),
-                  disabled: false
+                  disabled: !preferences.isCLIEnabled(.codex)
                 )
                 MCPServerTargetToggle(
                   provider: .claude,
@@ -162,7 +163,7 @@ struct SkillsSettingsView: View {
                       vm.updateSkillTarget(id: skill.id, target: .claude, value: value)
                     }
                   ),
-                  disabled: false
+                  disabled: !preferences.isCLIEnabled(.claude)
                 )
                 MCPServerTargetToggle(
                   provider: .gemini,
@@ -172,7 +173,7 @@ struct SkillsSettingsView: View {
                       vm.updateSkillTarget(id: skill.id, target: .gemini, value: value)
                     }
                   ),
-                  disabled: false
+                  disabled: !preferences.isCLIEnabled(.gemini)
                 )
               }
             }

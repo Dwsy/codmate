@@ -666,12 +666,14 @@ final class SessionListViewModel: ObservableObject {
       let providerId = note.userInfo?["providerId"] as? String
       Task { @MainActor in
         if consumer == ProvidersRegistryService.Consumer.codex.rawValue {
+          guard self.preferences.isCLIEnabled(.codex) else { return }
           if providerId == nil || providerId?.isEmpty == true {
             self.refreshCodexUsageStatus()
           } else {
             self.setUsageSnapshot(.codex, Self.thirdPartyUsageSnapshot(for: .codex))
           }
         } else if consumer == ProvidersRegistryService.Consumer.claudeCode.rawValue {
+          guard self.preferences.isCLIEnabled(.claude) else { return }
           if providerId == nil || providerId?.isEmpty == true {
             self.claudeUsageAutoRefreshEnabled = false
             self.setInitialClaudePlaceholder()
@@ -694,6 +696,30 @@ final class SessionListViewModel: ObservableObject {
         Task { await self.syncRemoteHosts(force: true, refreshAfter: true) }
       }
       .store(in: &cancellables)
+
+    // Observe global CLI enablement changes
+    var previousEnabledKinds = enabledCLIKindSet()
+    Publishers.CombineLatest3(
+      preferences.$cliCodexEnabled,
+      preferences.$cliClaudeEnabled,
+      preferences.$cliGeminiEnabled
+    )
+    .dropFirst()
+    .debounce(for: .milliseconds(200), scheduler: DispatchQueue.main)
+    .sink { [weak self] codex, claude, gemini in
+      guard let self else { return }
+      let current = Self.cliEnabledKindSet(codex: codex, claude: claude, gemini: gemini)
+      guard current != previousEnabledKinds else { return }
+      previousEnabledKinds = current
+      self.cancelHeavyWork()
+      self.activeScopeRefreshes.removeAll()
+      Task { await self.refreshSessionsForProviderChange(force: true) }
+      self.configureDirectoryMonitor()
+      self.configureClaudeDirectoryMonitor()
+      self.configureGeminiDirectoryMonitor()
+      self.trimUsageSnapshotsForDisabledCLIs()
+    }
+    .store(in: &cancellables)
 
     // Observe session path configs changes (ignore rules, enabled state)
     // When enabled state changes, trigger full refresh to rebuild providers
@@ -734,19 +760,23 @@ final class SessionListViewModel: ObservableObject {
       let claudeOrigin = await self.providerOrigin(for: .claude)
       let geminiOrigin = await self.providerOrigin(for: .gemini)
       await MainActor.run {
-        if codexOrigin == .thirdParty {
+        if self.preferences.isCLIEnabled(.codex), codexOrigin == .thirdParty {
           self.setUsageSnapshot(.codex, Self.thirdPartyUsageSnapshot(for: .codex))
         }
-        if claudeOrigin == .thirdParty {
-          self.setUsageSnapshot(.claude, Self.thirdPartyUsageSnapshot(for: .claude))
-        } else {
-          self.claudeUsageAutoRefreshEnabled = false
-          self.setInitialClaudePlaceholder()
+        if self.preferences.isCLIEnabled(.claude) {
+          if claudeOrigin == .thirdParty {
+            self.setUsageSnapshot(.claude, Self.thirdPartyUsageSnapshot(for: .claude))
+          } else {
+            self.claudeUsageAutoRefreshEnabled = false
+            self.setInitialClaudePlaceholder()
+          }
         }
-        if geminiOrigin == .thirdParty {
-          self.setUsageSnapshot(.gemini, Self.thirdPartyUsageSnapshot(for: .gemini))
-        } else {
-          self.refreshGeminiUsageStatus(silent: false)
+        if self.preferences.isCLIEnabled(.gemini) {
+          if geminiOrigin == .thirdParty {
+            self.setUsageSnapshot(.gemini, Self.thirdPartyUsageSnapshot(for: .gemini))
+          } else {
+            self.refreshGeminiUsageStatus(silent: false)
+          }
         }
       }
       await MainActor.run {
@@ -958,14 +988,21 @@ final class SessionListViewModel: ObservableObject {
     let enabledRemoteHostsForCounts = enabledRemoteHosts
     let sessionsRootForCounts = sessionsRoot
     Task {
-      var counts = await indexer.collectCWDCounts(root: sessionsRootForCounts)
-      let claudeCounts = await claudeProvider.collectCWDCounts()
-      let geminiCounts = await geminiProvider.collectCWDCounts()
-      for (key, value) in claudeCounts {
-        counts[key, default: 0] += value
+      var counts: [String: Int] = [:]
+      if self.preferences.isCLIEnabled(.codex) {
+        counts = await indexer.collectCWDCounts(root: sessionsRootForCounts)
       }
-      for (key, value) in geminiCounts {
-        counts[key, default: 0] += value
+      if self.preferences.isCLIEnabled(.claude) {
+        let claudeCounts = await claudeProvider.collectCWDCounts()
+        for (key, value) in claudeCounts {
+          counts[key, default: 0] += value
+        }
+      }
+      if self.preferences.isCLIEnabled(.gemini) {
+        let geminiCounts = await geminiProvider.collectCWDCounts()
+        for (key, value) in geminiCounts {
+          counts[key, default: 0] += value
+        }
       }
       if !enabledRemoteHostsForCounts.isEmpty {
         let remoteCodex = await remoteProvider.collectCWDAggregates(
@@ -975,8 +1012,10 @@ final class SessionListViewModel: ObservableObject {
         }
         let remoteClaude = await remoteProvider.collectCWDAggregates(
           kind: .claude, enabledHosts: enabledRemoteHostsForCounts)
-        for (key, value) in remoteClaude {
-          counts[key, default: 0] += value
+        if self.preferences.isCLIEnabled(.claude) {
+          for (key, value) in remoteClaude {
+            counts[key, default: 0] += value
+          }
         }
       }
       let tree = counts.buildPathTreeFromCounts()
@@ -990,11 +1029,15 @@ final class SessionListViewModel: ObservableObject {
         "refreshSessions meta/coverage updated metaCount=\(self.indexMeta?.sessionCount ?? -1, privacy: .public) coverageCount=\(self.cacheCoverage?.sessionCount ?? -1, privacy: .public) ts=\(self.ts(), format: .fixed(precision: 3))"
       )
     }
-    refreshCodexUsageStatus()
-    if claudeUsageAutoRefreshEnabled {
+    if preferences.isCLIEnabled(.codex) {
+      refreshCodexUsageStatus()
+    }
+    if preferences.isCLIEnabled(.claude), claudeUsageAutoRefreshEnabled {
       refreshClaudeUsageStatus(silent: false)
     }
-    refreshGeminiUsageStatus(silent: false)
+    if preferences.isCLIEnabled(.gemini) {
+      refreshGeminiUsageStatus(silent: false)
+    }
     schedulePathTreeRefresh()
 
     // Ensure currently selected sessions are fully up-to-date with high-quality parsing.
@@ -1118,25 +1161,36 @@ final class SessionListViewModel: ObservableObject {
     let enabledRemoteHostsForCounts = enabledRemoteHosts
     let sessionsRootForCounts = sessionsRoot
     Task {
-      var counts = await indexer.collectCWDCounts(root: sessionsRootForCounts)
-      let claudeCounts = await claudeProvider.collectCWDCounts()
-      let geminiCounts = await geminiProvider.collectCWDCounts()
-      for (key, value) in claudeCounts {
-        counts[key, default: 0] += value
+      var counts: [String: Int] = [:]
+      if self.preferences.isCLIEnabled(.codex) {
+        counts = await indexer.collectCWDCounts(root: sessionsRootForCounts)
       }
-      for (key, value) in geminiCounts {
-        counts[key, default: 0] += value
-      }
-      if !enabledRemoteHostsForCounts.isEmpty {
-        let remoteCodex = await remoteProvider.collectCWDAggregates(
-          kind: .codex, enabledHosts: enabledRemoteHostsForCounts)
-        for (key, value) in remoteCodex {
+      if self.preferences.isCLIEnabled(.claude) {
+        let claudeCounts = await claudeProvider.collectCWDCounts()
+        for (key, value) in claudeCounts {
           counts[key, default: 0] += value
         }
-        let remoteClaude = await remoteProvider.collectCWDAggregates(
-          kind: .claude, enabledHosts: enabledRemoteHostsForCounts)
-        for (key, value) in remoteClaude {
+      }
+      if self.preferences.isCLIEnabled(.gemini) {
+        let geminiCounts = await geminiProvider.collectCWDCounts()
+        for (key, value) in geminiCounts {
           counts[key, default: 0] += value
+        }
+      }
+      if !enabledRemoteHostsForCounts.isEmpty {
+        if self.preferences.isCLIEnabled(.codex) {
+          let remoteCodex = await remoteProvider.collectCWDAggregates(
+            kind: .codex, enabledHosts: enabledRemoteHostsForCounts)
+          for (key, value) in remoteCodex {
+            counts[key, default: 0] += value
+          }
+        }
+        if self.preferences.isCLIEnabled(.claude) {
+          let remoteClaude = await remoteProvider.collectCWDAggregates(
+            kind: .claude, enabledHosts: enabledRemoteHostsForCounts)
+          for (key, value) in remoteClaude {
+            counts[key, default: 0] += value
+          }
         }
       }
       let tree = counts.buildPathTreeFromCounts()
@@ -1150,11 +1204,15 @@ final class SessionListViewModel: ObservableObject {
         "refreshSessionsForProviderChange meta/coverage updated metaCount=\(self.indexMeta?.sessionCount ?? -1, privacy: .public) coverageCount=\(self.cacheCoverage?.sessionCount ?? -1, privacy: .public) ts=\(self.ts(), format: .fixed(precision: 3))"
       )
     }
-    refreshCodexUsageStatus()
-    if claudeUsageAutoRefreshEnabled {
+    if preferences.isCLIEnabled(.codex) {
+      refreshCodexUsageStatus()
+    }
+    if preferences.isCLIEnabled(.claude), claudeUsageAutoRefreshEnabled {
       refreshClaudeUsageStatus(silent: false)
     }
-    refreshGeminiUsageStatus(silent: false)
+    if preferences.isCLIEnabled(.gemini) {
+      refreshGeminiUsageStatus(silent: false)
+    }
     schedulePathTreeRefresh()
 
     if !selectedSessionIDs.isEmpty {
@@ -1428,10 +1486,16 @@ final class SessionListViewModel: ObservableObject {
   private func buildProviders(enabledRemoteHosts: Set<String>) -> [any SessionProvider] {
     var providers: [any SessionProvider] = []
 
-    // Check if each kind is enabled in session path configs
-    let codexEnabled = preferences.sessionPathConfigs.contains { $0.kind == .codex && $0.enabled }
-    let claudeEnabled = preferences.sessionPathConfigs.contains { $0.kind == .claude && $0.enabled }
-    let geminiEnabled = preferences.sessionPathConfigs.contains { $0.kind == .gemini && $0.enabled }
+    // Check if each kind is enabled in session path configs and globally enabled
+    let codexEnabled =
+      preferences.isCLIEnabled(.codex)
+      && preferences.sessionPathConfigs.contains { $0.kind == .codex && $0.enabled }
+    let claudeEnabled =
+      preferences.isCLIEnabled(.claude)
+      && preferences.sessionPathConfigs.contains { $0.kind == .claude && $0.enabled }
+    let geminiEnabled =
+      preferences.isCLIEnabled(.gemini)
+      && preferences.sessionPathConfigs.contains { $0.kind == .gemini && $0.enabled }
 
     diagLogger.log(
       "buildProviders: codex=\(codexEnabled, privacy: .public) claude=\(claudeEnabled, privacy: .public) gemini=\(geminiEnabled, privacy: .public) remoteHosts=\(enabledRemoteHosts.count, privacy: .public)"
@@ -1644,7 +1708,6 @@ final class SessionListViewModel: ObservableObject {
     guard !activityHeartbeat.isEmpty else { return }
     
     let now = Date()
-    let cutoff = now.addingTimeInterval(-3.0)
     
     // Find earliest time when any ID would expire (3s after its heartbeat)
     let earliestExpiry = activityHeartbeat.values
@@ -2856,6 +2919,10 @@ final class SessionListViewModel: ObservableObject {
   }
 
   func rebuildGeminiProjectHashLookup() {
+    guard preferences.isCLIEnabled(.gemini) else {
+      geminiProjectPathByHash = [:]
+      return
+    }
     geminiProjectPathByHash = Self.computeGeminiProjectHashes(from: projects)
   }
 
@@ -3022,6 +3089,10 @@ final class SessionListViewModel: ObservableObject {
   private func configureDirectoryMonitor() {
     directoryMonitor?.cancel()
     directoryRefreshTask?.cancel()
+    guard preferences.isCLIEnabled(.codex) else {
+      directoryMonitor = nil
+      return
+    }
     let root = preferences.sessionsRoot
     guard FileManager.default.fileExists(atPath: root.path) else {
       directoryMonitor = nil
@@ -3037,6 +3108,10 @@ final class SessionListViewModel: ObservableObject {
 
   private func configureClaudeDirectoryMonitor() {
     claudeDirectoryMonitor?.cancel()
+    guard preferences.isCLIEnabled(.claude) else {
+      claudeDirectoryMonitor = nil
+      return
+    }
     // Default Claude projects root: ~/.claude/projects
     let home = FileManager.default.homeDirectoryForCurrentUser
     let projects =
@@ -3059,6 +3134,10 @@ final class SessionListViewModel: ObservableObject {
 
   private func configureGeminiDirectoryMonitor() {
     geminiDirectoryMonitor?.cancel()
+    guard preferences.isCLIEnabled(.gemini) else {
+      geminiDirectoryMonitor = nil
+      return
+    }
     // Default Gemini tmp root: ~/.gemini/tmp
     let home = SessionPreferencesStore.getRealUserHomeURL()
     let tmpRoot =
@@ -3540,6 +3619,7 @@ final class SessionListViewModel: ObservableObject {
   private func dayOfToday() -> Date { Calendar.current.startOfDay(for: Date()) }
 
   func refreshIncrementalForNewCodexToday() async {
+    guard preferences.isCLIEnabled(.codex) else { return }
     do {
       let codexConfigs = preferences.sessionPathConfigs.filter { $0.kind == .codex && $0.enabled }
       let codexIgnoredPaths = codexConfigs.flatMap { $0.ignoredSubpaths }
@@ -3557,6 +3637,7 @@ final class SessionListViewModel: ObservableObject {
   }
 
   func refreshIncrementalForGeminiToday() async {
+    guard preferences.isCLIEnabled(.gemini) else { return }
     do {
       let geminiConfigs = preferences.sessionPathConfigs.filter { $0.kind == .gemini && $0.enabled }
       let geminiIgnoredPaths = geminiConfigs.flatMap { $0.ignoredSubpaths }
@@ -3570,6 +3651,7 @@ final class SessionListViewModel: ObservableObject {
   }
 
   func refreshIncrementalForClaudeToday() async {
+    guard preferences.isCLIEnabled(.claude) else { return }
     do {
       let claudeConfigs = preferences.sessionPathConfigs.filter { $0.kind == .claude && $0.enabled }
       let claudeIgnoredPaths = claudeConfigs.flatMap { $0.ignoredSubpaths }
@@ -3583,6 +3665,7 @@ final class SessionListViewModel: ObservableObject {
   }
 
   func refreshIncrementalForClaudeProject(directory: String) async {
+    guard preferences.isCLIEnabled(.claude) else { return }
     do {
       let subset = try await claudeProvider.sessions(inProjectDirectory: directory)
       await MainActor.run { self.mergeAndApply(subset) }
@@ -3645,14 +3728,14 @@ extension SessionListViewModel {
 
   func refreshGlobalCount() async {
     // Fast path: use cached coverage/meta to avoid re-parsing sessions on cold start.
-    if let coverage = await indexer.currentCoverage() {
+    if preferences.isCLIEnabled(.codex), let coverage = await indexer.currentCoverage() {
       await MainActor.run { self.globalSessionCount = coverage.sessionCount }
       diagLogger.log(
         "refreshGlobalCount via coverage count=\(coverage.sessionCount, privacy: .public) ts=\(self.ts(), format: .fixed(precision: 3))"
       )
       return
     }
-    if let meta = await indexer.currentMeta() {
+    if preferences.isCLIEnabled(.codex), let meta = await indexer.currentMeta() {
       await MainActor.run { self.globalSessionCount = meta.sessionCount }
       diagLogger.log(
         "refreshGlobalCount via meta count=\(meta.sessionCount, privacy: .public) ts=\(self.ts(), format: .fixed(precision: 3))"
@@ -3663,28 +3746,42 @@ extension SessionListViewModel {
     // Fallback: enumerate cached summaries (or re-index) when no coverage/meta is available.
     diagLogger.log("refreshGlobalCount fallback enumerate summaries")
     let codexSummaries: [SessionSummary]
-    do {
-      if let cached = try await indexer.cachedAllSummaries() {
-        codexSummaries = cached
-      } else {
-        codexSummaries = []
+    if preferences.isCLIEnabled(.codex) {
+      do {
+        if let cached = try await indexer.cachedAllSummaries() {
+          codexSummaries = cached
+        } else {
+          codexSummaries = []
+        }
+      } catch {
+        diagLogger.error(
+          "refreshGlobalCount failed to read codex cache: \(error.localizedDescription, privacy: .public)"
+        )
+        await MainActor.run { self.globalSessionCount = 0 }
+        return
       }
-    } catch {
-      diagLogger.error(
-        "refreshGlobalCount failed to read codex cache: \(error.localizedDescription, privacy: .public)"
-      )
-      await MainActor.run { self.globalSessionCount = 0 }
-      return
+    } else {
+      codexSummaries = []
     }
 
-    let claudeConfigs = preferences.sessionPathConfigs.filter { $0.kind == .claude && $0.enabled }
-    let claudeIgnoredPaths = claudeConfigs.flatMap { $0.ignoredSubpaths }
-    let claudeSummaries =
-      (try? await claudeProvider.sessions(scope: .all, ignoredPaths: claudeIgnoredPaths)) ?? []
-    let geminiConfigs = preferences.sessionPathConfigs.filter { $0.kind == .gemini && $0.enabled }
-    let geminiIgnoredPaths = geminiConfigs.flatMap { $0.ignoredSubpaths }
-    let geminiSummaries =
-      (try? await geminiProvider.sessions(scope: .all, ignoredPaths: geminiIgnoredPaths)) ?? []
+    let claudeSummaries: [SessionSummary]
+    if preferences.isCLIEnabled(.claude) {
+      let claudeConfigs = preferences.sessionPathConfigs.filter { $0.kind == .claude && $0.enabled }
+      let claudeIgnoredPaths = claudeConfigs.flatMap { $0.ignoredSubpaths }
+      claudeSummaries =
+        (try? await claudeProvider.sessions(scope: .all, ignoredPaths: claudeIgnoredPaths)) ?? []
+    } else {
+      claudeSummaries = []
+    }
+    let geminiSummaries: [SessionSummary]
+    if preferences.isCLIEnabled(.gemini) {
+      let geminiConfigs = preferences.sessionPathConfigs.filter { $0.kind == .gemini && $0.enabled }
+      let geminiIgnoredPaths = geminiConfigs.flatMap { $0.ignoredSubpaths }
+      geminiSummaries =
+        (try? await geminiProvider.sessions(scope: .all, ignoredPaths: geminiIgnoredPaths)) ?? []
+    } else {
+      geminiSummaries = []
+    }
 
     var idSet = Set<String>()
     for s in codexSummaries { idSet.insert(s.id) }
@@ -3695,9 +3792,12 @@ extension SessionListViewModel {
     let enabledHosts = preferences.enabledRemoteHosts
     if !enabledHosts.isEmpty {
       let startRemote = Date()
-      let codexCount = await remoteProvider.countSessions(kind: .codex, enabledHosts: enabledHosts)
-      let claudeCount = await remoteProvider.countSessions(
-        kind: .claude, enabledHosts: enabledHosts)
+      let codexCount = preferences.isCLIEnabled(.codex)
+        ? await remoteProvider.countSessions(kind: .codex, enabledHosts: enabledHosts)
+        : 0
+      let claudeCount = preferences.isCLIEnabled(.claude)
+        ? await remoteProvider.countSessions(kind: .claude, enabledHosts: enabledHosts)
+        : 0
       total += codexCount
       total += claudeCount
       let elapsed = Date().timeIntervalSince(startRemote)
@@ -3710,6 +3810,7 @@ extension SessionListViewModel {
 
   /// User-driven refresh for usage status (status capsule tap / Command+R fallback).
   func requestUsageStatusRefresh(for provider: UsageProviderKind) {
+    if !isCLIEnabled(for: provider) { return }
     switch provider {
     case .codex:
       refreshCodexUsageStatus()
@@ -3722,6 +3823,7 @@ extension SessionListViewModel {
   }
 
   func requestUsageStatusRefreshSilently(for provider: UsageProviderKind) {
+    if !isCLIEnabled(for: provider) { return }
     switch provider {
     case .codex:
       refreshCodexUsageStatus()
@@ -3750,6 +3852,40 @@ extension SessionListViewModel {
 
   private func setInitialClaudePlaceholder() {
     self.setClaudeUsagePlaceholder("Load Claude usage", action: .refresh)
+  }
+
+  private func isCLIEnabled(for provider: UsageProviderKind) -> Bool {
+    switch provider {
+    case .codex: return preferences.isCLIEnabled(.codex)
+    case .claude: return preferences.isCLIEnabled(.claude)
+    case .gemini: return preferences.isCLIEnabled(.gemini)
+    }
+  }
+
+  private func enabledCLIKindSet() -> Set<SessionSource.Kind> {
+    Self.cliEnabledKindSet(
+      codex: preferences.cliCodexEnabled,
+      claude: preferences.cliClaudeEnabled,
+      gemini: preferences.cliGeminiEnabled
+    )
+  }
+
+  private static func cliEnabledKindSet(
+    codex: Bool,
+    claude: Bool,
+    gemini: Bool
+  ) -> Set<SessionSource.Kind> {
+    var set: Set<SessionSource.Kind> = []
+    if codex { set.insert(.codex) }
+    if claude { set.insert(.claude) }
+    if gemini { set.insert(.gemini) }
+    return set
+  }
+
+  private func trimUsageSnapshotsForDisabledCLIs() {
+    if !preferences.isCLIEnabled(.codex) { usageSnapshots.removeValue(forKey: .codex) }
+    if !preferences.isCLIEnabled(.claude) { usageSnapshots.removeValue(forKey: .claude) }
+    if !preferences.isCLIEnabled(.gemini) { usageSnapshots.removeValue(forKey: .gemini) }
   }
 
   private func setClaudeUsagePlaceholder(
@@ -4205,13 +4341,13 @@ extension SessionListViewModel {
       return snapshot.updatedAt == nil
     }
 
-    if codexOrigin == .builtin, shouldRefresh(.codex) {
+    if preferences.isCLIEnabled(.codex), codexOrigin == .builtin, shouldRefresh(.codex) {
       refreshCodexUsageStatus()
     }
-    if claudeOrigin == .builtin, shouldRefresh(.claude) {
+    if preferences.isCLIEnabled(.claude), claudeOrigin == .builtin, shouldRefresh(.claude) {
       refreshClaudeUsageStatus(silent: false)
     }
-    if geminiOrigin == .builtin, shouldRefresh(.gemini) {
+    if preferences.isCLIEnabled(.gemini), geminiOrigin == .builtin, shouldRefresh(.gemini) {
       refreshGeminiUsageStatus(silent: false)
     }
   }

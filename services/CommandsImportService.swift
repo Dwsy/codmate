@@ -44,6 +44,14 @@ enum CommandsImportService {
         format: .toml
       ),
     ]
+      .filter { source in
+        switch source.label {
+        case "Codex": return SessionPreferencesStore.isCLIEnabled(.codex)
+        case "Claude": return SessionPreferencesStore.isCLIEnabled(.claude)
+        case "Gemini": return SessionPreferencesStore.isCLIEnabled(.gemini)
+        default: return true
+        }
+      }
 
     var merged: [String: CommandImportCandidate] = [:]
 

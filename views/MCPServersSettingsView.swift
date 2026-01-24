@@ -4,6 +4,7 @@ import AppKit
 
 struct MCPServersSettingsPane: View {
     @StateObject private var vm = MCPServersViewModel()
+    @ObservedObject var preferences: SessionPreferencesStore
     @State private var showImportConfirmation = false
     @State private var showNewSheet = false
     // New unified editor sheet
@@ -211,7 +212,7 @@ struct MCPServersSettingsPane: View {
                                         get: { vm.isServerEnabled(s, for: .codex) },
                                         set: { value in Task { await vm.setServerTargetEnabled(s, target: .codex, enabled: value) } }
                                     ),
-                                    disabled: !s.enabled
+                                    disabled: !s.enabled || !preferences.isCLIEnabled(.codex)
                                 )
                                 MCPServerTargetToggle(
                                     provider: .claude,
@@ -219,7 +220,7 @@ struct MCPServersSettingsPane: View {
                                         get: { vm.isServerEnabled(s, for: .claude) },
                                         set: { value in Task { await vm.setServerTargetEnabled(s, target: .claude, enabled: value) } }
                                     ),
-                                    disabled: !s.enabled
+                                    disabled: !s.enabled || !preferences.isCLIEnabled(.claude)
                                 )
                                 MCPServerTargetToggle(
                                     provider: .gemini,
@@ -227,7 +228,7 @@ struct MCPServersSettingsPane: View {
                                         get: { vm.isServerEnabled(s, for: .gemini) },
                                         set: { value in Task { await vm.setServerTargetEnabled(s, target: .gemini, enabled: value) } }
                                     ),
-                                    disabled: !s.enabled
+                                    disabled: !s.enabled || !preferences.isCLIEnabled(.gemini)
                                 )
                             }
                             .padding(.trailing, 8)

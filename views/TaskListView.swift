@@ -943,9 +943,10 @@ struct TaskListView: View {
     if let anchor {
       allowed = Set(viewModel.allowedSources(for: anchor))
     } else if let project {
-      allowed = project.sources.isEmpty ? ProjectSessionSource.allSet : project.sources
+      let sources = project.sources.isEmpty ? ProjectSessionSource.allSet : project.sources
+      allowed = Set(sources.filter { viewModel.preferences.isCLIEnabled($0.baseKind) })
     } else {
-      allowed = ProjectSessionSource.allSet
+      allowed = Set(ProjectSessionSource.allCases.filter { viewModel.preferences.isCLIEnabled($0.baseKind) })
     }
     let requestedOrder: [ProjectSessionSource] = [.claude, .codex, .gemini]
     let enabledRemoteHosts = viewModel.preferences.enabledRemoteHosts.sorted()

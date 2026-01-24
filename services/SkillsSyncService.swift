@@ -16,9 +16,15 @@ actor SkillsSyncService {
     let geminiDir = home.appendingPathComponent(".gemini", isDirectory: true).appendingPathComponent("skills", isDirectory: true)
 
     var warnings: [SkillSyncWarning] = []
-    warnings.append(contentsOf: syncSkills(skills: skills, target: .codex, destination: codexDir))
-    warnings.append(contentsOf: syncSkills(skills: skills, target: .claude, destination: claudeDir))
-    warnings.append(contentsOf: syncSkills(skills: skills, target: .gemini, destination: geminiDir))
+    if SessionPreferencesStore.isCLIEnabled(.codex) {
+      warnings.append(contentsOf: syncSkills(skills: skills, target: .codex, destination: codexDir))
+    }
+    if SessionPreferencesStore.isCLIEnabled(.claude) {
+      warnings.append(contentsOf: syncSkills(skills: skills, target: .claude, destination: claudeDir))
+    }
+    if SessionPreferencesStore.isCLIEnabled(.gemini) {
+      warnings.append(contentsOf: syncSkills(skills: skills, target: .gemini, destination: geminiDir))
+    }
     return warnings
   }
 
@@ -34,24 +40,30 @@ actor SkillsSyncService {
     let selectedSkills = selections.reduce(into: [String: SkillSelection]()) { $0[$1.id] = $1 }
     let chosen = skills.filter { selectedSkills[$0.id]?.isSelected == true }
 
-    warnings.append(contentsOf: syncSkills(
-      skills: chosen,
-      target: .codex,
-      destination: codexDir,
-      selectionOverride: selectedSkills
-    ))
-    warnings.append(contentsOf: syncSkills(
-      skills: chosen,
-      target: .claude,
-      destination: claudeDir,
-      selectionOverride: selectedSkills
-    ))
-    warnings.append(contentsOf: syncSkills(
-      skills: chosen,
-      target: .gemini,
-      destination: geminiDir,
-      selectionOverride: selectedSkills
-    ))
+    if SessionPreferencesStore.isCLIEnabled(.codex) {
+      warnings.append(contentsOf: syncSkills(
+        skills: chosen,
+        target: .codex,
+        destination: codexDir,
+        selectionOverride: selectedSkills
+      ))
+    }
+    if SessionPreferencesStore.isCLIEnabled(.claude) {
+      warnings.append(contentsOf: syncSkills(
+        skills: chosen,
+        target: .claude,
+        destination: claudeDir,
+        selectionOverride: selectedSkills
+      ))
+    }
+    if SessionPreferencesStore.isCLIEnabled(.gemini) {
+      warnings.append(contentsOf: syncSkills(
+        skills: chosen,
+        target: .gemini,
+        destination: geminiDir,
+        selectionOverride: selectedSkills
+      ))
+    }
     return warnings
   }
 

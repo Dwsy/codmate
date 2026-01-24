@@ -32,6 +32,18 @@ final class SessionPreferencesStore: ObservableObject {
     didSet { persistCLIPaths() }
   }
 
+  @Published var cliCodexEnabled: Bool {
+    didSet { persistCLIEnablement() }
+  }
+
+  @Published var cliClaudeEnabled: Bool {
+    didSet { persistCLIEnablement() }
+  }
+
+  @Published var cliGeminiEnabled: Bool {
+    didSet { persistCLIEnablement() }
+  }
+
   @Published var sessionPathConfigs: [SessionPathConfig] {
     didSet { persistSessionPaths() }
   }
@@ -45,6 +57,9 @@ final class SessionPreferencesStore: ObservableObject {
     static let codexCommandPath = "codmate.command.codex"
     static let claudeCommandPath = "codmate.command.claude"
     static let geminiCommandPath = "codmate.command.gemini"
+    static let cliCodexEnabled = "codmate.cli.codex.enabled"
+    static let cliClaudeEnabled = "codmate.cli.claude.enabled"
+    static let cliGeminiEnabled = "codmate.cli.gemini.enabled"
     static let resumeUseEmbedded = "codex.resume.useEmbedded"
     static let resumeCopyClipboard = "codex.resume.copyClipboard"
     static let resumeExternalApp = "codex.resume.externalApp"
@@ -168,6 +183,14 @@ final class SessionPreferencesStore: ObservableObject {
     let storedClaudeCommandPath = defaults.string(forKey: Keys.claudeCommandPath) ?? ""
     let storedGeminiCommandPath = defaults.string(forKey: Keys.geminiCommandPath) ?? ""
 
+    var storedCodexEnabled = defaults.object(forKey: Keys.cliCodexEnabled) as? Bool ?? true
+    let storedClaudeEnabled = defaults.object(forKey: Keys.cliClaudeEnabled) as? Bool ?? true
+    let storedGeminiEnabled = defaults.object(forKey: Keys.cliGeminiEnabled) as? Bool ?? true
+    if !storedCodexEnabled && !storedClaudeEnabled && !storedGeminiEnabled {
+      storedCodexEnabled = true
+      defaults.set(true, forKey: Keys.cliCodexEnabled)
+    }
+
     // Assign after all are computed to avoid using self before init completes
     self.sessionsRoot = resolvedSessionsRoot
     self.notesRoot = resolvedNotesRoot
@@ -175,6 +198,9 @@ final class SessionPreferencesStore: ObservableObject {
     self.codexCommandPath = storedCodexCommandPath
     self.claudeCommandPath = storedClaudeCommandPath
     self.geminiCommandPath = storedGeminiCommandPath
+    self.cliCodexEnabled = storedCodexEnabled
+    self.cliClaudeEnabled = storedClaudeEnabled
+    self.cliGeminiEnabled = storedGeminiEnabled
     
     // Load session path configs (with migration)
     let loadedConfigs = Self.loadSessionPathConfigs(
@@ -439,6 +465,12 @@ final class SessionPreferencesStore: ObservableObject {
   
   private func persistSessionPaths() {
     persistJSON(sessionPathConfigs, key: Keys.sessionPathConfigs)
+  }
+
+  private func persistCLIEnablement() {
+    defaults.set(cliCodexEnabled, forKey: Keys.cliCodexEnabled)
+    defaults.set(cliClaudeEnabled, forKey: Keys.cliClaudeEnabled)
+    defaults.set(cliGeminiEnabled, forKey: Keys.cliGeminiEnabled)
   }
 
   private static func decodeJSON<T: Decodable>(_ type: T.Type, defaults: UserDefaults, key: String) -> T? {
@@ -1014,5 +1046,48 @@ final class SessionPreferencesStore: ObservableObject {
       }
     }
     return false
+  }
+
+  func isCLIEnabled(_ kind: SessionSource.Kind) -> Bool {
+    switch kind {
+    case .codex: return cliCodexEnabled
+    case .claude: return cliClaudeEnabled
+    case .gemini: return cliGeminiEnabled
+    }
+  }
+
+  func setCLIEnabled(_ kind: SessionSource.Kind, enabled: Bool) -> Bool {
+    if enabled {
+      switch kind {
+      case .codex: cliCodexEnabled = true
+      case .claude: cliClaudeEnabled = true
+      case .gemini: cliGeminiEnabled = true
+      }
+      return true
+    }
+    let enabledCount = [cliCodexEnabled, cliClaudeEnabled, cliGeminiEnabled].filter { $0 }.count
+    if enabledCount <= 1 {
+      return false
+    }
+    switch kind {
+    case .codex: cliCodexEnabled = false
+    case .claude: cliClaudeEnabled = false
+    case .gemini: cliGeminiEnabled = false
+    }
+    return true
+  }
+
+  nonisolated static func isCLIEnabled(_ kind: SessionSource.Kind, defaults: UserDefaults = .standard) -> Bool {
+    let codex = defaults.object(forKey: Keys.cliCodexEnabled) as? Bool ?? true
+    let claude = defaults.object(forKey: Keys.cliClaudeEnabled) as? Bool ?? true
+    let gemini = defaults.object(forKey: Keys.cliGeminiEnabled) as? Bool ?? true
+    if !codex && !claude && !gemini {
+      return kind == .codex
+    }
+    switch kind {
+    case .codex: return codex
+    case .claude: return claude
+    case .gemini: return gemini
+    }
   }
 }

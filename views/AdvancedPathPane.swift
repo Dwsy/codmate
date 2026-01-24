@@ -64,6 +64,7 @@ struct AdvancedPathPane: View {
                             description: "Optional override for codex CLI",
                             override: $preferences.codexCommandPath,
                             autoInfo: cliVM.codex,
+                            isDisabled: !preferences.isCLIEnabled(.codex),
                             onChoose: { selectCommandPath(kind: .codex) }
                         )
                         gridDivider
@@ -72,6 +73,7 @@ struct AdvancedPathPane: View {
                             description: "Optional override for claude CLI",
                             override: $preferences.claudeCommandPath,
                             autoInfo: cliVM.claude,
+                            isDisabled: !preferences.isCLIEnabled(.claude),
                             onChoose: { selectCommandPath(kind: .claude) }
                         )
                         gridDivider
@@ -80,6 +82,7 @@ struct AdvancedPathPane: View {
                             description: "Optional override for gemini CLI",
                             override: $preferences.geminiCommandPath,
                             autoInfo: cliVM.gemini,
+                            isDisabled: !preferences.isCLIEnabled(.gemini),
                             onChoose: { selectCommandPath(kind: .gemini) }
                         )
                     }
@@ -133,6 +136,7 @@ struct AdvancedPathPane: View {
         description: String,
         override: Binding<String>,
         autoInfo: CLIPathVM.CLIInfo,
+        isDisabled: Bool,
         onChoose: @escaping () -> Void
     ) -> some View {
         GridRow {
@@ -161,6 +165,7 @@ struct AdvancedPathPane: View {
                 .disabled(override.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
+        .disabled(isDisabled)
     }
 
     private func placeholderText(for info: CLIPathVM.CLIInfo) -> String {

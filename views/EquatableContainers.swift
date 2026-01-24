@@ -71,15 +71,18 @@ struct EquatableUsageContainer: View, Equatable {
   let key: UsageDigest
 
   var snapshots: [UsageProviderKind: UsageProviderSnapshot]
+  var preferences: SessionPreferencesStore
   @Binding var selectedProvider: UsageProviderKind
   var onRequestRefresh: (UsageProviderKind) -> Void
 
   init(
     snapshots: [UsageProviderKind: UsageProviderSnapshot],
+    preferences: SessionPreferencesStore,
     selectedProvider: Binding<UsageProviderKind>,
     onRequestRefresh: @escaping (UsageProviderKind) -> Void
   ) {
     self.snapshots = snapshots
+    self.preferences = preferences
     self._selectedProvider = selectedProvider
     self.onRequestRefresh = onRequestRefresh
     self.key = Self.digest(snapshots)
@@ -88,6 +91,7 @@ struct EquatableUsageContainer: View, Equatable {
   var body: some View {
     UsageStatusControl(
       snapshots: snapshots,
+      preferences: preferences,
       selectedProvider: $selectedProvider,
       onRequestRefresh: onRequestRefresh
     )

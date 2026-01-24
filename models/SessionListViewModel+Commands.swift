@@ -863,13 +863,16 @@ extension SessionListViewModel {
     }
 
     func allowedSources(for session: SessionSummary) -> [ProjectSessionSource] {
+        let sources: [ProjectSessionSource]
         if let pid = projectIdForSession(session.id),
             let p = projects.first(where: { $0.id == pid })
         {
             let allowed = p.sources.isEmpty ? ProjectSessionSource.allSet : p.sources
-            return Array(allowed).sorted { $0.displayName < $1.displayName }
+            sources = Array(allowed).sorted { $0.displayName < $1.displayName }
+        } else {
+            sources = ProjectSessionSource.allCases
         }
-        return ProjectSessionSource.allCases
+        return sources.filter { preferences.isCLIEnabled($0.baseKind) }
     }
 
     func copyRealResumeCommand(session: SessionSummary) {

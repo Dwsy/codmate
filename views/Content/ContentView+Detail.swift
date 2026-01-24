@@ -125,6 +125,7 @@ extension ContentView {
       // Global overview when no specific project is selected
       AllOverviewView(
         viewModel: overviewViewModel,
+        preferences: viewModel.preferences,
         onSelectSession: { focusSessionFromOverview($0) },
         onResumeSession: { resumeFromList($0) },
         onFocusToday: { focusTodayFromOverview() }, // No longer visible but still part of API
@@ -136,6 +137,7 @@ extension ContentView {
       ProjectSpecificOverviewContainerView(
           sessionListViewModel: viewModel,
           project: project,
+          preferences: viewModel.preferences,
           onSelectSession: { focusSessionFromOverview($0) },
           onResumeSession: { resumeFromList($0) },
           onFocusToday: { focusTodayFromOverview() },

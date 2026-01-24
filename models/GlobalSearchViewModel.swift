@@ -302,12 +302,21 @@ final class GlobalSearchViewModel: ObservableObject {
     let current = preferences.sessionsRoot
     let home = SessionPreferencesStore.getRealUserHomeURL()
     let defaultRoot = SessionPreferencesStore.defaultSessionsRoot(for: home)
-    var sessionRoots: [URL] = [current]
-    if defaultRoot != current { sessionRoots.append(defaultRoot) }
-    if let claudeRoot = Self.defaultClaudeSessionsRoot(), FileManager.default.fileExists(atPath: claudeRoot.path) {
+    var sessionRoots: [URL] = []
+    if preferences.isCLIEnabled(.codex) {
+      sessionRoots.append(current)
+      if defaultRoot != current { sessionRoots.append(defaultRoot) }
+    }
+    if preferences.isCLIEnabled(.claude),
+      let claudeRoot = Self.defaultClaudeSessionsRoot(),
+      FileManager.default.fileExists(atPath: claudeRoot.path)
+    {
       if !sessionRoots.contains(claudeRoot) { sessionRoots.append(claudeRoot) }
     }
-    if let geminiRoot = Self.defaultGeminiSessionsRoot(), FileManager.default.fileExists(atPath: geminiRoot.path) {
+    if preferences.isCLIEnabled(.gemini),
+      let geminiRoot = Self.defaultGeminiSessionsRoot(),
+      FileManager.default.fileExists(atPath: geminiRoot.path)
+    {
       if !sessionRoots.contains(geminiRoot) { sessionRoots.append(geminiRoot) }
     }
     return GlobalSearchPaths(

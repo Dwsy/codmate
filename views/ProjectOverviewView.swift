@@ -3,6 +3,7 @@ import SwiftUI
 struct ProjectOverviewView: View {
   @ObservedObject var viewModel: ProjectOverviewViewModel
   var project: Project
+  var preferences: SessionPreferencesStore
   var onSelectSession: (SessionSummary) -> Void
   var onResumeSession: (SessionSummary) -> Void  // Keeping this for consistency, though not used in ProjectOverviewViewModel directly
   var onFocusToday: () -> Void  // Keeping this for consistency, though not used in ProjectOverviewViewModel directly
@@ -36,7 +37,11 @@ struct ProjectOverviewView: View {
           if shouldShowChartPlaceholder {
             OverviewChartPlaceholder()
           } else {
-            OverviewActivityChart(data: snapshot.activityChartData, onSelectDate: onSelectDate)
+            OverviewActivityChart(
+              data: snapshot.activityChartData,
+              enabledSources: enabledSources,
+              onSelectDate: onSelectDate
+            )
           }
 
           heroSection(columns: cols)
@@ -51,6 +56,13 @@ struct ProjectOverviewView: View {
   }
 
   private var snapshot: ProjectOverviewSnapshot { viewModel.snapshot }
+  private var enabledSources: Set<SessionSource.Kind> {
+    Set([
+      preferences.isCLIEnabled(.codex) ? SessionSource.Kind.codex : nil,
+      preferences.isCLIEnabled(.claude) ? SessionSource.Kind.claude : nil,
+      preferences.isCLIEnabled(.gemini) ? SessionSource.Kind.gemini : nil,
+    ].compactMap { $0 })
+  }
   private var shouldShowChartPlaceholder: Bool {
     viewModel.isLoading && snapshot.activityChartData.points.isEmpty
   }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ExtensionsSettingsView: View {
     @Binding var selectedTab: ExtensionsSettingsTab
+    @ObservedObject var preferences: SessionPreferencesStore
     var openMCPMateDownload: () -> Void
 
     var body: some View {
@@ -11,23 +12,27 @@ struct ExtensionsSettingsView: View {
                 if #available(macOS 15.0, *) {
                     TabView(selection: $selectedTab) {
                         Tab("Commands", systemImage: "command", value: ExtensionsSettingsTab.commands) {
-                            SettingsTabContent { CommandsSettingsView() }
+                            SettingsTabContent { CommandsSettingsView(preferences: preferences) }
                         }
                         Tab("Hooks", systemImage: "link", value: ExtensionsSettingsTab.hooks) {
                             SettingsTabContent { HooksSettingsView() }
                         }
                         Tab("MCP Servers", systemImage: "server.rack", value: ExtensionsSettingsTab.mcp) {
                             SettingsTabContent {
-                                MCPServersSettingsPane(openMCPMateDownload: openMCPMateDownload, showHeader: false)
+                                MCPServersSettingsPane(
+                                    preferences: preferences,
+                                    openMCPMateDownload: openMCPMateDownload,
+                                    showHeader: false
+                                )
                             }
                         }
                         Tab("Skills", systemImage: "sparkles", value: ExtensionsSettingsTab.skills) {
-                            SettingsTabContent { SkillsSettingsView() }
+                            SettingsTabContent { SkillsSettingsView(preferences: preferences) }
                         }
                     }
                 } else {
                     TabView(selection: $selectedTab) {
-                        SettingsTabContent { CommandsSettingsView() }
+                        SettingsTabContent { CommandsSettingsView(preferences: preferences) }
                             .tabItem { Label("Commands", systemImage: "command") }
                             .tag(ExtensionsSettingsTab.commands)
 
@@ -36,12 +41,16 @@ struct ExtensionsSettingsView: View {
                             .tag(ExtensionsSettingsTab.hooks)
 
                         SettingsTabContent {
-                            MCPServersSettingsPane(openMCPMateDownload: openMCPMateDownload, showHeader: false)
+                            MCPServersSettingsPane(
+                                preferences: preferences,
+                                openMCPMateDownload: openMCPMateDownload,
+                                showHeader: false
+                            )
                         }
                         .tabItem { Label("MCP Servers", systemImage: "server.rack") }
                         .tag(ExtensionsSettingsTab.mcp)
 
-                        SettingsTabContent { SkillsSettingsView() }
+                        SettingsTabContent { SkillsSettingsView(preferences: preferences) }
                             .tabItem { Label("Skills", systemImage: "sparkles") }
                             .tag(ExtensionsSettingsTab.skills)
                     }

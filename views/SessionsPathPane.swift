@@ -30,6 +30,8 @@ struct SessionsPathPane: View {
                             diagnostics: diagnostics[config.id],
                             canDelete: false
                         )
+                        .disabled(!preferences.isCLIEnabled(config.kind))
+                        .opacity(preferences.isCLIEnabled(config.kind) ? 1.0 : 0.6)
                     }
                 }
             }
@@ -55,27 +57,29 @@ struct SessionsPathPane: View {
                 } else {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(customPaths.indices, id: \.self) { index in
-                            let config = customPaths[index]
-                            SessionPathGroup(
-                                config: Binding(
-                                    get: { 
-                                        if let idx = findConfigIndex(config) {
+                        let config = customPaths[index]
+                        SessionPathGroup(
+                            config: Binding(
+                                get: { 
+                                    if let idx = findConfigIndex(config) {
                                             return preferences.sessionPathConfigs[idx]
                                         }
                                         return config
                                     },
                                     set: { updateConfig($0) }
-                                ),
-                                diagnostics: diagnostics[config.id],
-                                canDelete: true,
-                                onDelete: {
-                                    deleteConfig(config)
-                                }
-                            )
-                        }
+                            ),
+                            diagnostics: diagnostics[config.id],
+                            canDelete: true,
+                            onDelete: {
+                                deleteConfig(config)
+                            }
+                        )
+                        .disabled(!preferences.isCLIEnabled(config.kind))
+                        .opacity(preferences.isCLIEnabled(config.kind) ? 1.0 : 0.6)
                     }
                 }
             }
+        }
         }
         .task {
             await refreshDiagnostics()
@@ -83,6 +87,7 @@ struct SessionsPathPane: View {
         .sheet(isPresented: $showingAddPath) {
             AddSessionPathSheet(
                 selectedKind: $selectedKind,
+                preferences: preferences,
                 onAdd: { kind, path in
                     addCustomPath(kind: kind, path: path)
                 }
@@ -169,6 +174,7 @@ struct SessionsPathPane: View {
 
 struct AddSessionPathSheet: View {
     @Binding var selectedKind: SessionSource.Kind
+    @ObservedObject var preferences: SessionPreferencesStore
     let onAdd: (SessionSource.Kind, String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var selectedPath: String = ""
@@ -218,7 +224,7 @@ struct AddSessionPathSheet: View {
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(selectedPath.isEmpty)
+                .disabled(selectedPath.isEmpty || !preferences.isCLIEnabled(selectedKind))
             }
         }
         .padding(20)
