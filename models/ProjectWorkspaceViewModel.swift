@@ -208,7 +208,10 @@ class ProjectWorkspaceViewModel: ObservableObject {
             let sessions = allSessions.filter { task.sessionIds.contains($0.id) }
             // Keep session ordering consistent with the main list
             // by reusing the current sort order.
-            let sorted = sessionListViewModel.sortOrder.sort(sessions)
+            let sorted = sessionListViewModel.sortOrder.sort(
+                sessions,
+                visibleKinds: sessionListViewModel.preferences.timelineVisibleKinds
+            )
             return TaskWithSessions(task: task, sessions: sorted)
         }
     }

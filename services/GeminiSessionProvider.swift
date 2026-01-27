@@ -311,6 +311,7 @@ actor GeminiSessionProvider {
       toolInvocationCount: summary.toolInvocationCount,
       responseCounts: summary.responseCounts,
       turnContextCount: summary.turnContextCount,
+      messageTypeCounts: summary.messageTypeCounts,
       totalTokens: summary.totalTokens,
       tokenBreakdown: summary.tokenBreakdown,
       eventCount: summary.eventCount,

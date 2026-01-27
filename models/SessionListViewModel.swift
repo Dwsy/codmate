@@ -753,6 +753,14 @@ final class SessionListViewModel: ObservableObject {
         }
       }
       .store(in: &cancellables)
+
+    preferences.$timelineVisibleKinds
+      .removeDuplicates()
+      .dropFirst()
+      .sink { [weak self] _ in
+        self?.scheduleFiltersUpdate()
+      }
+      .store(in: &cancellables)
     // Pre-seed usage snapshots based on current Active Provider selection to avoid initial flicker
     Task { [weak self] in
       guard let self else { return }
@@ -2525,6 +2533,7 @@ final class SessionListViewModel: ObservableObject {
       dateDimension: dateDimension,
       quickSearchNeedle: quickNeedle,
       sortOrder: sortOrder,
+      visibleKinds: preferences.timelineVisibleKinds,
       canonicalCache: canonicalCwdCache,
       dayIndex: dayIndexMap,
       dayCoverage: updatedMonthCoverage,
@@ -2603,9 +2612,17 @@ final class SessionListViewModel: ObservableObject {
       }
     }
 
-    filtered = snapshot.sortOrder.sort(filtered, dimension: snapshot.dateDimension)
+    filtered = snapshot.sortOrder.sort(
+      filtered,
+      dimension: snapshot.dateDimension,
+      visibleKinds: snapshot.visibleKinds
+    )
 
-    let sections = Self.groupSessions(filtered, dimension: snapshot.dateDimension)
+    let sections = Self.groupSessions(
+      filtered,
+      dimension: snapshot.dateDimension,
+      visibleKinds: snapshot.visibleKinds
+    )
 
     return FilterComputationResult(
       filteredSessions: filtered,
@@ -2676,6 +2693,7 @@ final class SessionListViewModel: ObservableObject {
     let dateDimension: DateDimension
     let quickSearchNeedle: String?
     let sortOrder: SessionSortOrder
+    let visibleKinds: Set<MessageVisibilityKind>
     let canonicalCache: [String: String]
     let dayIndex: [String: SessionDayIndex]
     let dayCoverage: [SessionMonthCoverageKey: Set<Int>]
@@ -2692,6 +2710,10 @@ final class SessionListViewModel: ObservableObject {
       hasher.combine(dateDimension.rawValue)
       hasher.combine(quickSearchNeedle ?? "")
       hasher.combine(sortOrder.rawValue)
+      hasher.combine(visibleKinds.count)
+      for value in visibleKinds.rawValues {
+        hasher.combine(value)
+      }
       hasher.combine(sessionsVersion)
       return hasher.finalize()
     }
@@ -2705,7 +2727,9 @@ final class SessionListViewModel: ObservableObject {
   }
 
   nonisolated private static func groupSessions(
-    _ sessions: [SessionSummary], dimension: DateDimension
+    _ sessions: [SessionSummary],
+    dimension: DateDimension,
+    visibleKinds: Set<MessageVisibilityKind>
   )
     -> [SessionDaySection]
   {
@@ -2735,7 +2759,7 @@ final class SessionListViewModel: ObservableObject {
       .sorted(by: { $0.key > $1.key })
       .map { day, sessions in
         let totalDuration = sessions.reduce(into: 0.0) { $0 += $1.duration }
-        let totalEvents = sessions.reduce(0) { $0 + $1.eventCount }
+        let totalEvents = sessions.reduce(0) { $0 + $1.visibleEventCount(using: visibleKinds) }
         let title: String
         if calendar.isDateInToday(day) {
           title = "Today"

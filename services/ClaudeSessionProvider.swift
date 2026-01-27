@@ -221,6 +221,7 @@ actor ClaudeSessionProvider {
             toolInvocationCount: parsed.summary.toolInvocationCount,
             responseCounts: parsed.summary.responseCounts,
             turnContextCount: parsed.summary.turnContextCount,
+            messageTypeCounts: parsed.summary.messageTypeCounts,
             totalTokens: parsed.summary.totalTokens,
             tokenBreakdown: parsed.summary.tokenBreakdown,
             eventCount: parsed.summary.eventCount,

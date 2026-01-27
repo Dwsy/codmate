@@ -180,6 +180,9 @@ extension MessageVisibilityKind {
         if matchesContains(["agent reasoning", "reasoning", "thinking", "thought"]) { return .reasoning }
         if matchesContains(["environment context"]) { return .environmentContext }
         if matchesExact(["context updated"]) || matchesContains(["turn context"]) { return .turnContext }
+        if matchesContains(["collaboration mode", "permissions instructions", "permissions instruction"]) {
+            return .infoOther
+        }
         if matchesExact(["info", "warning", "error", "info other", "info_other"])
             || matchesContains(["system message", "system summary"]) { return .infoOther }
 

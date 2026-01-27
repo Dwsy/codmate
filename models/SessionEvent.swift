@@ -297,6 +297,8 @@ struct SessionSummaryBuilder {
     private(set) var toolInvocationCount: Int = 0
     private(set) var responseCounts: [String: Int] = [:]
     private(set) var turnContextCount: Int = 0
+    private(set) var messageTypeCounts: [MessageVisibilityKind: Int] = [:]
+    private var seenToolCallIDs: Set<String> = []
     private(set) var totalTokens: Int = 0
     private(set) var tokenInput: Int = 0
     private(set) var tokenOutput: Int = 0
@@ -439,6 +441,15 @@ struct SessionSummaryBuilder {
         case .unknown:
             lineCount += 0
         }
+
+        if let classified = TimelineEventClassifier.classify(row: row) {
+            if classified.isToolLike, let callID = classified.callID, !callID.isEmpty {
+                if !seenToolCallIDs.insert(callID).inserted {
+                    return
+                }
+            }
+            messageTypeCounts[classified.kind, default: 0] += 1
+        }
     }
 
     @discardableResult
@@ -500,6 +511,7 @@ struct SessionSummaryBuilder {
             toolInvocationCount: toolInvocationCount,
             responseCounts: responseCounts,
             turnContextCount: turnContextCount,
+            messageTypeCounts: messageTypeCounts.isEmpty ? nil : messageTypeCounts.reduce(into: [:]) { $0[$1.key.rawValue] = $1.value },
             totalTokens: totalTokens,
             tokenBreakdown: currentTokenBreakdown(),
             eventCount: eventCount,

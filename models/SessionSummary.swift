@@ -31,6 +31,7 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
     var toolInvocationCount: Int
     let responseCounts: [String: Int]
     let turnContextCount: Int
+    var messageTypeCounts: [String: Int]? = nil
     let totalTokens: Int?
     var tokenBreakdown: SessionTokenBreakdown? = nil
     let eventCount: Int
@@ -69,6 +70,16 @@ struct SessionSummary: Identifiable, Hashable, Sendable, Codable {
 
     var actualTotalTokens: Int {
         return totalTokens ?? 0
+    }
+
+    func visibleEventCount(using visibleKinds: Set<MessageVisibilityKind>) -> Int {
+        guard let messageTypeCounts, !messageTypeCounts.isEmpty else { return eventCount }
+        let allowed = visibleKinds.rawValues
+        var total = 0
+        for (key, count) in messageTypeCounts where allowed.contains(key) {
+            total += count
+        }
+        return total
     }
 
     var displayName: String {
@@ -208,6 +219,7 @@ extension SessionSummary {
             toolInvocationCount: toolInvocationCount,
             responseCounts: responseCounts,
             turnContextCount: turnContextCount,
+            messageTypeCounts: messageTypeCounts,
             totalTokens: totalTokens,
             tokenBreakdown: tokenBreakdown,
             eventCount: eventCount,
@@ -242,6 +254,7 @@ extension SessionSummary {
             toolInvocationCount: toolInvocationCount,
             responseCounts: responseCounts,
             turnContextCount: turnContextCount,
+            messageTypeCounts: messageTypeCounts,
             totalTokens: totalTokens,
             tokenBreakdown: tokenBreakdown,
             eventCount: eventCount,
@@ -284,6 +297,7 @@ extension SessionSummary {
             toolInvocationCount: toolInvocations ?? toolInvocationCount,
             responseCounts: responseCounts,
             turnContextCount: turnContextCount,
+            messageTypeCounts: messageTypeCounts,
             totalTokens: totalTokens,
             tokenBreakdown: tokenBreakdown,
             eventCount: eventCount,
@@ -321,6 +335,7 @@ extension SessionSummary {
             toolInvocationCount: toolInvocationCount,
             responseCounts: responseCounts,
             turnContextCount: turnContextCount,
+            messageTypeCounts: messageTypeCounts,
             totalTokens: totalTokens,
             tokenBreakdown: tokenBreakdown ?? self.tokenBreakdown,
             eventCount: eventCount,
@@ -420,6 +435,51 @@ enum SessionSortOrder: String, CaseIterable, Identifiable, Sendable {
                 }
             }
             return sessions.sorted { key($0) > key($1) }
+        default:
+            return sort(sessions)
+        }
+    }
+
+    func sort(
+        _ sessions: [SessionSummary],
+        dimension: DateDimension,
+        visibleKinds: Set<MessageVisibilityKind>
+    ) -> [SessionSummary] {
+        switch self {
+        case .mostRecent:
+            return sort(sessions, dimension: dimension)
+        case .mostActivity:
+            return sessions.sorted {
+                let lCount = $0.visibleEventCount(using: visibleKinds)
+                let rCount = $1.visibleEventCount(using: visibleKinds)
+                if lCount != rCount { return lCount > rCount }
+                let l0 = $0.lastUpdatedAt ?? $0.startedAt
+                let l1 = $1.lastUpdatedAt ?? $1.startedAt
+                if l0 != l1 { return l0 > l1 }
+                return $0.effectiveTitle
+                    .localizedCaseInsensitiveCompare($1.effectiveTitle) == .orderedAscending
+            }
+        default:
+            return sort(sessions)
+        }
+    }
+
+    func sort(
+        _ sessions: [SessionSummary],
+        visibleKinds: Set<MessageVisibilityKind>
+    ) -> [SessionSummary] {
+        switch self {
+        case .mostActivity:
+            return sessions.sorted {
+                let lCount = $0.visibleEventCount(using: visibleKinds)
+                let rCount = $1.visibleEventCount(using: visibleKinds)
+                if lCount != rCount { return lCount > rCount }
+                let l0 = $0.lastUpdatedAt ?? $0.startedAt
+                let l1 = $1.lastUpdatedAt ?? $1.startedAt
+                if l0 != l1 { return l0 > l1 }
+                return $0.effectiveTitle
+                    .localizedCaseInsensitiveCompare($1.effectiveTitle) == .orderedAscending
+            }
         default:
             return sort(sessions)
         }

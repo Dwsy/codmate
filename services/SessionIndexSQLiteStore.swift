@@ -33,7 +33,7 @@ enum SessionIndexSQLiteStoreError: Error {
 
 /// SQLite 持久化缓存，负责 sessions 汇总数据的存储与读取。
   actor SessionIndexSQLiteStore {
-    static let schemaVersion = 2
+    static let schemaVersion = 3
     static let instructionsPreviewLimit = 128
 
     private let logger = Logger(subsystem: "io.umate.codmate", category: "SessionIndexSQLiteStore")
@@ -104,7 +104,7 @@ enum SessionIndexSQLiteStoreError: Error {
     guard let modificationDate else { return nil }
     try openIfNeeded()
     let sql =
-      "SELECT payload, file_size FROM sessions WHERE file_path = ?1 AND file_mtime = ?2 LIMIT 1"
+      "SELECT payload, file_size, schema_version FROM sessions WHERE file_path = ?1 AND file_mtime = ?2 LIMIT 1"
     var stmt: OpaquePointer?
     guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
       throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
@@ -116,6 +116,11 @@ enum SessionIndexSQLiteStoreError: Error {
 
     if sqlite3_step(stmt) == SQLITE_ROW {
       let storedSize = columnInt64(stmt, index: 1).flatMap { UInt64($0) }
+      let schemaVersion = Int(sqlite3_column_int(stmt, 2))
+      guard schemaVersion == Self.schemaVersion else {
+        logger.info("cache miss (schema mismatch) for path=\(path, privacy: .public)")
+        return nil
+      }
       if let fileSize, let storedSize, fileSize != storedSize {
         logger.info("cache miss (size mismatch) for path=\(path, privacy: .public)")
         return nil
@@ -157,6 +162,7 @@ enum SessionIndexSQLiteStoreError: Error {
       let fileSize = columnInt64(stmt, index: 3).flatMap { UInt64($0) }
       let project = columnText(stmt, index: 4)
       let schemaVersion = Int(sqlite3_column_int(stmt, 5))
+      guard schemaVersion == Self.schemaVersion else { return nil }
       let parseError = columnText(stmt, index: 6)
       let tokenBreakdown = tokenBreakdownFromColumns(stmt, startIndex: 7)
       summary = summary.withTokenBreakdownFallback(tokenBreakdown)

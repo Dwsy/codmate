@@ -105,7 +105,7 @@ struct SessionTimelineLoader {
                 return nil
             }
 
-            let message = cleanedText(payload.message ?? payload.text ?? payload.reason ?? "")
+            let message = cleanedAssistantText(payload.message ?? payload.text ?? payload.reason ?? "")
             let attachments = attachments(from: payload)
             guard !message.isEmpty || !attachments.isEmpty else { return nil }
             let displayMessage = message.isEmpty ? "[Image]" : message
@@ -173,7 +173,7 @@ struct SessionTimelineLoader {
             }
 
             if type == "message" {
-                let text = cleanedText(joinedText(from: payload.content ?? []))
+                let text = cleanedAssistantText(joinedText(from: payload.content ?? []))
                 guard !text.isEmpty else { return nil }
                 if payload.role?.lowercased() == "user" {
                     if let environment = makeEnvironmentContextEvent(text: text, timestamp: row.timestamp) {
@@ -376,6 +376,44 @@ struct SessionTimelineLoader {
             .replacingOccurrences(of: "<user_instructions>", with: "")
             .replacingOccurrences(of: "</user_instructions>", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func cleanedAssistantText(_ text: String) -> String {
+        let base = cleanedText(text)
+        return stripTaggedBlocks(
+            base,
+            tags: [
+                "permissions_instructions",
+                "permissions instructions",
+                "collaboration_mode",
+                "collaboration mode"
+            ]
+        )
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func stripTaggedBlocks(_ text: String, tags: [String]) -> String {
+        var result = text
+        for tag in tags {
+            result = stripTaggedBlock(result, tag: tag)
+        }
+        return result
+    }
+
+    private func stripTaggedBlock(_ text: String, tag: String) -> String {
+        let lowerTag = tag.lowercased()
+        let openToken = "<\(lowerTag)>"
+        let closeToken = "</\(lowerTag)>"
+        var output = text
+        while let openRange = output.lowercased().range(of: openToken) {
+            if let closeRange = output.lowercased().range(of: closeToken, range: openRange.upperBound..<output.endIndex) {
+                output.removeSubrange(openRange.lowerBound..<closeRange.upperBound)
+            } else {
+                output.removeSubrange(openRange.lowerBound..<output.endIndex)
+                break
+            }
+        }
+        return output
     }
 
     private func joinedText(from blocks: [ResponseContentBlock]) -> String {

@@ -1174,6 +1174,7 @@ actor SessionIndexer {
       toolInvocationCount: base.toolInvocationCount,
       responseCounts: base.responseCounts,
       turnContextCount: base.turnContextCount,
+      messageTypeCounts: base.messageTypeCounts,
       totalTokens: base.totalTokens,
       tokenBreakdown: base.tokenBreakdown,
       eventCount: base.eventCount,

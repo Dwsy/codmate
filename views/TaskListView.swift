@@ -308,10 +308,13 @@ struct TaskListView: View {
         }
 
       case .mostActivity:
-        // Aggregate total event count
+        // Aggregate total visible event count
+        let visibleKinds = viewModel.preferences.timelineVisibleKinds
         return tasksInSection.sorted { lhs, rhs in
-          let lEvents = (taskSectionSessions[lhs.task.id] ?? []).reduce(0) { $0 + $1.eventCount }
-          let rEvents = (taskSectionSessions[rhs.task.id] ?? []).reduce(0) { $0 + $1.eventCount }
+          let lEvents = (taskSectionSessions[lhs.task.id] ?? [])
+            .reduce(0) { $0 + $1.visibleEventCount(using: visibleKinds) }
+          let rEvents = (taskSectionSessions[rhs.task.id] ?? [])
+            .reduce(0) { $0 + $1.visibleEventCount(using: visibleKinds) }
           if lEvents != rEvents { return lEvents > rEvents }
           let lDate =
             (taskSectionSessions[lhs.task.id] ?? []).map { $0.lastUpdatedAt ?? $0.startedAt }.max()
