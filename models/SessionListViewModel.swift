@@ -3842,7 +3842,7 @@ extension SessionListViewModel {
     if !isCLIEnabled(for: provider) { return }
     switch provider {
     case .codex:
-      refreshCodexUsageStatus()
+      refreshCodexUsageStatus(silent: true)
     case .claude:
       claudeUsageAutoRefreshEnabled = true
       refreshClaudeUsageStatus(silent: true)
@@ -3973,13 +3973,6 @@ extension SessionListViewModel {
           self.setUsageSnapshot(.codex, Self.thirdPartyUsageSnapshot(for: .codex))
         }
         return
-      }
-
-      // Set placeholder immediately for better UX (like Gemini)
-      if !silent {
-        await MainActor.run {
-          self.setCodexUsagePlaceholder("Refreshing …", action: nil, availability: .comingSoon)
-        }
       }
 
       // Fetch plan type from OAuth API (more reliable than RPC)
@@ -4202,11 +4195,6 @@ extension SessionListViewModel {
         }
         return
       }
-      if !silent {
-        await MainActor.run {
-          self.setClaudeUsagePlaceholder("Refreshing …", action: nil, availability: .comingSoon)
-        }
-      }
       let client = self.claudeUsageClient
       do {
         let status = try await client.fetchUsageStatus()
@@ -4258,12 +4246,6 @@ extension SessionListViewModel {
         }
         return
       }
-      if !silent {
-        await MainActor.run {
-          self.setGeminiUsagePlaceholder("Refreshing …", action: nil, availability: .comingSoon)
-        }
-      }
-
       do {
         let status = try await self.geminiUsageClient.fetchUsageStatus()
         guard !Task.isCancelled else { return }
