@@ -29,6 +29,7 @@ final class GitChangesViewModel: ObservableObject {
     private var treeBuildTask: Task<Void, Never>? = nil
     private var diffTask: Task<Void, Never>? = nil
     private var treeSnapshotGeneration: UInt64 = 0
+    private var lastRefreshToken: Int? = nil
     private var explorerFallbackRoot: URL? = nil
 
     func attach(to directory: URL, fallbackProjectDirectory: URL? = nil) {
@@ -210,6 +211,12 @@ final class GitChangesViewModel: ObservableObject {
             diffText = ""
         }
         await refreshDetail()
+    }
+
+    func refreshStatusIfNeeded(refreshToken: Int) async {
+        if lastRefreshToken == refreshToken { return }
+        lastRefreshToken = refreshToken
+        await refreshStatus()
     }
 
     func refreshDetail() async {

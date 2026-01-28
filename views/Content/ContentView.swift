@@ -68,6 +68,9 @@ struct ContentView: View {
   @State var popoverDismissDisabled = false
   @State var lastWorkspaceMode: ProjectWorkspaceMode? = nil
   @StateObject var overviewViewModel: AllOverviewViewModel
+  @State var reviewRefreshToken: Int = 0
+  @State var agentsRefreshToken: Int = 0
+  @State var projectOverviewRefreshToken: Int = 0
   @State var sidebarWidth: CGFloat = 0
   // Preference key to read sidebar width
   struct SidebarWidthPreferenceKey: PreferenceKey {

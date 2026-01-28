@@ -68,11 +68,26 @@ struct CodMateApp: App {
       // Integrate actions into the system View menu
       CommandGroup(after: .sidebar) {
         Button(action: {
-          NotificationCenter.default.post(name: .codMateGlobalRefresh, object: nil)
+          NotificationCenter.default.post(
+            name: .codMateRefreshRequested,
+            object: nil,
+            userInfo: RefreshRequest.userInfo(for: .context)
+          )
         }) {
           Label("Refresh", systemImage: "arrow.clockwise")
         }
         .keyboardShortcut("r", modifiers: [.command])
+
+        Button(action: {
+          NotificationCenter.default.post(
+            name: .codMateRefreshRequested,
+            object: nil,
+            userInfo: RefreshRequest.userInfo(for: .global)
+          )
+        }) {
+          Label("Full Refresh", systemImage: "arrow.triangle.2.circlepath")
+        }
+        .keyboardShortcut("r", modifiers: [.command, .option])
 
         Button(action: {
           NotificationCenter.default.post(name: .codMateToggleSidebar, object: nil)

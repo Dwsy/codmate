@@ -13,6 +13,7 @@ struct GitChangesPanel: View {
   var regionLayout: RegionLayout = .combined
   let preferences: SessionPreferencesStore
   var onRequestAuthorization: (() -> Void)? = nil
+  var refreshToken: Int = 0
   @Binding var savedState: ReviewPanelState
   @ObservedObject var vm: GitChangesViewModel
   // Layout state
@@ -172,6 +173,17 @@ struct GitChangesPanel: View {
           reloadBrowserTreeIfNeeded()
           if let selectedPath = vm.selectedPath { ensureBrowserPathExpanded(selectedPath) }
         }
+      }
+    })
+    view = AnyView(view.onChange(of: refreshToken) { _ in
+      switch mode {
+      case .diff:
+        Task { await vm.refreshStatusIfNeeded(refreshToken: refreshToken) }
+      case .browser:
+        Task { await vm.refreshStatusIfNeeded(refreshToken: refreshToken) }
+        reloadBrowserTreeIfNeeded(force: true)
+      case .graph:
+        graphVM.triggerRefresh()
       }
     })
     view = AnyView(

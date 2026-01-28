@@ -4,6 +4,7 @@ struct ProjectSpecificOverviewContainerView: View {
     @ObservedObject var sessionListViewModel: SessionListViewModel
     var project: Project
     var preferences: SessionPreferencesStore
+    var refreshToken: Int = 0
     var onSelectSession: (SessionSummary) -> Void
     var onResumeSession: (SessionSummary) -> Void
     var onFocusToday: () -> Void
@@ -15,6 +16,7 @@ struct ProjectSpecificOverviewContainerView: View {
       sessionListViewModel: SessionListViewModel,
       project: Project,
       preferences: SessionPreferencesStore,
+      refreshToken: Int = 0,
       onSelectSession: @escaping (SessionSummary) -> Void,
       onResumeSession: @escaping (SessionSummary) -> Void,
       onFocusToday: @escaping () -> Void,
@@ -23,6 +25,7 @@ struct ProjectSpecificOverviewContainerView: View {
         self.sessionListViewModel = sessionListViewModel
         self.project = project
         self.preferences = preferences
+        self.refreshToken = refreshToken
         self.onSelectSession = onSelectSession
         self.onResumeSession = onResumeSession
         self.onFocusToday = onFocusToday
@@ -46,6 +49,9 @@ struct ProjectSpecificOverviewContainerView: View {
         // Update the project in the ViewModel if it changes from outside
         .onChange(of: project) { newProject in
             projectOverviewViewModel.updateProject(newProject)
+        }
+        .onChange(of: refreshToken) { _ in
+            projectOverviewViewModel.forceRefresh()
         }
     }
 }

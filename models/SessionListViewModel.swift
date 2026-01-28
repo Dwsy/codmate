@@ -3848,6 +3848,58 @@ extension SessionListViewModel {
     await MainActor.run { self.globalSessionCount = total }
   }
 
+  /// Refresh sidebar stats (calendar, path tree, and global count) without forcing session reload.
+  func refreshSidebarStats() async {
+    invalidateCalendarCaches()
+    ensureCalendarCounts(for: sidebarMonthStart, dimension: dateDimension)
+    await refreshPathTreeFromDisk()
+    await refreshGlobalCount()
+  }
+
+  /// Rebuild the path tree from on-disk counts for accurate sidebar navigation.
+  func refreshPathTreeFromDisk() async {
+    let enabledRemoteHostsForCounts = preferences.enabledRemoteHosts
+    let sessionsRootForCounts = preferences.sessionsRoot
+    var counts: [String: Int] = [:]
+
+    if preferences.isCLIEnabled(.codex) {
+      counts = await indexer.collectCWDCounts(root: sessionsRootForCounts)
+    }
+    if preferences.isCLIEnabled(.claude) {
+      let claudeCounts = await claudeProvider.collectCWDCounts()
+      for (key, value) in claudeCounts {
+        counts[key, default: 0] += value
+      }
+    }
+    if preferences.isCLIEnabled(.gemini) {
+      let geminiCounts = await geminiProvider.collectCWDCounts()
+      for (key, value) in geminiCounts {
+        counts[key, default: 0] += value
+      }
+    }
+    if !enabledRemoteHostsForCounts.isEmpty {
+      let remoteCodex = await remoteProvider.collectCWDAggregates(
+        kind: .codex,
+        enabledHosts: enabledRemoteHostsForCounts
+      )
+      for (key, value) in remoteCodex {
+        counts[key, default: 0] += value
+      }
+      let remoteClaude = await remoteProvider.collectCWDAggregates(
+        kind: .claude,
+        enabledHosts: enabledRemoteHostsForCounts
+      )
+      if preferences.isCLIEnabled(.claude) {
+        for (key, value) in remoteClaude {
+          counts[key, default: 0] += value
+        }
+      }
+    }
+
+    let tree = counts.buildPathTreeFromCounts()
+    pathTreeRootPublished = tree
+  }
+
   /// User-driven refresh for usage status (status capsule tap / Command+R fallback).
   func requestUsageStatusRefresh(for provider: UsageProviderKind) {
     if !isCLIEnabled(for: provider) { return }

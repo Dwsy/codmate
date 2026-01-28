@@ -111,4 +111,5 @@ extension Notification.Name {
   static let codMateOpenSettings = Notification.Name("CodMate.OpenSettings")
   static let codMateFocusSessionSummary = Notification.Name("CodMate.FocusSessionSummary")
   static let codMateOpenNewProject = Notification.Name("CodMate.OpenNewProject")
+  static let codMateRefreshRequested = Notification.Name("CodMate.RefreshRequested")
 }

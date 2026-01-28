@@ -79,13 +79,15 @@ extension ContentView {
       key: .init(
         workingDirectoryPath: ws,
         projectDirectoryPath: ws,
-        state: stateBinding.wrappedValue
+        state: stateBinding.wrappedValue,
+        refreshToken: reviewRefreshToken
       ),
       workingDirectory: URL(fileURLWithPath: ws, isDirectory: true),
       projectDirectory: URL(fileURLWithPath: ws, isDirectory: true),
       presentation: .full,
       preferences: viewModel.preferences,
       onRequestAuthorization: { ensureRepoAccessForProjectReview(directory: ws) },
+      refreshToken: reviewRefreshToken,
       savedState: stateBinding
     )
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -104,7 +106,8 @@ extension ContentView {
       key: .init(
         workingDirectoryPath: ws,
         projectDirectoryPath: ws,
-        state: stateBinding.wrappedValue
+        state: stateBinding.wrappedValue,
+        refreshToken: reviewRefreshToken
       ),
       workingDirectory: URL(fileURLWithPath: ws, isDirectory: true),
       projectDirectory: URL(fileURLWithPath: ws, isDirectory: true),
@@ -113,6 +116,7 @@ extension ContentView {
       preferences: viewModel.preferences,
       onRequestAuthorization: { ensureRepoAccessForProjectReview(directory: ws) },
       externalVM: vm,
+      refreshToken: reviewRefreshToken,
       savedState: stateBinding
     )
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -138,6 +142,7 @@ extension ContentView {
           sessionListViewModel: viewModel,
           project: project,
           preferences: viewModel.preferences,
+          refreshToken: projectOverviewRefreshToken,
           onSelectSession: { focusSessionFromOverview($0) },
           onResumeSession: { resumeFromList($0) },
           onFocusToday: { focusTodayFromOverview() },
@@ -153,7 +158,11 @@ extension ContentView {
   @ViewBuilder
   func projectAgentsContent() -> some View {
     if let project = currentSelectedProject(), let directory = project.directory {
-      ProjectAgentsView(projectDirectory: directory, preferences: viewModel.preferences)
+      ProjectAgentsView(
+        projectDirectory: directory,
+        preferences: viewModel.preferences,
+        refreshToken: agentsRefreshToken
+      )
     } else {
       placeholderSurface(title: "No Project Selected", systemImage: "folder.badge.questionmark")
     }

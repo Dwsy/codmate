@@ -3,6 +3,7 @@ import SwiftUI
 struct ProjectAgentsView: View {
     let projectDirectory: String
     let preferences: SessionPreferencesStore
+    var refreshToken: Int = 0
 
     @State private var markdownContent: String = ""
     @State private var isLoading: Bool = true
@@ -74,6 +75,9 @@ struct ProjectAgentsView: View {
             loadAgentsFile()
         }
         .onChange(of: projectDirectory) { _ in
+            loadAgentsFile()
+        }
+        .onChange(of: refreshToken) { _ in
             loadAgentsFile()
         }
     }

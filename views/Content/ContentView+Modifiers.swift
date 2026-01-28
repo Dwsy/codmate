@@ -354,16 +354,13 @@ extension ContentView {
       .onReceive(NotificationCenter.default.publisher(for: .codMateFocusGlobalSearch)) { _ in
         focusGlobalSearchPanel()
       }
+      .onReceive(NotificationCenter.default.publisher(for: .codMateRefreshRequested)) { note in
+        let kind = RefreshRequest.kind(from: note.userInfo)
+        handleRefreshRequest(kind)
+      }
       .onReceive(NotificationCenter.default.publisher(for: .codMateGlobalRefresh)) { _ in
-        // Always refresh sessions to keep global stats in sync
-        Task { await viewModel.refreshSessions(force: true) }
-        // If in Review mode with a concrete project selected, refresh git status as well
-        if viewModel.projectWorkspaceMode == .review,
-           let project = currentSelectedProject(),
-           let dir = project.directory, !dir.isEmpty {
-          let vm = projectReviewVM(for: project.id)
-          Task { await vm.refreshStatus() }
-        }
+        // Legacy hook: treat as full refresh.
+        handleRefreshRequest(.global)
       }
       .onAppear {
         // Mark ContentView as ready first, so any queued requests can be processed
@@ -401,6 +398,33 @@ extension ContentView {
       profileId: nil,
       parentId: nil
     )
+  }
+
+  private func handleRefreshRequest(_ kind: RefreshRequestKind) {
+    Task { await viewModel.refreshSidebarStats() }
+
+    let mode = viewModel.projectWorkspaceMode
+    let shouldRefreshSessions = kind == .global || mode == .tasks || mode == .sessions
+    if shouldRefreshSessions {
+      Task { await viewModel.refreshSessions(force: true) }
+    }
+
+    switch mode {
+    case .tasks, .sessions:
+      break
+    case .review:
+      reviewRefreshToken &+= 1
+    case .overview, .settings:
+      if currentSelectedProject() == nil {
+        overviewViewModel.forceRefresh()
+      } else {
+        projectOverviewRefreshToken &+= 1
+      }
+    case .agents:
+      agentsRefreshToken &+= 1
+    case .memory:
+      break
+    }
   }
 
   func applyDialogsAndAlerts<V: View>(to view: V) -> some View {

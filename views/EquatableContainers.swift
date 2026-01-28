@@ -6,6 +6,7 @@ struct EquatableGitChangesContainer: View, Equatable {
     var workingDirectoryPath: String
     var projectDirectoryPath: String?
     var state: ReviewPanelState
+    var refreshToken: Int
   }
 
   static func == (lhs: EquatableGitChangesContainer, rhs: EquatableGitChangesContainer) -> Bool {
@@ -22,6 +23,7 @@ struct EquatableGitChangesContainer: View, Equatable {
   var onRequestAuthorization: (() -> Void)? = nil
   // Optional external shared VM; when nil, this container owns an internal VM
   var externalVM: GitChangesViewModel? = nil
+  var refreshToken: Int = 0
   @Binding var savedState: ReviewPanelState
 
   @StateObject private var internalVM = GitChangesViewModel()
@@ -35,6 +37,7 @@ struct EquatableGitChangesContainer: View, Equatable {
       regionLayout: regionLayout,
       preferences: preferences,
       onRequestAuthorization: onRequestAuthorization,
+      refreshToken: refreshToken,
       savedState: $savedState,
       vm: vm
     )

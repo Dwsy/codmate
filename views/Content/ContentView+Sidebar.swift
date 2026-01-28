@@ -159,7 +159,8 @@ extension ContentView {
           key: .init(
             workingDirectoryPath: ws,
             projectDirectoryPath: ws,
-            state: stateBinding.wrappedValue
+            state: stateBinding.wrappedValue,
+            refreshToken: reviewRefreshToken
           ),
           workingDirectory: URL(fileURLWithPath: ws, isDirectory: true),
           projectDirectory: URL(fileURLWithPath: ws, isDirectory: true),
@@ -168,6 +169,7 @@ extension ContentView {
           preferences: viewModel.preferences,
           onRequestAuthorization: { ensureRepoAccessForProjectReview(directory: ws) },
           externalVM: vm,
+          refreshToken: reviewRefreshToken,
           savedState: stateBinding
         )
       } else {
@@ -316,7 +318,11 @@ extension ContentView {
         showProgress: viewModel.isEnriching || viewModel.isLoading,
         help: "Refresh"
       ) {
-        NotificationCenter.default.post(name: .codMateGlobalRefresh, object: nil)
+        NotificationCenter.default.post(
+          name: .codMateRefreshRequested,
+          object: nil,
+          userInfo: RefreshRequest.userInfo(for: .context)
+        )
       }
       .disabled(viewModel.isEnriching || viewModel.isLoading)
     }
