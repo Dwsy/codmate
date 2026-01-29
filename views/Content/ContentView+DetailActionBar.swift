@@ -75,6 +75,8 @@ extension ContentView {
                 case .claudeRemote(let host): return "claude-\(host)"
                 case .geminiLocal: return "gemini-local"
                 case .geminiRemote(let host): return "gemini-\(host)"
+                case .piLocal: return "pi-local"
+                case .piRemote(let host): return "pi-\(host)"
                 }
               }
 
@@ -105,6 +107,7 @@ extension ContentView {
                 case .codex: return .codexRemote(host: host)
                 case .claude: return .claudeRemote(host: host)
                 case .gemini: return .geminiRemote(host: host)
+                case .pi: return .piRemote(host: host)
                 }
               }
 
@@ -113,6 +116,7 @@ extension ContentView {
                 case .codex: return "ChatGPTIcon"
                 case .claude: return "ClaudeIcon"
                 case .gemini: return "GeminiIcon"
+                case .pi: return "PiIcon"
                 }
               }
 
@@ -121,6 +125,7 @@ extension ContentView {
                 case .codex: return "ChatGPTIcon"
                 case .claude: return "ClaudeIcon"
                 case .gemini: return "GeminiIcon"
+                case .pi: return "PiIcon"
                 }
               }
 
@@ -190,6 +195,8 @@ extension ContentView {
                 case .claudeRemote(let host): return "claude-\(host)"
                 case .geminiLocal: return "gemini-local"
                 case .geminiRemote(let host): return "gemini-\(host)"
+                case .piLocal: return "pi-local"
+                case .piRemote(let host): return "pi-\(host)"
                 }
               }
 

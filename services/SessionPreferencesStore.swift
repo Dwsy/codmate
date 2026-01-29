@@ -32,6 +32,10 @@ final class SessionPreferencesStore: ObservableObject {
     didSet { persistCLIPaths() }
   }
 
+  @Published var piCommandPath: String {
+    didSet { persistCLIPaths() }
+  }
+
   @Published var cliCodexEnabled: Bool {
     didSet { persistCLIEnablement() }
   }
@@ -41,6 +45,10 @@ final class SessionPreferencesStore: ObservableObject {
   }
 
   @Published var cliGeminiEnabled: Bool {
+    didSet { persistCLIEnablement() }
+  }
+
+  @Published var cliPiEnabled: Bool {
     didSet { persistCLIEnablement() }
   }
 
@@ -57,9 +65,11 @@ final class SessionPreferencesStore: ObservableObject {
     static let codexCommandPath = "codmate.command.codex"
     static let claudeCommandPath = "codmate.command.claude"
     static let geminiCommandPath = "codmate.command.gemini"
+    static let piCommandPath = "codmate.command.pi"
     static let cliCodexEnabled = "codmate.cli.codex.enabled"
     static let cliClaudeEnabled = "codmate.cli.claude.enabled"
     static let cliGeminiEnabled = "codmate.cli.gemini.enabled"
+    static let cliPiEnabled = "codmate.cli.pi.enabled"
     static let resumeUseEmbedded = "codex.resume.useEmbedded"
     static let resumeCopyClipboard = "codex.resume.copyClipboard"
     static let resumeExternalApp = "codex.resume.externalApp"
@@ -182,11 +192,13 @@ final class SessionPreferencesStore: ObservableObject {
     let storedCodexCommandPath = defaults.string(forKey: Keys.codexCommandPath) ?? ""
     let storedClaudeCommandPath = defaults.string(forKey: Keys.claudeCommandPath) ?? ""
     let storedGeminiCommandPath = defaults.string(forKey: Keys.geminiCommandPath) ?? ""
+    let storedPiCommandPath = defaults.string(forKey: Keys.piCommandPath) ?? ""
 
     var storedCodexEnabled = defaults.object(forKey: Keys.cliCodexEnabled) as? Bool ?? true
     let storedClaudeEnabled = defaults.object(forKey: Keys.cliClaudeEnabled) as? Bool ?? true
     let storedGeminiEnabled = defaults.object(forKey: Keys.cliGeminiEnabled) as? Bool ?? true
-    if !storedCodexEnabled && !storedClaudeEnabled && !storedGeminiEnabled {
+    let storedPiEnabled = defaults.object(forKey: Keys.cliPiEnabled) as? Bool ?? true
+    if !storedCodexEnabled && !storedClaudeEnabled && !storedGeminiEnabled && !storedPiEnabled {
       storedCodexEnabled = true
       defaults.set(true, forKey: Keys.cliCodexEnabled)
     }
@@ -198,9 +210,11 @@ final class SessionPreferencesStore: ObservableObject {
     self.codexCommandPath = storedCodexCommandPath
     self.claudeCommandPath = storedClaudeCommandPath
     self.geminiCommandPath = storedGeminiCommandPath
+    self.piCommandPath = storedPiCommandPath
     self.cliCodexEnabled = storedCodexEnabled
     self.cliClaudeEnabled = storedClaudeEnabled
     self.cliGeminiEnabled = storedGeminiEnabled
+    self.cliPiEnabled = storedPiEnabled
     
     // Load session path configs (with migration)
     let loadedConfigs = Self.loadSessionPathConfigs(
@@ -209,6 +223,13 @@ final class SessionPreferencesStore: ObservableObject {
       homeURL: homeURL,
       currentSessionsRoot: resolvedSessionsRoot
     )
+
+    // Persist default configs if they were just generated (first run)
+    if defaults.data(forKey: Keys.sessionPathConfigs) == nil {
+      let data = try? JSONEncoder().encode(loadedConfigs)
+      defaults.set(data, forKey: Keys.sessionPathConfigs)
+    }
+
     self.sessionPathConfigs = loadedConfigs
     
     // Resume defaults (defer assigning to self until value is finalized)
@@ -471,6 +492,7 @@ final class SessionPreferencesStore: ObservableObject {
     defaults.set(cliCodexEnabled, forKey: Keys.cliCodexEnabled)
     defaults.set(cliClaudeEnabled, forKey: Keys.cliClaudeEnabled)
     defaults.set(cliGeminiEnabled, forKey: Keys.cliGeminiEnabled)
+    defaults.set(cliPiEnabled, forKey: Keys.cliPiEnabled)
   }
 
   private static func decodeJSON<T: Decodable>(_ type: T.Type, defaults: UserDefaults, key: String) -> T? {
@@ -487,6 +509,7 @@ final class SessionPreferencesStore: ObservableObject {
     setOptionalPath(codexCommandPath, key: Keys.codexCommandPath)
     setOptionalPath(claudeCommandPath, key: Keys.claudeCommandPath)
     setOptionalPath(geminiCommandPath, key: Keys.geminiCommandPath)
+    setOptionalPath(piCommandPath, key: Keys.piCommandPath)
   }
 
   private func setOptionalPath(_ value: String, key: String) {
@@ -553,6 +576,7 @@ final class SessionPreferencesStore: ObservableObject {
     case .codex: raw = codexCommandPath
     case .claude: raw = claudeCommandPath
     case .gemini: raw = geminiCommandPath
+    case .pi: raw = piCommandPath
     }
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return nil }
@@ -978,6 +1002,11 @@ final class SessionPreferencesStore: ObservableObject {
       .appendingPathComponent(".gemini", isDirectory: true)
       .appendingPathComponent("tmp", isDirectory: true)
       .path
+    let piPath = homeURL
+      .appendingPathComponent(".pi", isDirectory: true)
+      .appendingPathComponent("agent", isDirectory: true)
+      .appendingPathComponent("sessions", isDirectory: true)
+      .path
     
     return [
       SessionPathConfig(
@@ -997,6 +1026,12 @@ final class SessionPreferencesStore: ObservableObject {
         path: geminiPath,
         enabled: true,
         displayName: "Gemini"
+      ),
+      SessionPathConfig(
+        kind: .pi,
+        path: piPath,
+        enabled: true,
+        displayName: "Pi"
       )
     ]
   }
@@ -1026,6 +1061,11 @@ final class SessionPreferencesStore: ObservableObject {
       return home
         .appendingPathComponent(".gemini", isDirectory: true)
         .appendingPathComponent("tmp", isDirectory: true)
+    case .pi:
+      return home
+        .appendingPathComponent(".pi", isDirectory: true)
+        .appendingPathComponent("agent", isDirectory: true)
+        .appendingPathComponent("sessions", isDirectory: true)
     }
   }
   
@@ -1053,6 +1093,7 @@ final class SessionPreferencesStore: ObservableObject {
     case .codex: return cliCodexEnabled
     case .claude: return cliClaudeEnabled
     case .gemini: return cliGeminiEnabled
+    case .pi: return cliPiEnabled
     }
   }
 
@@ -1062,10 +1103,11 @@ final class SessionPreferencesStore: ObservableObject {
       case .codex: cliCodexEnabled = true
       case .claude: cliClaudeEnabled = true
       case .gemini: cliGeminiEnabled = true
+      case .pi: cliPiEnabled = true
       }
       return true
     }
-    let enabledCount = [cliCodexEnabled, cliClaudeEnabled, cliGeminiEnabled].filter { $0 }.count
+    let enabledCount = [cliCodexEnabled, cliClaudeEnabled, cliGeminiEnabled, cliPiEnabled].filter { $0 }.count
     if enabledCount <= 1 {
       return false
     }
@@ -1073,6 +1115,7 @@ final class SessionPreferencesStore: ObservableObject {
     case .codex: cliCodexEnabled = false
     case .claude: cliClaudeEnabled = false
     case .gemini: cliGeminiEnabled = false
+    case .pi: cliPiEnabled = false
     }
     return true
   }
@@ -1081,13 +1124,15 @@ final class SessionPreferencesStore: ObservableObject {
     let codex = defaults.object(forKey: Keys.cliCodexEnabled) as? Bool ?? true
     let claude = defaults.object(forKey: Keys.cliClaudeEnabled) as? Bool ?? true
     let gemini = defaults.object(forKey: Keys.cliGeminiEnabled) as? Bool ?? true
-    if !codex && !claude && !gemini {
+    let pi = defaults.object(forKey: Keys.cliPiEnabled) as? Bool ?? true
+    if !codex && !claude && !gemini && !pi {
       return kind == .codex
     }
     switch kind {
     case .codex: return codex
     case .claude: return claude
     case .gemini: return gemini
+    case .pi: return pi
     }
   }
 }

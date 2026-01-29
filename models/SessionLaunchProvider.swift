@@ -15,12 +15,16 @@ extension SessionSource {
             return "claude-local"
         case .geminiLocal:
             return "gemini-local"
+        case .piLocal:
+            return "pi-local"
         case .codexRemote(let host):
             return "codex-remote-\(host)"
         case .claudeRemote(let host):
             return "claude-remote-\(host)"
         case .geminiRemote(let host):
             return "gemini-remote-\(host)"
+        case .piRemote(let host):
+            return "pi-remote-\(host)"
         }
     }
 }

@@ -38,6 +38,7 @@ struct ProviderIconView: View {
     case .codex: return "ChatGPTIcon"
     case .claude: return "ClaudeIcon"
     case .gemini: return "GeminiIcon"
+    case .pi: return "PiIcon"
     }
   }
 
@@ -46,6 +47,7 @@ struct ProviderIconView: View {
     case .codex: return Color.accentColor
     case .claude: return Color(nsColor: .systemPurple)
     case .gemini: return Color(nsColor: .systemTeal)
+    case .pi: return Color.orange
     }
   }
 }

@@ -319,6 +319,7 @@ final class SessionListViewModel: ObservableObject {
   var tasksStore: TasksStore
   let claudeProvider: ClaudeSessionProvider
   let geminiProvider: GeminiSessionProvider
+  let piProvider: PiSessionProvider
   private let claudeUsageClient = ClaudeUsageAPIClient()
   private let geminiUsageClient = GeminiUsageAPIClient()
   private let codexAppServerProbe = CodexAppServerProbeService()
@@ -565,6 +566,7 @@ final class SessionListViewModel: ObservableObject {
     self.claudeProvider = ClaudeSessionProvider(cacheStore: sqliteStore)
     self.geminiProvider = GeminiSessionProvider(
       projectsStore: self.projectsStore, cacheStore: sqliteStore)
+    self.piProvider = PiSessionProvider(cacheStore: sqliteStore)
     self.remoteProvider = RemoteSessionProvider(indexer: SessionIndexer(sqliteStore: sqliteStore))
 
     suppressFilterNotifications = true
@@ -767,6 +769,7 @@ final class SessionListViewModel: ObservableObject {
       let codexOrigin = await self.providerOrigin(for: .codex)
       let claudeOrigin = await self.providerOrigin(for: .claude)
       let geminiOrigin = await self.providerOrigin(for: .gemini)
+      let piOrigin = await self.providerOrigin(for: .pi)
       await MainActor.run {
         if self.preferences.isCLIEnabled(.codex) {
           if codexOrigin == .thirdParty {
@@ -791,12 +794,20 @@ final class SessionListViewModel: ObservableObject {
             self.refreshGeminiUsageStatus(silent: false)
           }
         }
+        if self.preferences.isCLIEnabled(.pi) {
+          if piOrigin == .thirdParty {
+            self.setUsageSnapshot(.pi, Self.thirdPartyUsageSnapshot(for: .pi))
+          } else {
+            self.refreshPiUsageStatus()
+          }
+        }
       }
       await MainActor.run {
         self.autoRefreshUsageIfNeeded(
           codexOrigin: codexOrigin,
           claudeOrigin: claudeOrigin,
-          geminiOrigin: geminiOrigin
+          geminiOrigin: geminiOrigin,
+          piOrigin: piOrigin
         )
       }
     }
@@ -1520,9 +1531,12 @@ final class SessionListViewModel: ObservableObject {
     let geminiEnabled =
       preferences.isCLIEnabled(.gemini)
       && preferences.sessionPathConfigs.contains { $0.kind == .gemini && $0.enabled }
+    let piEnabled =
+      preferences.isCLIEnabled(.pi)
+      && preferences.sessionPathConfigs.contains { $0.kind == .pi && $0.enabled }
 
     diagLogger.log(
-      "buildProviders: codex=\(codexEnabled, privacy: .public) claude=\(claudeEnabled, privacy: .public) gemini=\(geminiEnabled, privacy: .public) remoteHosts=\(enabledRemoteHosts.count, privacy: .public)"
+      "buildProviders: codex=\(codexEnabled, privacy: .public) claude=\(claudeEnabled, privacy: .public) gemini=\(geminiEnabled, privacy: .public) pi=\(piEnabled, privacy: .public) remoteHosts=\(enabledRemoteHosts.count, privacy: .public)"
     )
 
     if codexEnabled {
@@ -1534,6 +1548,12 @@ final class SessionListViewModel: ObservableObject {
     if geminiEnabled {
       providers.append(geminiProvider)
     }
+    if piEnabled {
+      providers.append(piProvider)
+      diagLogger.log("PiSessionProvider added to providers array, total providers: \(providers.count, privacy: .public)")
+    }
+
+    diagLogger.log("buildProviders completed: total providers=\(providers.count, privacy: .public) kinds=\(providers.map { $0.kind.rawValue }, privacy: .public)")
 
     if !enabledRemoteHosts.isEmpty {
       if codexEnabled {
@@ -1569,6 +1589,7 @@ final class SessionListViewModel: ObservableObject {
       error is SessionIndexSQLiteStoreError
         || error is ClaudeSessionProvider.SessionProviderCacheError
         || error is GeminiSessionProvider.SessionProviderCacheError
+        || error is PiSessionProvider.SessionProviderCacheError
     }
     return await withTaskGroup(
       of: ([SessionSummary], SessionIndexCoverage?, SessionSource.Kind).self
@@ -3911,6 +3932,8 @@ extension SessionListViewModel {
       refreshClaudeUsageStatus(silent: false)
     case .gemini:
       refreshGeminiUsageStatus(silent: false)
+    case .pi:
+      break // Pi usage status not yet implemented
     }
   }
 
@@ -3924,6 +3947,8 @@ extension SessionListViewModel {
       refreshClaudeUsageStatus(silent: true)
     case .gemini:
       refreshGeminiUsageStatus(silent: true)
+    case .pi:
+      break // Pi usage status not yet implemented
     }
   }
 
@@ -3951,6 +3976,7 @@ extension SessionListViewModel {
     case .codex: return preferences.isCLIEnabled(.codex)
     case .claude: return preferences.isCLIEnabled(.claude)
     case .gemini: return preferences.isCLIEnabled(.gemini)
+    case .pi: return preferences.isCLIEnabled(.pi)
     }
   }
 
@@ -4360,6 +4386,51 @@ extension SessionListViewModel {
     }
   }
 
+  // MARK: - Pi Usage Status
+
+  private func refreshPiUsageStatus(silent: Bool = false) {
+    Task { [weak self] in
+      guard let self else { return }
+      // Pi does not have token quotas like Codex/Claude/Gemini
+      // Show basic system status instead
+      let piSettings = PiSettingsService()
+      let isInstalled = await piSettings.isPiInstalled()
+      let version = try? await piSettings.getPiVersion()
+      let defaultProvider = try? await piSettings.getDefaultProvider()
+      let defaultModel = try? await piSettings.getDefaultModel()
+
+      guard isInstalled else {
+        await MainActor.run {
+          self.setUsageSnapshot(
+            .pi,
+            UsageProviderSnapshot(
+              provider: .pi,
+              title: UsageProviderKind.pi.displayName,
+              availability: .empty,
+              metrics: [],
+              updatedAt: nil,
+              statusMessage: "Pi is not installed",
+              origin: .builtin,
+              action: nil
+            )
+          )
+        }
+        return
+      }
+
+      let status = PiUsageStatus(
+        updatedAt: Date(),
+        version: version,
+        defaultProvider: defaultProvider,
+        defaultModel: defaultModel
+      )
+
+      await MainActor.run {
+        self.setUsageSnapshot(.pi, status.asProviderSnapshot())
+      }
+    }
+  }
+
   private struct ClaudeUsageErrorDescriptor {
     var message: String
     var requiresReauth: Bool
@@ -4505,7 +4576,8 @@ extension SessionListViewModel {
   private func autoRefreshUsageIfNeeded(
     codexOrigin: UsageProviderOrigin,
     claudeOrigin: UsageProviderOrigin,
-    geminiOrigin: UsageProviderOrigin
+    geminiOrigin: UsageProviderOrigin,
+    piOrigin: UsageProviderOrigin
   ) {
     guard !didAutoRefreshUsage else { return }
     didAutoRefreshUsage = true
@@ -4528,6 +4600,9 @@ extension SessionListViewModel {
     }
     if preferences.isCLIEnabled(.gemini), geminiOrigin == .builtin, shouldRefresh(.gemini) {
       refreshGeminiUsageStatus(silent: false)
+    }
+    if preferences.isCLIEnabled(.pi), piOrigin == .builtin, shouldRefresh(.pi) {
+      refreshPiUsageStatus()
     }
   }
 
@@ -4560,6 +4635,7 @@ extension SessionListViewModel {
       case .codex: return .codex
       case .claude: return .claudeCode
       case .gemini: return .codex
+      case .pi: return .codex
       }
     }()
     let bindings = await providersRegistry.getBindings()
@@ -4630,6 +4706,8 @@ extension SessionListViewModel {
       return await claudeProvider.timeline(for: summary) ?? []
     } else if summary.source.baseKind == .gemini {
       return await geminiProvider.timeline(for: summary) ?? []
+    } else if summary.source.baseKind == .pi {
+      return await piProvider.timeline(for: summary) ?? []
     }
     let loader = SessionTimelineLoader()
     return (try? loader.load(url: summary.fileURL)) ?? []

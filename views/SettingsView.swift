@@ -166,6 +166,8 @@ struct SettingsView: View {
       providersSettings
     case .codex:
       codexSettings
+    case .pi:
+      piSettings
     case .gemini:
       geminiSettings
     case .remoteHosts:
@@ -561,6 +563,13 @@ struct SettingsView: View {
   private var geminiSettings: some View {
     settingsScroll {
       GeminiSettingsView(vm: geminiVM, preferences: preferences)
+    }
+  }
+
+  private var piSettings: some View {
+    settingsScroll {
+      PiSettingsView(preferences: preferences)
+        .environmentObject(viewModel)
     }
   }
 

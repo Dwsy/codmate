@@ -28,7 +28,7 @@ struct OverviewActivityChart: View {
     }
 
     // All available sources for the legend
-    private let allSources: [SessionSource.Kind] = [.codex, .claude, .gemini]
+    private let allSources: [SessionSource.Kind] = [.codex, .claude, .gemini, .pi]
 
     init(
       data: ActivityChartData,
@@ -365,6 +365,7 @@ struct OverviewActivityChart: View {
             "Codex": color(for: .codex),
             "Claude": color(for: .claude),
             "Gemini": color(for: .gemini),
+            "Pi": color(for: .pi),
         ])
     }
 
@@ -487,6 +488,7 @@ struct OverviewActivityChart: View {
         case .codex: return .purple
         case .claude: return .orange
         case .gemini: return .blue
+        case .pi: return .cyan
         }
     }
 

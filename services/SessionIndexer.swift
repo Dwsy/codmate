@@ -547,7 +547,7 @@ actor SessionIndexer {
         return false
       }
       return true
-    case .claude:
+    case .claude, .pi:
       return false
     }
   }

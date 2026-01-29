@@ -239,6 +239,9 @@ extension ContentView {
             if let directory {
                 viewModel.setIncrementalHintForClaudeProject(directory: directory)
             }
+        case .pi:
+            // Pi doesn't support incremental refresh
+            break
         }
     }
     
@@ -267,6 +270,8 @@ extension ContentView {
         case .claude:
             guard let directory else { return nil }
             return { await viewModel.refreshIncrementalForClaudeProject(directory: directory) }
+        case .pi:
+            return nil  // Pi doesn't support incremental refresh
         }
     }
     
@@ -283,6 +288,8 @@ extension ContentView {
             ]
         case .codex, .gemini:
             return [0, 600_000_000, 1_500_000_000]
+        case .pi:
+            return []  // Pi doesn't support incremental refresh
         }
     }
 

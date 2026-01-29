@@ -498,20 +498,22 @@ enum SessionSource: Hashable, Sendable {
     case codexLocal
     case claudeLocal
     case geminiLocal
+    case piLocal
     case codexRemote(host: String)
     case claudeRemote(host: String)
     case geminiRemote(host: String)
+    case piRemote(host: String)
 
     var isRemote: Bool {
         switch self {
-        case .codexRemote, .claudeRemote, .geminiRemote: return true
+        case .codexRemote, .claudeRemote, .geminiRemote, .piRemote: return true
         default: return false
         }
     }
 
     var remoteHost: String? {
         switch self {
-        case .codexRemote(let host), .claudeRemote(let host), .geminiRemote(let host): return host
+        case .codexRemote(let host), .claudeRemote(let host), .geminiRemote(let host), .piRemote(let host): return host
         default: return nil
         }
     }
@@ -521,6 +523,7 @@ enum SessionSource: Hashable, Sendable {
         case .codexLocal, .codexRemote: return .codex
         case .claudeLocal, .claudeRemote: return .claude
         case .geminiLocal, .geminiRemote: return .gemini
+        case .piLocal, .piRemote: return .pi
         }
     }
 
@@ -528,12 +531,14 @@ enum SessionSource: Hashable, Sendable {
     case codex
     case claude
     case gemini
-    
+    case pi
+
     var cliExecutableName: String {
         switch self {
         case .codex: return "codex"
         case .claude: return "claude"
         case .gemini: return "gemini"
+        case .pi: return "pi"
         }
     }
     }
@@ -545,6 +550,7 @@ extension SessionSource.Kind {
         case .codex: return "Codex"
         case .claude: return "Claude"
         case .gemini: return "Gemini"
+        case .pi: return "Pi"
         }
     }
 }
@@ -566,6 +572,9 @@ extension SessionSource: Codable {
         case .geminiLocal:
             var container = encoder.singleValueContainer()
             try container.encode("gemini")
+        case .piLocal:
+            var container = encoder.singleValueContainer()
+            try container.encode("pi")
         case .codexRemote(let host):
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode("codexRemote", forKey: .kind)
@@ -577,6 +586,10 @@ extension SessionSource: Codable {
         case .geminiRemote(let host):
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode("geminiRemote", forKey: .kind)
+            try container.encode(host, forKey: .host)
+        case .piRemote(let host):
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode("piRemote", forKey: .kind)
             try container.encode(host, forKey: .host)
         }
     }
@@ -592,12 +605,16 @@ extension SessionSource: Codable {
                 self = .claudeLocal
             case "gemini":
                 self = .geminiLocal
+            case "pi":
+                self = .piLocal
             case "codexLocal":
                 self = .codexLocal
             case "claudeLocal":
                 self = .claudeLocal
             case "geminiLocal":
                 self = .geminiLocal
+            case "piLocal":
+                self = .piLocal
             default:
                 throw DecodingError.dataCorruptedError(
                     in: singleValue, debugDescription: "Unknown SessionSource raw value \(raw)")
@@ -617,12 +634,17 @@ extension SessionSource: Codable {
         case "geminiRemote":
             let host = try container.decode(String.self, forKey: .host)
             self = .geminiRemote(host: host)
+        case "piRemote":
+            let host = try container.decode(String.self, forKey: .host)
+            self = .piRemote(host: host)
         case "codex":
             self = .codexLocal
         case "claude":
             self = .claudeLocal
         case "gemini":
             self = .geminiLocal
+        case "pi":
+            self = .piLocal
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .kind, in: container, debugDescription: "Unknown SessionSource kind \(kind)")

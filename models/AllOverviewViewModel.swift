@@ -62,7 +62,16 @@ final class AllOverviewViewModel: ObservableObject {
       let started = Date()
       
       // Capture data on MainActor
-      let filteredSessions: [SessionSummary] = self.sessionListViewModel.sections.flatMap { $0.sessions }
+      // Use allSessions for Recent Sessions to ensure all sessions are visible regardless of project filter
+      // If allSessions is empty, wait for hydrateFromCacheOnLaunch to complete
+      var filteredSessions: [SessionSummary] = self.sessionListViewModel.allSessions
+      var waitCount = 0
+      while filteredSessions.isEmpty && waitCount < 40 { // Max wait 20 seconds (40 * 0.5s)
+        try? await Task.sleep(nanoseconds: 500_000_000) // Wait 500ms
+        guard !Task.isCancelled else { return }
+        filteredSessions = self.sessionListViewModel.allSessions
+        waitCount += 1
+      }
       let usageSnapshots = self.sessionListViewModel.usageSnapshots
       let projectCount = self.sessionListViewModel.projects.count
       let scope = self.sessionListViewModel.overviewAggregateScope()
@@ -168,7 +177,7 @@ final class AllOverviewViewModel: ObservableObject {
       groups[session.source.baseKind, default: []].append(session)
     }
     
-    let kinds: [SessionSource.Kind] = [.codex, .claude, .gemini]
+    let kinds: [SessionSource.Kind] = [.codex, .claude, .gemini, .pi]
     
     var stats: [AllOverviewSnapshot.SourceStat] = kinds.compactMap { kind in
       let group = groups[kind] ?? []
@@ -257,6 +266,7 @@ struct AllOverviewSnapshot: Equatable {
       case .codex: return "Codex"
       case .claude: return "Claude"
       case .gemini: return "Gemini"
+      case .pi: return "Pi"
       }
     }
   }

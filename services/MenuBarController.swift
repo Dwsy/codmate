@@ -235,6 +235,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       return Color(nsColor: .systemPurple)
     case .gemini:
       return Color(nsColor: .systemTeal)
+    case .pi:
+      return Color.orange
     }
   }
 
@@ -653,6 +655,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       case .codex: return .codex
       case .claude: return .claudeCode
       case .gemini: return nil
+      case .pi: return nil
       }
     }()
 
@@ -801,6 +804,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       case .codex: return .codex
       case .claude: return .claudeCode
       case .gemini: return nil
+      case .pi: return nil
       }
     }()
     guard let consumer else { return nil }
@@ -938,6 +942,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       case .claudeRemote(let host): return "claude-\(host)"
       case .geminiLocal: return "gemini-local"
       case .geminiRemote(let host): return "gemini-\(host)"
+      case .piLocal: return "pi-local"
+      case .piRemote(let host): return "pi-\(host)"
       }
     }
 
@@ -946,6 +952,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
       case .codex: return .codexRemote(host: host)
       case .claude: return .claudeRemote(host: host)
       case .gemini: return .geminiRemote(host: host)
+      case .pi: return .piRemote(host: host)
       }
     }
 
@@ -1170,6 +1177,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     case .codex: name = "ChatGPTIcon"
     case .claude: name = "ClaudeIcon"
     case .gemini: name = "GeminiIcon"
+    case .pi: name = "PiIcon"
     }
     return ProviderIconThemeHelper.menuImage(named: name)
   }
@@ -1180,6 +1188,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     case .codex: return .codex
     case .claude: return .claude
     case .gemini: return .gemini
+    case .pi: return .pi
     }
   }
 
@@ -1188,6 +1197,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     case .codex: return .codex
     case .claude: return .claude
     case .gemini: return .gemini
+    case .pi: return .pi
     }
   }
 

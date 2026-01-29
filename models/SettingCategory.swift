@@ -7,6 +7,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
   case command
   case providers
   case codex
+  case pi
   case gemini
   case remoteHosts
   case gitReview
@@ -26,6 +27,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
       .mcpServer,
       .remoteHosts,
       .codex,
+      .pi,
       .gemini,
       .claudeCode,
       .notifications,
@@ -44,6 +46,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     case .command: return "Command"
     case .providers: return "Providers"
     case .codex: return "Codex"
+    case .pi: return "Pi"
     case .gemini: return "Gemini CLI"
     case .remoteHosts: return "Remote Hosts"
     case .gitReview: return "Git Review"
@@ -62,6 +65,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     case .command: return "slider.horizontal.3"
     case .providers: return "server.rack"
     case .codex: return "sparkles"
+    case .pi: return "brain"
     case .gemini: return "sparkles.rectangle.stack"
     case .remoteHosts: return "antenna.radiowaves.left.and.right"
     case .advanced: return "gearshape.2"
@@ -80,6 +84,7 @@ enum SettingCategory: String, CaseIterable, Identifiable {
     case .command: return "Command execution policies"
     case .providers: return "Global providers and bindings"
     case .codex: return "Codex CLI configuration"
+    case .pi: return "Pi Agent configuration"
     case .gemini: return "Gemini CLI configuration"
     case .remoteHosts: return "Remote SSH host configuration"
     case .gitReview: return "Git changes viewer and commit generation"

@@ -4,6 +4,7 @@ enum UsageProviderKind: String, CaseIterable, Identifiable {
   case codex
   case claude
   case gemini
+  case pi
 
   var id: String { rawValue }
 
@@ -12,6 +13,7 @@ enum UsageProviderKind: String, CaseIterable, Identifiable {
     case .codex: return "Codex"
     case .claude: return "Claude"
     case .gemini: return "Gemini"
+    case .pi: return "Pi"
     }
   }
 
@@ -20,6 +22,7 @@ enum UsageProviderKind: String, CaseIterable, Identifiable {
     case .codex: return "accentColor"
     case .claude: return "purple"
     case .gemini: return "teal"
+    case .pi: return "orange"
     }
   }
 
@@ -28,6 +31,7 @@ enum UsageProviderKind: String, CaseIterable, Identifiable {
     case .codex: return .codex
     case .claude: return .claude
     case .gemini: return .gemini
+    case .pi: return .pi
     }
   }
 

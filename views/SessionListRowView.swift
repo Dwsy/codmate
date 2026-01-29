@@ -72,6 +72,24 @@ extension SessionSource {
         badgeAssetName: "GeminiIcon",
         providerKind: .gemini
       )
+    case .piLocal:
+      return SessionSourceBranding(
+        displayName: "Pi",
+        symbolName: "brain",
+        iconColor: Color.orange,
+        badgeBackground: Color.orange.opacity(0.1),
+        badgeAssetName: "PiIcon",
+        providerKind: .pi
+      )
+    case .piRemote(let host):
+      return SessionSourceBranding(
+        displayName: "Pi (\(host))",
+        symbolName: "brain",
+        iconColor: Color.orange,
+        badgeBackground: Color.orange.opacity(0.1),
+        badgeAssetName: "PiIcon",
+        providerKind: .pi
+      )
     }
   }
 }
