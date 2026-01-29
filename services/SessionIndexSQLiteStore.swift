@@ -516,6 +516,110 @@ enum SessionIndexSQLiteStoreError: Error {
     guard sqlite3_step(stmt) == SQLITE_DONE else {
       throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
     }
+
+  // MARK: - Message Indexing
+  
+  func upsertMessages(sessionId: String, messages: [(type: String, content: String, timestamp: Date)]) throws {
+    guard !messages.isEmpty else { return }
+    try openIfNeeded()
+    
+    // Start transaction
+    try exec("BEGIN TRANSACTION;")
+    
+    do {
+      // Delete existing messages for this session
+      let deleteSQL = "DELETE FROM messages WHERE session_id = ?1"
+      var deleteStmt: OpaquePointer?
+      guard sqlite3_prepare_v2(db, deleteSQL, -1, &deleteStmt, nil) == SQLITE_OK else {
+        throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
+      }
+      defer { sqlite3_finalize(deleteStmt) }
+      sqlite3_bind_text(deleteStmt, 1, sessionId, -1, SQLITE_TRANSIENT)
+      guard sqlite3_step(deleteStmt) == SQLITE_DONE else {
+        throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
+      }
+      
+      // Insert new messages
+      let insertSQL = """
+      INSERT INTO messages (session_id, message_type, content, timestamp)
+      VALUES (?1, ?2, ?3, ?4)
+      """
+      var insertStmt: OpaquePointer?
+      guard sqlite3_prepare_v2(db, insertSQL, -1, &insertStmt, nil) == SQLITE_OK else {
+        throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
+      }
+      defer { sqlite3_finalize(insertStmt) }
+      
+      for message in messages {
+        sqlite3_bind_text(insertStmt, 1, sessionId, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(insertStmt, 2, message.type, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(insertStmt, 3, message.content, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(insertStmt, 4, message.timestamp.timeIntervalSince1970)
+        
+        guard sqlite3_step(insertStmt) == SQLITE_DONE else {
+          throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
+        }
+        
+        sqlite3_reset(insertStmt)
+        sqlite3_clear_bindings(insertStmt)
+      }
+      
+      // Rebuild FTS index
+      try exec("INSERT INTO messages_fts(messages_fts) VALUES('rebuild');")
+      
+      // Commit transaction
+      try exec("COMMIT;")
+      
+    } catch {
+      // Rollback on error
+      try? exec("ROLLBACK;")
+      throw error
+    }
+  }
+  
+  func searchMessages(term: String, limit: Int = 200) throws -> [(sessionId: String, content: String, timestamp: Date, score: Double)] {
+    try openIfNeeded()
+    
+    // Use FTS5 for full-text search
+    let sql = """
+    SELECT 
+      m.session_id,
+      m.content,
+      m.timestamp,
+      fts.rank as score
+    FROM messages_fts AS fts
+    JOIN messages AS m ON fts.rowid = m.id
+    WHERE messages_fts MATCH ?1
+    ORDER BY fts.rank ASC
+    LIMIT ?2
+    """
+    
+    var stmt: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+      throw SessionIndexSQLiteStoreError.stepFailed(errorMessage)
+    }
+    defer { sqlite3_finalize(stmt) }
+    
+    // Prepare FTS query (handle multiple terms)
+    let ftsQuery = term.split(separator: " ").map { "\"\($0)\"" }.joined(separator: " ")
+    sqlite3_bind_text(stmt, 1, ftsQuery, -1, SQLITE_TRANSIENT)
+    sqlite3_bind_int(stmt, 2, Int32(limit))
+    
+    var results: [(sessionId: String, content: String, timestamp: Date, score: Double)] = []
+    
+    while sqlite3_step(stmt) == SQLITE_ROW {
+      guard let sessionId = columnText(stmt, index: 0),
+            let content = columnText(stmt, index: 1) else {
+        continue
+      }
+      let timestamp = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 2))
+      let score = sqlite3_column_double(stmt, 3)
+      
+      results.append((sessionId, content, timestamp, score))
+    }
+    
+    return results
+  }
   }
 
   func delete(sessionId: String) throws {
@@ -719,6 +823,19 @@ enum SessionIndexSQLiteStoreError: Error {
       file_size INTEGER,
       PRIMARY KEY (session_id, turn_id)
     );
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      message_type TEXT NOT NULL,
+      content TEXT NOT NULL,
+      timestamp REAL NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+    );
+    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+      content,
+      content='messages',
+      content_rowid='id'
+    );
     """
     try exec(createSQL)
     try exec("CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);")
@@ -727,6 +844,9 @@ enum SessionIndexSQLiteStoreError: Error {
     try exec("CREATE INDEX IF NOT EXISTS idx_sessions_source ON sessions(source);")
     try exec("CREATE INDEX IF NOT EXISTS idx_sessions_parse_level ON sessions(parse_level);")
     try exec("CREATE INDEX IF NOT EXISTS idx_timeline_previews_session ON timeline_previews(session_id);")
+    try exec("CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);")
+    try exec("CREATE INDEX IF NOT EXISTS idx_messages_type ON messages(message_type);")
+    try exec("CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);")
   }
 
   @discardableResult
@@ -894,12 +1014,16 @@ enum SessionIndexSQLiteStoreError: Error {
       return ("claudeLocal", nil)
     case .geminiLocal:
       return ("geminiLocal", nil)
+    case .piLocal:
+      return ("piLocal", nil)
     case .codexRemote(let host):
       return ("codexRemote", host)
     case .claudeRemote(let host):
       return ("claudeRemote", host)
     case .geminiRemote(let host):
       return ("geminiRemote", host)
+    case .piRemote(let host):
+      return ("piRemote", host)
     }
   }
 
@@ -911,6 +1035,8 @@ enum SessionIndexSQLiteStoreError: Error {
       return .claude
     case "geminiLocal", "geminiRemote":
       return .gemini
+    case "piLocal", "piRemote":
+      return .pi
     default:
       return nil
     }
@@ -1371,6 +1497,9 @@ extension SessionIndexSQLiteStore {
       case .gemini:
         sources.append("geminiLocal")
         if includeRemote { sources.append("geminiRemote") }
+      case .pi:
+        sources.append("piLocal")
+        if includeRemote { sources.append("piRemote") }
       }
     }
     return sources

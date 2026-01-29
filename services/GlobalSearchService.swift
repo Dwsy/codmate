@@ -672,15 +672,35 @@ actor GlobalSearchService {
     snippetRadius: Int,
     maxMatches: Int
   ) -> [GlobalSearchHit] {
-    guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
-    defer { try? handle.close() }
     var hits: [GlobalSearchHit] = []
-    var carry = ""
     let fallback = url.deletingPathExtension().lastPathComponent
     let attributes = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))
     let modDate = attributes?.contentModificationDate
-
+    
+    // First, try to parse the session file and extract messages
+    if let messageHits = scanSessionMessages(
+      url: url,
+      pattern: pattern,
+      maxMatches: maxMatches,
+      fallbackTitle: fallback,
+      metadataDate: modDate
+    ), !messageHits.isEmpty {
+      hits.append(contentsOf: messageHits)
+    }
+    
+    // If we have enough matches, return early
+    if hits.count >= maxMatches {
+      return Array(hits.prefix(maxMatches))
+    }
+    
+    // Fall back to the original scanner for the remaining matches
+    guard let handle = try? FileHandle(forReadingFrom: url) else { return hits }
+    defer { try? handle.close() }
+    
+    var carry = ""
     var eofReached = false
+    let remainingMatches = maxMatches - hits.count
+    
     while hits.count < maxMatches && !eofReached {
       if Task.isCancelled { break }
       autoreleasepool {
@@ -701,7 +721,7 @@ actor GlobalSearchService {
           let snippet = GlobalSearchSnippetFactory.snippet(
             in: buffer, matchRange: match, radius: snippetRadius)
           let offset = buffer.distance(from: buffer.startIndex, to: match.lowerBound)
-          let id = "\(url.path)#\(offset)"
+          let id = "\(url.path)#raw#\(offset)"
           hits.append(
             GlobalSearchHit(
               id: id,
@@ -726,6 +746,119 @@ actor GlobalSearchService {
       if eofReached { break }
     }
     return hits
+  }
+  
+  /// Scan session file for user and assistant messages (non-tool messages)
+  /// Scan session file for user and assistant messages (non-tool messages)
+  nonisolated private static func scanSessionMessages(
+    url: URL,
+    pattern: SearchPattern,
+    maxMatches: Int,
+    fallbackTitle: String,
+    metadataDate: Date?
+  ) -> [GlobalSearchHit]? {
+    guard let data = try? Data(contentsOf: url, options: [.mappedIfSafe]) else { return nil }
+    guard !data.isEmpty else { return nil }
+    
+    var hits: [GlobalSearchHit] = []
+    var lineNumber = 0
+    
+    // Simple JSON parsing to extract message types
+    guard let string = String(data: data, encoding: .utf8) else { return nil }
+    let lines = string.split(separator: "\n", omittingEmptySubsequences: false)
+    
+    for line in lines {
+      lineNumber += 1
+      guard !line.isEmpty else { continue }
+      
+      let lineString = String(line)
+      
+      // Check if this line contains a message we care about
+      // Look for: "type":"user_message" or "type":"agent_message" or "type":"agent_reasoning"
+      let containsTypeColon = lineString.contains("\"type\":\"")
+      let containsTypeUserMsg = containsTypeColon && lineString.contains("user_message\"")
+      let containsTypeAgentMsg = containsTypeColon && (
+        lineString.contains("agent_message\"") || lineString.contains("agent_reasoning\"")
+      )
+      
+      let messageType: String?
+      if containsTypeUserMsg {
+        messageType = "user_message"
+      } else if containsTypeAgentMsg {
+        messageType = "agent_message"
+      } else {
+        continue
+      }
+      
+      // Try to extract the message text from the JSON line
+      var messageText: String? = nil
+      
+      // Look for "message": "..." pattern
+      if let messageRange = lineString.range(of: "\"message\":\"") {
+        let afterMessage = String(lineString[messageRange.upperBound...])
+        var escapedText = ""
+        var inEscape = false
+        var foundEnd = false
+        
+        for char in afterMessage {
+          if !inEscape && char == "\\" {
+            inEscape = true
+            escapedText.append(char)
+            continue
+          }
+          if inEscape {
+            inEscape = false
+            escapedText.append(char)
+            continue
+          }
+          if char == "\"" {
+            foundEnd = true
+            break
+          }
+          escapedText.append(char)
+        }
+        
+        if foundEnd && !escapedText.isEmpty {
+          // Remove common JSON escape sequences
+          messageText = escapedText
+            .replacingOccurrences(of: "\\\"", with: "\"")
+            .replacingOccurrences(of: "\\\\", with: "\\")
+            .replacingOccurrences(of: "\\n", with: " ")
+            .replacingOccurrences(of: "\\r", with: "")
+            .replacingOccurrences(of: "\\t", with: " ")
+        }
+      }
+      
+      // Check if the extracted text matches the search pattern
+      guard let text = messageText, !text.isEmpty else { continue }
+      
+      let matchScore = pattern.score(in: text)
+      guard matchScore > 0 else { continue }
+      
+      // Create a hit for this message
+      let id = "\(url.path)#msg#\(lineNumber)"
+      let actorPrefix = messageType == "user_message" ? "User: " : "Assistant: "
+      let snippetText = actorPrefix + (text.count > 200 ? String(text.prefix(200)) + "..." : text)
+      let snippet = GlobalSearchSnippet(text: snippetText)
+      
+      hits.append(
+        GlobalSearchHit(
+          id: id,
+          kind: .session,
+          fileURL: url,
+          snippet: snippet,
+          fallbackTitle: fallbackTitle,
+          metadataDate: metadataDate,
+          score: matchScore * 1.2 // Boost message matches slightly
+        )
+      )
+      
+      if hits.count >= maxMatches {
+        break
+      }
+    }
+    
+    return hits.isEmpty ? nil : hits
   }
 
   nonisolated private static func scanNote(url: URL, pattern: SearchPattern) -> [GlobalSearchHit] {
