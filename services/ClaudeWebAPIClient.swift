@@ -136,18 +136,8 @@ enum ClaudeWebAPIClient {
       NSLog("[ClaudeWebAPI] Safari cookie load failed: \(error.localizedDescription)")
     }
 
-    // Try Chrome (may trigger Keychain prompt)
-    do {
-      if let sessionKey = try ChromeCookieImporter.extractClaudeSessionKey() {
-        guard validateSessionKey(sessionKey) else {
-          throw FetchError.invalidSessionKey
-        }
-        NSLog("[ClaudeWebAPI] Found sessionKey in Chrome cookies")
-        return sessionKey
-      }
-    } catch {
-      NSLog("[ClaudeWebAPI] Chrome cookie load failed: \(error.localizedDescription)")
-    }
+    // Chrome cookie import disabled to avoid Keychain prompts
+    // Users can manually configure session key in Settings if needed
 
     throw FetchError.noSessionKeyFound
   }

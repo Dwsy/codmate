@@ -135,7 +135,7 @@ actor SkillsStore {
       source: "Template",
       path: destination.path,
       isEnabled: true,
-      targets: MCPServerTargets(codex: true, claude: true, gemini: false),
+      targets: MCPServerTargets(codex: true, claude: true, gemini: false, pi: true),
       installedAt: Date()
     )
 
@@ -306,7 +306,7 @@ Assistant: [Expected behavior]
       source: metadata.source,
       path: destination.path,
       isEnabled: existing?.isEnabled ?? true,
-      targets: existing?.targets ?? MCPServerTargets(codex: true, claude: true, gemini: false),
+      targets: existing?.targets ?? MCPServerTargets(codex: true, claude: true, gemini: false, pi: true),
       installedAt: Date()
     )
     upsert(record)

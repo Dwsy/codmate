@@ -60,6 +60,7 @@ struct AllOverviewView: View {
       preferences.isCLIEnabled(.codex) ? SessionSource.Kind.codex : nil,
       preferences.isCLIEnabled(.claude) ? SessionSource.Kind.claude : nil,
       preferences.isCLIEnabled(.gemini) ? SessionSource.Kind.gemini : nil,
+      preferences.isCLIEnabled(.pi) ? SessionSource.Kind.pi : nil,
     ].compactMap { $0 })
   }
 

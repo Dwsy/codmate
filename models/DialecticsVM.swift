@@ -219,7 +219,7 @@ final class DialecticsVM: ObservableObject {
             switch kind {
             case .codex: raw = preferences.codexCommandPath
             case .claude: raw = preferences.claudeCommandPath
-            case .gemini: raw = preferences.geminiCommandPath
+            case .gemini: raw = preferences.geminiCommandPath    case .pi: raw = preferences.piCommandPath
             }
             let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed

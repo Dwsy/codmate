@@ -21,12 +21,14 @@ public enum MCPServerTarget: String, Codable, CaseIterable, Sendable {
     case codex
     case claude
     case gemini
+    case pi
 
     var baseKind: SessionSource.Kind {
         switch self {
         case .codex: return .codex
         case .claude: return .claude
         case .gemini: return .gemini
+        case .pi: return .pi
         }
     }
 }
@@ -35,11 +37,13 @@ public struct MCPServerTargets: Codable, Equatable, Hashable, Sendable {
     public var codex: Bool
     public var claude: Bool
     public var gemini: Bool
+    public var pi: Bool
 
-    public init(codex: Bool = true, claude: Bool = true, gemini: Bool = true) {
+    public init(codex: Bool = true, claude: Bool = true, gemini: Bool = true, pi: Bool = true) {
         self.codex = codex
         self.claude = claude
         self.gemini = gemini
+        self.pi = pi
     }
 
     public func isEnabled(for target: MCPServerTarget) -> Bool {
@@ -47,6 +51,7 @@ public struct MCPServerTargets: Codable, Equatable, Hashable, Sendable {
         case .codex: return codex
         case .claude: return claude
         case .gemini: return gemini
+        case .pi: return pi
         }
     }
 
@@ -58,6 +63,8 @@ public struct MCPServerTargets: Codable, Equatable, Hashable, Sendable {
             claude = value
         case .gemini:
             gemini = value
+        case .pi:
+            pi = value
         }
     }
 }

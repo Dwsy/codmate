@@ -671,6 +671,8 @@ extension SessionListViewModel {
             cmd = buildClaudeProjectInvocation(project: project)
         case .gemini:
             cmd = buildGeminiProjectInvocation()
+        case .pi:
+            cmd = "pi"  // Pi CLI
         }
 
         guard copyNewProjectCommandsIfEnabled(project: project, destinationApp: profile)

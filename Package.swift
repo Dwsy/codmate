@@ -52,6 +52,8 @@ let package = Package(
         "assets/CodMate.entitlements",
         "assets/CodMate-Notify.entitlements",
         "Ghostty-header.h",
+        "task",
+        "final-verification.sh",
       ],
       sources: [
         "CodMateApp.swift",

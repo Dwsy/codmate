@@ -43,6 +43,7 @@ final class MCPServersViewModel: ObservableObject {
     @Published var formTargetsCodex: Bool = true
     @Published var formTargetsClaude: Bool = true
     @Published var formTargetsGemini: Bool = true
+    @Published var formTargetsPi: Bool = true
 
     private let store = MCPServersStore()
     private let tester = MCPQuickTestService()
@@ -264,6 +265,7 @@ final class MCPServersViewModel: ObservableObject {
         formTargetsCodex = targets.codex
         formTargetsClaude = targets.claude
         formTargetsGemini = targets.gemini
+        formTargetsPi = targets.pi
         testMessage = nil
     }
 
@@ -347,7 +349,8 @@ final class MCPServersViewModel: ObservableObject {
             targets: MCPServerTargets(
                 codex: formTargetsCodex,
                 claude: formTargetsClaude,
-                gemini: formTargetsGemini
+                gemini: formTargetsGemini,
+                pi: formTargetsPi
             )
         )
     }

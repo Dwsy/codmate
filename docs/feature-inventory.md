@@ -202,7 +202,7 @@
 - Window/state persistence. Evidence: `services/WindowStateStore.swift`, `utils/WindowConfigurator.swift`
 
 ## 23) Claude Web / Browser Integration (Auxiliary Capabilities)
-- Chrome/Safari cookie reading (Claude sessionKey). Evidence: `services/BrowserCookies/ChromeCookieImporter.swift`, `services/BrowserCookies/SafariCookieImporter.swift`
+- Safari cookie reading (Claude sessionKey). Evidence: `services/BrowserCookies/SafariCookieImporter.swift`
 - Claude Web API client (sessions/usage, etc.). Evidence: `services/ClaudeWebAPIClient.swift`, `services/LLMHTTPService.swift`
 
 ---

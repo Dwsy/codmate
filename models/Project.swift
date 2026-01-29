@@ -28,6 +28,7 @@ enum ProjectSessionSource: String, CaseIterable, Codable, Sendable, Identifiable
     case codex
     case claude
     case gemini
+    case pi
 
     var id: String { rawValue }
 
@@ -36,6 +37,7 @@ enum ProjectSessionSource: String, CaseIterable, Codable, Sendable, Identifiable
         case .codex: return "Codex"
         case .claude: return "Claude"
         case .gemini: return "Gemini"
+        case .pi: return "Pi"
         }
     }
 }
@@ -48,6 +50,7 @@ extension ProjectSessionSource {
         case .codex: return .codex
         case .claude: return .claude
         case .gemini: return .gemini
+        case .pi: return .pi
         }
     }
 
@@ -56,6 +59,7 @@ extension ProjectSessionSource {
         case .codex: return .codexLocal
         case .claude: return .claudeLocal
         case .gemini: return .geminiLocal
+        case .pi: return .piLocal
         }
     }
 }
@@ -66,12 +70,13 @@ extension SessionSource {
         case .codexLocal, .codexRemote: return .codex
         case .claudeLocal, .claudeRemote: return .claude
         case .geminiLocal, .geminiRemote: return .gemini
+        case .piLocal, .piRemote: return .pi
         }
     }
 
     func friendlyModelName(for raw: String) -> String {
         switch self {
-        case .codexLocal, .codexRemote, .geminiLocal, .geminiRemote:
+        case .codexLocal, .codexRemote, .geminiLocal, .geminiRemote, .piLocal, .piRemote:
             return raw
         case .claudeLocal, .claudeRemote:
             return Self.normalizeClaudeModel(raw)

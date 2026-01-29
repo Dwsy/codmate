@@ -18,11 +18,15 @@ actor CommandsSyncService {
       .appendingPathComponent("commands", isDirectory: true)
     let geminiDir = home.appendingPathComponent(".gemini", isDirectory: true)
       .appendingPathComponent("commands", isDirectory: true)
+    let piDir = home.appendingPathComponent(".pi", isDirectory: true)
+      .appendingPathComponent("agent", isDirectory: true)
+      .appendingPathComponent("prompts", isDirectory: true)
 
     let targets: [(CommandTarget, URL)] = [
       (.codex, codexDir),
       (.claude, claudeDir),
-      (.gemini, geminiDir)
+      (.gemini, geminiDir),
+      (.pi, piDir)
     ]
     var warnings: [CommandSyncWarning] = []
     for (target, destination) in targets
@@ -68,11 +72,10 @@ actor CommandsSyncService {
     let content: String
 
     switch target {
-    case .codex, .claude:
-      // Both use Markdown + YAML frontmatter
+    case .codex, .claude, .pi:
+      // All use Markdown + YAML frontmatter
       fileURL = directory.appendingPathComponent("\(command.id).md", isDirectory: false)
       content = generateMarkdownFormat(command, for: target)
-
     case .gemini:
       // Gemini uses TOML
       fileURL = directory.appendingPathComponent("\(command.id).toml", isDirectory: false)

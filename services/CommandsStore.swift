@@ -205,6 +205,7 @@ actor CommandsStore {
     var codex = true
     var claude = true
     var gemini = false
+    var pi = true
 
     for line in frontmatter {
       let trimmed = line.trimmingCharacters(in: .whitespaces)
@@ -245,6 +246,8 @@ actor CommandsStore {
         claude = trimmed.replacingOccurrences(of: "claude:", with: "").trimmingCharacters(in: .whitespaces) == "true"
       } else if trimmed.hasPrefix("gemini:") {
         gemini = trimmed.replacingOccurrences(of: "gemini:", with: "").trimmingCharacters(in: .whitespaces) == "true"
+      } else if trimmed.hasPrefix("pi:") {
+        pi = trimmed.replacingOccurrences(of: "pi:", with: "").trimmingCharacters(in: .whitespaces) == "true"
       } else if trimmed.hasPrefix("-") && frontmatter.last?.contains("tags") == true {
         // Handle YAML array items
         let item = trimmed.replacingOccurrences(of: "-", with: "").trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
@@ -276,7 +279,7 @@ actor CommandsStore {
         allowedTools: allowedTools,
         tags: tags
       ),
-      targets: CommandTargets(codex: codex, claude: claude, gemini: gemini),
+      targets: CommandTargets(codex: codex, claude: claude, gemini: gemini, pi: pi),
       isEnabled: isEnabled,
       source: source,
       path: path,

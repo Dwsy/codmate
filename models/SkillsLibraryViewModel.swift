@@ -308,7 +308,7 @@ final class SkillsLibraryViewModel: ObservableObject {
         updated.targets.setEnabled(value, for: target)
         if value && !updated.isSelected {
             updated.isSelected = true
-        } else if !updated.targets.codex && !updated.targets.claude && !updated.targets.gemini {
+        } else if !updated.targets.codex && !updated.targets.claude && !updated.targets.gemini && !updated.targets.pi {
             updated.isSelected = false
         }
         skills[idx] = updated

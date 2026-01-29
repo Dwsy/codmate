@@ -202,7 +202,7 @@ struct SessionsPathPane: View {
     
     private func fileExtension(for kind: SessionSource.Kind) -> String {
         switch kind {
-        case .codex, .claude: return "jsonl"
+        case .codex, .claude, .pi: return "jsonl"
         case .gemini: return "json"
         }
     }

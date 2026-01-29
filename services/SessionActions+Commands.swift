@@ -60,6 +60,8 @@ extension SessionActions {
             let config = geminiRuntimeConfiguration(options: options)
             args = ["--resume", conversationId(for: session)] + config.flags
             additionalEnv = config.environment
+        case .pi:
+            args = ["-c", session.id]
         }
         
         return try await withCheckedThrowingContinuation { continuation in
@@ -444,6 +446,9 @@ extension SessionActions {
             let config = geminiRuntimeConfiguration(options: options)
             let args: [String] = ["--resume", conversationId(for: session)] + config.flags
             return ([exe] + args.map { shellQuoteIfNeeded($0) }).joined(separator: " ")
+        case .pi:
+            let args = ["-c", session.id]
+            return ([exe] + args).joined(separator: " ")
         }
     }
 
@@ -507,6 +512,13 @@ extension SessionActions {
                 args += ["--model", rawModel]
             }
             args.append(contentsOf: geminiRuntimeConfiguration(options: options).flags)
+            return args
+        case .pi:
+            var args: [String] = []
+            if let rawModel = session.model?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !rawModel.isEmpty {
+                args += ["--model", rawModel]
+            }
             return args
         }
     }
@@ -658,6 +670,21 @@ extension SessionActions {
                 parts.append(shellSingleQuoted(prompt))
             }
             return parts.joined(separator: " ")
+        case .pi:
+            let exe = shellQuoteIfNeeded(executablePath ?? "pi")
+            var parts: [String] = [exe]
+            let args = buildNewSessionArguments(session: session, options: options).map {
+                arg -> String in
+                if arg.contains(where: { $0.isWhitespace || $0 == "'" }) {
+                    return shellEscapedPath(arg)
+                }
+                return arg
+            }
+            parts.append(contentsOf: args)
+            if let prompt = initialPrompt, !prompt.isEmpty {
+                parts.append(shellSingleQuoted(prompt))
+            }
+            return parts.joined(separator: " ")
         }
     }
 
@@ -671,6 +698,8 @@ extension SessionActions {
         case .gemini:
             let config = geminiRuntimeConfiguration(options: options)
             return ["--resume", conversationId(for: session)] + config.flags
+        case .pi:
+            return ["-c", session.id]
         }
     }
 

@@ -262,6 +262,8 @@ struct AdvancedPathPane: View {
                 preferences.claudeCommandPath = url.path
             case .gemini:
                 preferences.geminiCommandPath = url.path
+            case .pi:
+                preferences.piCommandPath = url.path
             }
         }
     }

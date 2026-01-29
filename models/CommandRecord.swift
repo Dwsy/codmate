@@ -64,11 +64,13 @@ struct CommandTargets: Codable, Hashable {
   var codex: Bool
   var claude: Bool
   var gemini: Bool
+  var pi: Bool
 
-  init(codex: Bool = true, claude: Bool = true, gemini: Bool = false) {
+  init(codex: Bool = true, claude: Bool = true, gemini: Bool = false, pi: Bool = true) {
     self.codex = codex
     self.claude = claude
     self.gemini = gemini
+    self.pi = pi
   }
 
   func isEnabled(for target: CommandTarget) -> Bool {
@@ -76,6 +78,7 @@ struct CommandTargets: Codable, Hashable {
     case .codex: return codex
     case .claude: return claude
     case .gemini: return gemini
+    case .pi: return pi
     }
   }
 }
@@ -85,12 +88,14 @@ enum CommandTarget: String, CaseIterable {
   case codex
   case claude
   case gemini
+  case pi
 
   var displayName: String {
     switch self {
     case .codex: return "Codex CLI"
     case .claude: return "Claude Code"
     case .gemini: return "Gemini CLI"
+    case .pi: return "Pi Agent"
     }
   }
 
@@ -99,6 +104,7 @@ enum CommandTarget: String, CaseIterable {
     case .codex: return ".codex"
     case .claude: return ".claude"
     case .gemini: return ".gemini"
+    case .pi: return ".pi"
     }
   }
 
@@ -107,6 +113,7 @@ enum CommandTarget: String, CaseIterable {
     case .codex: return "prompts"  // Codex uses ~/.codex/prompts/
     case .claude: return "commands" // Claude uses ~/.claude/commands/
     case .gemini: return "commands" // Gemini uses ~/.gemini/commands/
+    case .pi: return "agent/prompts" // Pi uses ~/.pi/agent/prompts/
     }
   }
 
@@ -115,6 +122,7 @@ enum CommandTarget: String, CaseIterable {
     case .codex: return .codex
     case .claude: return .claude
     case .gemini: return .gemini
+    case .pi: return .pi
     }
   }
 }

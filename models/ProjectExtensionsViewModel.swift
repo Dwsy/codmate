@@ -105,7 +105,7 @@ final class ProjectExtensionsViewModel: ObservableObject {
         mcpSelections[idx].targets.setEnabled(value, for: target)
         if value && !mcpSelections[idx].isSelected {
             mcpSelections[idx].isSelected = true
-        } else if !mcpSelections[idx].targets.codex && !mcpSelections[idx].targets.claude && !mcpSelections[idx].targets.gemini {
+        } else if !mcpSelections[idx].targets.codex && !mcpSelections[idx].targets.claude && !mcpSelections[idx].targets.gemini && !mcpSelections[idx].targets.pi {
             mcpSelections[idx].isSelected = false
         }
         Task { await persistAndApplyIfPossible() }
@@ -117,7 +117,7 @@ final class ProjectExtensionsViewModel: ObservableObject {
         updated.targets.setEnabled(value, for: target)
         if value && !updated.isSelected {
             updated.isSelected = true
-        } else if !updated.targets.codex && !updated.targets.claude && !updated.targets.gemini {
+        } else if !updated.targets.codex && !updated.targets.claude && !updated.targets.gemini && !updated.targets.pi {
             updated.isSelected = false
         }
         skills[idx] = updated

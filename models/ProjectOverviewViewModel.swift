@@ -196,7 +196,7 @@ final class ProjectOverviewViewModel: ObservableObject {
       groups[session.source.baseKind, default: []].append(session)
     }
     
-    let kinds: [SessionSource.Kind] = [.codex, .claude, .gemini]
+    let kinds: [SessionSource.Kind] = [.codex, .claude, .gemini, .pi]
     
     var stats: [ProjectOverviewSnapshot.SourceStat] = kinds.compactMap { kind in
       let group = groups[kind] ?? []
@@ -264,6 +264,7 @@ struct ProjectOverviewSnapshot: Equatable {
       case .codex: return "Codex"
       case .claude: return "Claude"
       case .gemini: return "Gemini"
+    case .pi: return "Pi"
       }
     }
   }

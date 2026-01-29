@@ -217,6 +217,8 @@ struct UsageStatusControl: View {
       return Color(nsColor: .systemPurple)
     case .gemini:
       return Color(nsColor: .systemTeal)
+    case .pi:
+      return Color.orange
     }
   }
 
@@ -417,6 +419,8 @@ private struct UsageProviderTitleView: View {
     case .claude:
       return URL(string: "https://claude.ai/settings/usage")
     case .gemini:
+      return nil
+    case .pi:
       return nil
     }
   }

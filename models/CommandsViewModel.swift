@@ -215,10 +215,12 @@ class CommandsViewModel: ObservableObject {
         record.targets.claude = value
       case .gemini:
         record.targets.gemini = value
+      case .pi:
+        record.targets.pi = value
       }
       if value && !record.isEnabled {
         record.isEnabled = true
-      } else if !record.targets.codex && !record.targets.claude && !record.targets.gemini {
+      } else if !record.targets.codex && !record.targets.claude && !record.targets.gemini && !record.targets.pi {
         record.isEnabled = false
       }
     }
@@ -231,10 +233,12 @@ class CommandsViewModel: ObservableObject {
           record.targets.claude = value
         case .gemini:
           record.targets.gemini = value
+        case .pi:
+          record.targets.pi = value
         }
         if value && !record.isEnabled {
           record.isEnabled = true
-        } else if !record.targets.codex && !record.targets.claude && !record.targets.gemini {
+        } else if !record.targets.codex && !record.targets.claude && !record.targets.gemini && !record.targets.pi {
           record.isEnabled = false
         }
       }

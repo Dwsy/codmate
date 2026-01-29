@@ -30,7 +30,7 @@ let package = Package(
             linkerSettings: [
                 .linkedLibrary("ghostty"),
                 .unsafeFlags([
-                    "-L", "/Volumes/External/GitHub/CodMate/ghostty/Vendor/lib",
+                    "-L", "/Users/dengwenyu/Dev/AI/codmate/ghostty/Vendor/lib",
                     "-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks",
                     // Enable dead code stripping to remove unused symbols from static library
                     "-Xlinker", "-dead_strip",

@@ -141,7 +141,7 @@ enum CommandsImportService {
       description: description,
       prompt: prompt,
       metadata: CommandMetadata(),
-      targets: CommandTargets(codex: true, claude: true, gemini: true),
+      targets: CommandTargets(codex: true, claude: true, gemini: true, pi: true),
       isEnabled: true,
       source: "import",
       path: "",
